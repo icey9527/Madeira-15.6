@@ -4358,7 +4358,9 @@ final class LibraryKeyInput: UIView, UIKeyInput {
     var keyboardType: UIKeyboardType { get { .asciiCapable } set {} }
     var autocorrectionType: UITextAutocorrectionType { get { .no } set {} }
     var autocapitalizationType: UITextAutocapitalizationType { get { .none } set {} }
-    override var inputAccessoryView: UIView? {
+    private lazy var accessoryBar = makeAccessoryBar()
+    override var inputAccessoryView: UIView? { accessoryBar }
+    private func makeAccessoryBar() -> UIView {
         let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 650, height: 52)); scroll.backgroundColor = .secondarySystemBackground
         let row = UIStackView(); row.axis = .horizontal; row.spacing = 5
         for (title, key) in [("Esc", 0x1b), ("Ctrl", 0x11), ("Shift", 0x10), ("Alt", 0x12), ("Tab", 0x09), ("Enter", 0x0d), ("←", 0x25), ("↑", 0x26), ("↓", 0x28), ("→", 0x27), ("Done", 0)] {
