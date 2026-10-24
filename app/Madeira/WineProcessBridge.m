@@ -1668,8 +1668,32 @@ static void *wine_process_thread(void *arg) {
             // that exercise the full C++ runtime (parallel_for, atomic_wait,
             // <filesystem>, etc.) don't trip __wine_unimplemented stubs.
             if (use_arm64ec) {
-                NSString *vcrtSource = [bundlePath stringByAppendingPathComponent:@"x86_64-vcruntime"];
-                NSArray *vcrtDlls = [fm contentsOfDirectoryAtPath:vcrtSource error:nil];
+                /* madeira-vcruntime-sources: two sources, not one.
+                 *
+                 * The bundle is read-only and signature-sealed, so DLLs placed
+                 * there can only arrive by rebuilding the app -- which for a
+                 * sideloaded build is the entire install cycle. Documents is
+                 * user-writable (UIFileSharingEnabled), so it is searched
+                 * first and a user-supplied file shadows a bundled one. */
+                NSString *vcrtBundleSource = [bundlePath stringByAppendingPathComponent:@"x86_64-vcruntime"];
+                NSString *vcrtDocsSource = [NSSearchPathForDirectoriesInDomains(
+                    NSDocumentDirectory, NSUserDomainMask, YES).firstObject
+                    stringByAppendingPathComponent:@"vcruntime"];
+                NSMutableArray *vcrtNames = [NSMutableArray array];
+                NSMutableDictionary *vcrtHome = [NSMutableDictionary dictionary];
+                for (NSString *dir in @[vcrtDocsSource, vcrtBundleSource]) {
+                    for (NSString *f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+                        /* Skip anything that is not a DLL. Without this the
+                         * placeholder README.txt that has to exist for Xcode's
+                         * resource copy to succeed is symlinked into system32,
+                         * and the "Symlinked N" count counts it. */
+                        if (![[f pathExtension] isEqualToString:@"dll"]) continue;
+                        if (vcrtHome[[f lowercaseString]]) continue;  /* Documents wins */
+                        vcrtHome[[f lowercaseString]] = [dir stringByAppendingPathComponent:f];
+                        [vcrtNames addObject:f];
+                    }
+                }
+                NSArray *vcrtDlls = vcrtNames;
                 int vcrtLinked = 0, vcrtSkipped = 0;
                 for (NSString *dll in vcrtDlls) {
                     /* NOTE 2026-07-03 (late): retried lifting BOTH exemptions
@@ -1707,7 +1731,7 @@ static void *wine_process_thread(void *arg) {
                         vcrtSkipped++;
                         continue;
                     }
-                    NSString *src = [vcrtSource stringByAppendingPathComponent:dll];
+                    NSString *src = vcrtHome[[dll lowercaseString]];
                     NSString *dst = [sys32Dir stringByAppendingPathComponent:dll];
                     [fm removeItemAtPath:dst error:nil];
                     if ([fm createSymbolicLinkAtPath:dst withDestinationPath:src error:nil])
