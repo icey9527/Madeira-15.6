@@ -702,6 +702,8 @@ struct SteamSettingsSection: View {
     @ObservedObject private var dock = MadeiraDockModel.shared
     @ObservedObject private var onboarding = OnboardingModel.shared
     @State private var confirmSignOut = false
+    /// Settings › Steam › Game language (SteamLanguage); "" follows the device.
+    @State private var language = SteamLanguage.chosen ?? ""
 
     /// Shown when Steam sign-in or Madeira Dock is available.
     static var shown: Bool { SteamSignIn.isEnabled || MadeiraDock.enabled }
@@ -714,6 +716,11 @@ struct SteamSettingsSection: View {
             } else {
                 Button { open(.steamSignIn) } label: { Label("登录 Steam", systemImage: "person.crop.circle.badge.plus") }
             }
+            Picker("Game language", selection: $language) {
+                Text("Device language (\(SteamLanguage.name(SteamLanguage.device)))").tag("")
+                ForEach(SteamLanguage.all, id: \.code) { Text($0.name).tag($0.code) }
+            }
+            .onChange(of: language) { value in SteamLanguage.choose(value.isEmpty ? nil : value) }
             if MadeiraDock.enabled {
                 Button { open(.dock) } label: { Label("Madeira Dock", systemImage: "shippingbox") }
                 if let status = dock.status {
@@ -726,7 +733,9 @@ struct SteamSettingsSection: View {
         } header: {
             Text("Steam")
         } footer: {
-            Text("Madeira 会将 Steam 登录令牌保存在本设备的钥匙串中，仅供本设备使用。退出登录后会删除该令牌。")
+            Text("游戏语言：Steam 下载安装的语言，也是 Steam 让游戏使用的语言。游戏没有该语言时使用英文。已安装的游戏在其页面选择下载前保持原语言。
+
+Madeira 会将 Steam 登录令牌保存在本设备的钥匙串中，仅供本设备使用。退出登录后会删除该令牌。")
         }
         .confirmationDialog("要退出 Steam 登录吗？", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("退出登录", role: .destructive) { signIn.signOut() }
