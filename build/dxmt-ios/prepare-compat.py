@@ -880,6 +880,73 @@ d3d9_files = (
          '      level.ptr()->flushLockedUpload();\n'
          '}\n\nHRESULT STDMETHODCALLTYPE\nMTLD3D9Texture::AddDirtyRect(const RECT *pDirtyRect) {\n'),
     ), ('flushLockedLevels',)),
+    # iOS pages are 16 KB but DXMT_PAGE_SIZE is 4096.  The mirror is wrapped by
+    # newBufferWithBytesNoCopy, which needs a host-page aligned pointer and
+    # length; a 4 KB aligned mirror fails there, ensureMirror frees it silently
+    # and every LockRect of a MANAGED texture returns INVALIDCALL (SDL2 2.0.3).
+    ('d3d9/d3d9_texture.cpp', (
+        ('    m_mirrorBacking = guest_alloc(total_bytes, DXMT_PAGE_SIZE);\n'
+         '    if (!m_mirrorBacking)\n'
+         '      return;\n'
+         '    std::memset(m_mirrorBacking, 0, total_bytes);\n'
+         '\n'
+         '    WMTBufferInfo binfo{};\n'
+         '    binfo.length = total_bytes;\n',
+         '    const size_t page = guest_page_size();\n'
+         '    const size_t mirror_alloc = (total_bytes + page - 1) & ~(page - 1);\n'
+         '    m_mirrorBacking = guest_alloc(mirror_alloc, page);\n'
+         '    if (!m_mirrorBacking) {\n'
+         '      Logger::warn(str::format("[d9-mirror] guest_alloc failed bytes=", mirror_alloc));\n'
+         '      return;\n'
+         '    }\n'
+         '    std::memset(m_mirrorBacking, 0, mirror_alloc);\n'
+         '\n'
+         '    WMTBufferInfo binfo{};\n'
+         '    binfo.length = mirror_alloc;\n'),
+        ('    m_mirrorBuffer = m_device->metalDevice().newBuffer(binfo);\n'
+         '    if (m_mirrorBuffer == nullptr) {\n',
+         '    m_mirrorBuffer = m_device->metalDevice().newBuffer(binfo);\n'
+         '    if (m_mirrorBuffer == nullptr) {\n'
+         '      Logger::warn(str::format("[d9-mirror] newBuffer failed ptr=", (uintptr_t)m_mirrorBacking,\n'
+         '          " bytes=", mirror_alloc));\n'),
+        ('  return m_levels[Level]->LockRect(pLockedRect, pRect, Flags);\n}\n',
+         '  HRESULT hr = m_levels[Level]->LockRect(pLockedRect, pRect, Flags);\n'
+         '  static unsigned lock_logged = 0;\n'
+         '  if (lock_logged < 8 && (FAILED(hr) || lock_logged < 2)) {\n'
+         '    ++lock_logged;\n'
+         '    Logger::warn(str::format(\n'
+         '        "[d9-lock-result] hr=", (uint32_t)hr, " pool=", (uint32_t)m_pool, " usage=", (uint32_t)m_usage,\n'
+         '        " fmt=", (uint32_t)m_format, " size=", m_width, "x", m_height, " level=", Level,\n'
+         '        " flags=", (uint32_t)Flags, " rect=", pRect ? 1 : 0, " mirror=", m_mirrorBacking ? 1 : 0));\n'
+         '  }\n'
+         '  return hr;\n}\n'),
+    ), ('d9-mirror', 'd9-lock-result', 'guest_page_size()')),
+    ('d3d9/d3d9_cube_texture.cpp', (
+        ('    m_mirrorBacking = guest_alloc(total_bytes, DXMT_PAGE_SIZE);\n'
+         '    if (!m_mirrorBacking)\n'
+         '      return;\n'
+         '    std::memset(m_mirrorBacking, 0, total_bytes);\n'
+         '\n'
+         '    WMTBufferInfo binfo{};\n'
+         '    binfo.length = total_bytes;\n',
+         '    const size_t page = guest_page_size();\n'
+         '    const size_t mirror_alloc = (total_bytes + page - 1) & ~(page - 1);\n'
+         '    m_mirrorBacking = guest_alloc(mirror_alloc, page);\n'
+         '    if (!m_mirrorBacking)\n'
+         '      return;\n'
+         '    std::memset(m_mirrorBacking, 0, mirror_alloc);\n'
+         '\n'
+         '    WMTBufferInfo binfo{};\n'
+         '    binfo.length = mirror_alloc;\n'),
+    ), ('guest_page_size()',)),
+    ('d3d9/d3d9_device.cpp', (
+        ('    void *backing = guest_alloc(bytes, DXMT_PAGE_SIZE);\n'
+         '    if (!backing)\n'
+         '      return 0;\n',
+         '    void *backing = guest_alloc(bytes, guest_page_size());\n'
+         '    if (!backing)\n'
+         '      return 0;\n'),
+    ), ('guest_alloc(bytes, guest_page_size())',)),
     ('d3d9/d3d9_device.cpp', (
         ('#include "d3d9_device.hpp"\n',
          '#include <cstdint>\n#include "d3d9_device.hpp"\n'),
