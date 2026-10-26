@@ -733,9 +733,7 @@ struct SteamSettingsSection: View {
         } header: {
             Text("Steam")
         } footer: {
-            Text("游戏语言：Steam 下载安装的语言，也是 Steam 让游戏使用的语言。游戏没有该语言时使用英文。已安装的游戏在其页面选择下载前保持原语言。
-
-Madeira 会将 Steam 登录令牌保存在本设备的钥匙串中，仅供本设备使用。退出登录后会删除该令牌。")
+            Text("游戏语言：Steam 下载安装的语言，也是 Steam 让游戏使用的语言。游戏没有该语言时使用英文。已安装的游戏在其页面选择下载前保持原语言。\n\nMadeira 会将 Steam 登录令牌保存在本设备的钥匙串中，仅供本设备使用。退出登录后会删除该令牌。")
         }
         .confirmationDialog("要退出 Steam 登录吗？", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("退出登录", role: .destructive) { signIn.signOut() }
