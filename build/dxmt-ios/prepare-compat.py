@@ -159,7 +159,67 @@ print(f'iOS {sys.argv[3]} optional MTLCopyAllDevices: {relative}')
 helper_anchor = '#import <Metal/Metal.h>\n'
 if source.count(helper_anchor) != 1:
     raise SystemExit('DXMT winemetal_unix.c: Metal import anchor changed')
-helper = helper_anchor + ('/* iOS 15: gpuResourceID is Metal 3 (iOS 16); encode 0 when there is none. */\nstatic inline uint64_t madeira_gpu_resource_id(id resource) {\n  if (@available(iOS 16.0, macOS 13.0, *))\n    return resource ? (uint64_t)[resource gpuResourceID]._impl : 0;\n  return 0;\n}\n')
+# Madeira-15.6: encoding 0 made every textured D3D11 draw fault with
+# MTLCommandBufferErrorDomain Code=9 "Invalid Resource" (The Shell, 2026-10-26),
+# because DXMT writes these ids straight into its argument buffers.  Below iOS 16
+# a texture may still answer gpuResourceID (only the sampler was seen to lack
+# it); otherwise encode the resource once with a throwaway MTLArgumentEncoder
+# and read back the 8-byte handle Tier 2 writes -- the path MoltenVK takes on
+# iOS 15.  That layout is undocumented, so MADEIRA_AB_HANDLE=0 restores 0.
+helper = helper_anchor + r'''#import <objc/message.h>
+/* iOS 15: gpuResourceID is Metal 3 (iOS 16).  Madeira-15.6: ask the resource if
+ * it answers anyway, else read the handle back from a one-off argument encoding.
+ * MADEIRA_AB_HANDLE=0: encode 0 as before.  Logs [ios15-ab] for the first ones. */
+static inline uint64_t madeira_gpu_resource_id(id resource) {
+  if (@available(iOS 16.0, macOS 13.0, *))
+    return resource ? (uint64_t)[resource gpuResourceID]._impl : 0;
+  if (!resource) return 0;
+  static int enabled = -1;
+  static unsigned said;
+  if (enabled < 0) {
+    const char *e = getenv("MADEIRA_AB_HANDLE");  /* 0: encode 0 below iOS 16 (textured D3D11 draws fault) */
+    enabled = !(e && e[0] == '0' && !e[1]);
+  }
+  if (!enabled) return 0;
+  uint64_t direct = 0, encoded = 0;
+  int responds = [resource respondsToSelector:@selector(gpuResourceID)];
+  int sampler = [resource conformsToProtocol:@protocol(MTLSamplerState)];
+  if (responds) direct = ((uint64_t (*)(id, SEL))objc_msgSend)(resource, @selector(gpuResourceID));
+  if (!direct) {
+    @autoreleasepool {
+      id<MTLDevice> device = [resource device];
+      MTLArgumentDescriptor *arg = [MTLArgumentDescriptor argumentDescriptor];
+      arg.index = 0;
+      arg.access = MTLArgumentAccessReadOnly;
+      if (sampler) {
+        arg.dataType = MTLDataTypeSampler;
+      } else {
+        arg.dataType = MTLDataTypeTexture;
+        arg.textureType = [(id<MTLTexture>)resource textureType];
+      }
+      id<MTLArgumentEncoder> enc = device ? [device newArgumentEncoderWithArguments:@[arg]] : nil;
+      if (enc) {
+        NSUInteger length = enc.encodedLength < 8 ? 8 : enc.encodedLength;
+        id<MTLBuffer> buf = [device newBufferWithLength:length options:MTLResourceStorageModeShared];
+        if (buf) {
+          [enc setArgumentBuffer:buf offset:0];
+          if (sampler) [enc setSamplerState:(id<MTLSamplerState>)resource atIndex:0];
+          else [enc setTexture:(id<MTLTexture>)resource atIndex:0];
+          __builtin_memcpy(&encoded, [buf contents], 8);
+          [buf release];
+        }
+        [enc release];
+      }
+    }
+  }
+  uint64_t handle = direct ? direct : encoded;
+  if (__atomic_fetch_add(&said, 1, __ATOMIC_RELAXED) < 12)
+    fprintf(stderr, "[ios15-ab] %s responds=%d direct=0x%llx encoded=0x%llx -> 0x%llx (MADEIRA_AB_HANDLE=0 disables)\n",
+            sampler ? "sampler" : "texture", responds, (unsigned long long)direct,
+            (unsigned long long)encoded, (unsigned long long)handle);
+  return handle;
+}
+'''
 source = source.replace(helper_anchor, helper)
 replacements = (
     ('info->gpu_resource_id = info->support_argument_buffers ? [sampler gpuResourceID]._impl : 0;',
