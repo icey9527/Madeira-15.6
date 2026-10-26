@@ -10,6 +10,15 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--or--later-yellow?style=for-the-badge" alt="License: GPL-3.0-or-later"></a>
 </p>
 
+> [!WARNING]
+> **Madeira-15.6 是一个非官方的、由 AI 完成的 "vibe" 向下移植（iPadOS 15.6），不是 Madeira 官方版本。**
+> 代码改动主要由 AI 编写，未经上游作者审查，可能存在错误、性能问题或不稳定；请自行承担使用风险。
+> 遇到问题请不要向上游 [willfaust/Madeira](https://github.com/willfaust/Madeira) 反馈，原项目的功劳归原作者所有。
+>
+> **Madeira-15.6 is an unofficial, AI-written "vibe" backport to iPadOS 15.6, not an official Madeira release.**
+> It has not been reviewed by the upstream author and may be buggy or unstable; use at your own risk.
+> Please do not report issues from this fork to upstream. All credit for Madeira belongs to its original authors.
+
 Madeira runs Windows PC games on an iPhone, with no jailbreak. Games run as they
 are, unmodified, inside a single iOS app.
 

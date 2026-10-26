@@ -3619,7 +3619,7 @@ struct SetupGuideView: View {
                 }
 
                 Section("关于") {
-                    Text("Madeira 是一个概念验证项目，使用 FEX-Emu、Wine 和基于 Metal 的图形转换技术在 iOS 上运行 x86 Windows 游戏。")
+                    Text("Madeira 是一个概念验证项目，使用 FEX-Emu、Wine 和基于 Metal 的图形转换技术在 iOS 上运行 x86 Windows 游戏。\n\nMadeira-15.6 是非官方的、由 AI 完成的 vibe 向下移植（iPadOS 15.6），未经上游作者审查，可能存在错误或不稳定，请自行承担风险；问题请勿反馈给上游 willfaust/Madeira。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
