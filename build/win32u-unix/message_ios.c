@@ -2858,7 +2858,27 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
                     /* fall through */
                 case MA_ACTIVATE:
                 case 0:
-                    if (!set_foreground_window( hwndTop, TRUE, FALSE )) eat_msg = TRUE;
+                    if (!set_foreground_window( hwndTop, TRUE, FALSE ))
+                    {
+                        /* Madeira-15.6: iOS has no window manager, so a click on a window is the
+                         * only activation it will get.  When the foreground lock refuses it, the
+                         * button-down was eaten and only the second tap reached the game.  Activate
+                         * it internally and deliver the click.  MADEIRA_CLICK_FOREGROUND=0: eat it. */
+                        static int click_fg = -1;
+                        static unsigned int said;
+                        BOOL ok = FALSE;
+                        if (click_fg < 0)
+                        {
+                            const char *e = getenv( "MADEIRA_CLICK_FOREGROUND" );  /* 0: a click the foreground lock refuses is eaten, as in Wine */
+                            click_fg = !(e && e[0] == '0' && !e[1]);
+                        }
+                        if (click_fg) ok = set_foreground_window( hwndTop, TRUE, TRUE );
+                        if (!ok) eat_msg = TRUE;
+                        extern int dprintf( int fd, const char *fmt, ... );
+                        if (said++ < 16)
+                            dprintf( 2, "[fg-click] foreground lock refused %p for msg %04x: internal retry ok=%d eaten=%d\n",
+                                     hwndTop, msg->message, ok, eat_msg );
+                    }
                     break;
                 default:
                     WARN( "unknown WM_MOUSEACTIVATE code %d\n", ret );

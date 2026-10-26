@@ -384,11 +384,15 @@ keyboard and mouse input only to the process in front. Horizon Zero Dawn
 (madeira-bcd build 471) showed its window with `SWP_NOACTIVATE` only, reads its
 pad through Windows.Gaming.Input, and nothing was in front at all
 (`GetForegroundWindow()` NULL), so it ignored every key and tap. With
-`env.MADEIRA_INPUT_FOREGROUND = 1` (opt-in), while no window at all is in
+`env.MADEIRA_INPUT_FOREGROUND` on (opt-in upstream; on by default in
+Madeira-15.6, `= 0` turns it off), while no window at all is in
 front, a process that polls its messages or receives an injected key or mouse
 event makes its largest visible top-level window (at least 320x200) foreground,
 at most every 250 ms; never while another window is in front. `[fg-none]` logs
-the first activations.
+the first activations. Madeira-15.6 also activates a clicked window
+internally when the foreground lock refuses it, instead of eating the
+button-down (`MADEIRA_CLICK_FOREGROUND = 0` restores Wine's behaviour;
+`[fg-click]` logs it).
 
 ## Windows.Gaming.Input
 

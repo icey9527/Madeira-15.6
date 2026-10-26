@@ -653,7 +653,9 @@ private struct SteamArtworkBlurSpot: View {
     let image: Image
     let size: CGSize
     /// (blur radius, fade radius) as fractions of the shorter side, outermost first.
-    private static let steps: [(blur: CGFloat, radius: CGFloat)] = [(0.008, 0.55), (0.015, 0.42), (0.025, 0.30)]
+    // Madeira-15.6: one layer instead of three. ~170 not-downloaded cards each
+    // carried three live blurs, and scrolling the library dropped frames.
+    private static let steps: [(blur: CGFloat, radius: CGFloat)] = [(0.015, 0.45)]
 
     var body: some View {
         let side = min(size.width, size.height)
@@ -669,6 +671,7 @@ private struct SteamArtworkBlurSpot: View {
                     }
             }
         }
+        .drawingGroup()
         .allowsHitTesting(false)
     }
 }

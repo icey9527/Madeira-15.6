@@ -889,7 +889,17 @@ final class SteamOwnedLibrary: ObservableObject {
             for id in resume { install(id) }
             if !resume.isEmpty { SteamLog.event("[steam-depot] resumed after a game session count=\(resume.count)") }
             // Steam records the session's playtime when the game ends.
-            Task { try? await Task.sleep(nanoseconds: 5_000_000_000); await self.refreshPlaytime() }
+            // Madeira-15.6: a refresh started at app launch is cut off when a game
+            // starts (the session takes the connection), and nothing retried it, so
+            // the library stayed on its old cache. Retry a stale one here.
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if Date().timeIntervalSince(self.libraryUpdated ?? .distantPast) > 6 * 3600 {
+                    await self.refreshLibrary(interactive: false)
+                } else {
+                    await self.refreshPlaytime()
+                }
+            }
         }
     }
 

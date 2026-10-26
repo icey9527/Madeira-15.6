@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in foreground for a process when no window is foreground (MADEIRA_INPUT_FOREGROUND); no Wine runs.
+"""Default-on (Madeira-15.6) foreground for a process when no window is foreground (MADEIRA_INPUT_FOREGROUND); no Wine runs.
 
 Horizon Zero Dawn (build 471, 2026-10-09 15:01) showed its window with
 SWP_NOACTIVATE only and reads no XInput, so GetForegroundWindow() stayed NULL
@@ -7,7 +7,7 @@ and the wineserver queued none of the injected keys or taps for it as raw
 input. build/win32u-unix/driver_ios.c ios_foreground_if_none makes the polling
 or posting process's main window foreground while no window is foreground.
 Compiles the production function with stubs and checks:
-  - off unless MADEIRA_INPUT_FOREGROUND is exactly "1";
+  - on unless MADEIRA_INPUT_FOREGROUND is exactly "0" (Madeira-15.6 default);
   - never while any window is foreground;
   - the process's main window is made foreground through the internal path;
   - nothing without a main window; at most once per 250 ms;
@@ -78,7 +78,7 @@ int main(void)
     main_window = game;
     ios_foreground_if_none( "test" );
     if (set_calls) FAIL( "acted without MADEIRA_INPUT_FOREGROUND\n" );
-    printf( "PASS: nothing happens without MADEIRA_INPUT_FOREGROUND=1\n" );
+    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );
     return 0;
 }
 '''
@@ -86,9 +86,9 @@ int main(void)
 on_harness = harness.replace(r'''int main(void)
 {''', r'''int main(void)
 {
-    if (getenv( "SECOND" )) goto second;''').replace(r'''    printf( "PASS: nothing happens without MADEIRA_INPUT_FOREGROUND=1\n" );
+    if (getenv( "SECOND" )) goto second;''').replace(r'''    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );
     return 0;
-}''', r'''    printf( "PASS: nothing happens without MADEIRA_INPUT_FOREGROUND=1\n" );
+}''', r'''    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );
     return 0;
 second:
     clock_ns = 5000000000LL;
@@ -129,8 +129,8 @@ with tempfile.TemporaryDirectory(prefix='madeira-fg-') as directory:
     subprocess.run([cc, '-std=c11', '-Wall', '-Werror', '-Wno-unused-function', str(source), '-pthread', '-o',
                     str(binary)], check=True)
     env = {k: v for k, v in os.environ.items() if k != 'MADEIRA_INPUT_FOREGROUND'}
-    subprocess.run([str(binary)], check=True, env=env)
-    for value in ('0', '', '10', 'yes'):
-        subprocess.run([str(binary)], check=True, env=dict(env, MADEIRA_INPUT_FOREGROUND=value))
-    subprocess.run([str(binary)], check=True, env=dict(env, MADEIRA_INPUT_FOREGROUND='1', SECOND='1'))
-print('PASS: only MADEIRA_INPUT_FOREGROUND=1 turns it on')
+    subprocess.run([str(binary)], check=True, env=dict(env, MADEIRA_INPUT_FOREGROUND='0'))
+    subprocess.run([str(binary)], check=True, env=dict(env, SECOND='1'))
+    for value in ('1', '', '10', 'yes'):
+        subprocess.run([str(binary)], check=True, env=dict(env, MADEIRA_INPUT_FOREGROUND=value, SECOND='1'))
+print('PASS: only MADEIRA_INPUT_FOREGROUND=0 turns it off')
