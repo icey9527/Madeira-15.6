@@ -45,6 +45,12 @@ jobs:
     defaults:
       run:
         shell: bash
+        # Madeira-15.6: the repository was renamed (Madeira -> Madeira-15.6) and
+        # every restored build tree (FEX CMakeCache, wine config.status, LLVM,
+        # meson) records the old checkout path; cmake refuses a cache made for
+        # another source directory.  Run from a symlink at the old path (made by
+        # the step after checkout) so those caches stay valid.
+        working-directory: /Users/runner/work/Madeira/Madeira
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,6 +59,16 @@ jobs:
           # macOS runner 本就紧张的磁盘吃光 —— 见 run #8 的 No space left）。
           submodules: false
           fetch-depth: 1
+
+      - name: Keep the pre-rename checkout path (Madeira-15.6)
+        working-directory: ${{ github.workspace }}
+        run: |
+          old=/Users/runner/work/Madeira/Madeira
+          if [ "$GITHUB_WORKSPACE" != "$old" ]; then
+            mkdir -p "$(dirname "$old")"
+            ln -sfn "$GITHUB_WORKSPACE" "$old"
+          fi
+          cd "$old" && pwd && git rev-parse --short HEAD
 
       - name: Guard — 只允许 port/ios15.6
         run: |
