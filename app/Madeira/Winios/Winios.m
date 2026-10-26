@@ -719,6 +719,27 @@ void winios_post_key(int vk, int down) {
     winios_q_push_ev(WINIOS_EV_KEY, vk, 0, down ? 0 : KEYEVENTF_KEYUP, 0);
 }
 
+/* Madeira-15.6: minimum hold between a press and its release.
+ * Every tap posts down and up back to back (the iOS keyboard's Esc, HoldKeyView,
+ * touch-pointer clicks), and one drain handed both to the game thread in the
+ * same message poll: the key state already read "up" when the game sampled it,
+ * so Esc took ~5 presses (DR1 log 2026-10-26 21:40, 85/85 pairs in one drain).
+ * A release that arrives sooner than this after its press stays at the head of
+ * the queue (order kept) and goes out on a later poll.
+ * MADEIRA_KEY_MIN_HOLD_MS (default 50, 0 = off, max 500). */
+static double winios_key_min_hold(void) {
+    static double hold = -1;
+    if (hold < 0) {
+        const char *e = getenv("MADEIRA_KEY_MIN_HOLD_MS");  /* 0: a release goes out in the same drain as its press, as before */
+        long ms = e ? strtol(e, NULL, 10) : 50;
+        if (ms < 0) ms = 0;
+        if (ms > 500) ms = 500;
+        hold = ms / 1000.0;
+    }
+    return hold;
+}
+static double g_key_down_at[256], g_btn_down_at[2];   /* under g_input_q.lock */
+
 BOOL winios_pProcessEvents(DWORD mask) {
     /* The restored born-minimized window's own thread brings it to the front
      * (see g_restore_foreground); other threads leave the request in place. */
@@ -749,18 +770,44 @@ BOOL winios_pProcessEvents(DWORD mask) {
         }
     }
     BOOL drained = FALSE;
+    double hold = winios_key_min_hold();
     for (;;) {
         winios_input_event_t e;
+        double now = winios_now_mono(), since = 1e9;
         pthread_mutex_lock(&g_input_q.lock);
         if (g_input_q.tail == g_input_q.head) {
             pthread_mutex_unlock(&g_input_q.lock);
             break;
         }
         e = g_input_q.buf[g_input_q.tail];
+        if (e.type == WINIOS_EV_KEY && (e.flags & KEYEVENTF_KEYUP) && (unsigned)e.x < 256)
+            since = now - g_key_down_at[e.x];
+        else if (e.type == WINIOS_EV_MOUSE && (e.flags & MOUSEEVENTF_LEFTUP))
+            since = now - g_btn_down_at[0];
+        else if (e.type == WINIOS_EV_MOUSE && (e.flags & MOUSEEVENTF_RIGHTUP))
+            since = now - g_btn_down_at[1];
+        if (hold > 0 && since < hold) {
+            /* Too soon after its press: leave it (and everything behind it, so
+             * order is kept) for a later poll. */
+            static unsigned int held_said;
+            pthread_mutex_unlock(&g_input_q.lock);
+            if (held_said++ < 16) {
+                fprintf(stderr, "[key-hold] type=%u x=%d flags=0x%x release held back %.0f ms after its press "
+                        "(MADEIRA_KEY_MIN_HOLD_MS=0 disables)\n", e.type, e.x, e.flags, since * 1000.0);
+                fflush(stderr);
+            }
+            break;
+        }
         g_input_q.tail = (g_input_q.tail + 1) % WINIOS_RING_SIZE;
+        if (e.type == WINIOS_EV_KEY && !(e.flags & KEYEVENTF_KEYUP) && (unsigned)e.x < 256)
+            g_key_down_at[e.x] = now;
+        else if (e.type == WINIOS_EV_MOUSE && (e.flags & MOUSEEVENTF_LEFTDOWN))
+            g_btn_down_at[0] = now;
+        else if (e.type == WINIOS_EV_MOUSE && (e.flags & MOUSEEVENTF_RIGHTDOWN))
+            g_btn_down_at[1] = now;
         pthread_mutex_unlock(&g_input_q.lock);
 
-        fprintf(stderr, "[winios] drain type=%u x=%d y=%d flags=0x%x\n", e.type, e.x, e.y, e.flags); fflush(stderr);
+        fprintf(stderr, "[winios] drain t=%.3f type=%u x=%d y=%d flags=0x%x\n", now, e.type, e.x, e.y, e.flags); fflush(stderr);
         if (e.type == WINIOS_EV_KEY)
             winios_drv_post_key((unsigned short)e.x, e.flags);
         else
