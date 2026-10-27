@@ -1454,6 +1454,22 @@ NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR limit, SIZE_T reserve_size, SIZE
 #ifdef _WIN64
         teb->Tib.StackBase = teb->TlsSlots[WOW64_TLS_CPURESERVED] = cpu;
         teb->Tib.StackLimit = stack.StackLimit;
+        /* Madeira-15.6: a syscall's __TRY frame lives on the KERNEL stack, which
+         * is allocated just below this user stack; is_valid_frame() (ntdll_misc.h)
+         * only knows the TIB range, so the frame was rejected -- "Exception frame
+         * is not in stack limits" -- and a fault the caller was ready to catch
+         * killed the process (dbghelp reading guest 0x8 after GAML's own bad
+         * jump, 2026-10-27). Report the union of the two contiguous stacks. */
+        if (thread_data->kernel_stack &&
+            (ULONG_PTR)thread_data->kernel_stack + kernel_stack_size == (ULONG_PTR)stack.StackLimit)
+        {
+            static int said;
+            teb->Tib.StackLimit = (ULONG_PTR)thread_data->kernel_stack;
+            if (said++ < 3)
+                ERR_(seh)("[stack-union] ml1204 frame check spans the kernel stack too: "
+                          "[%p, %p)
+", thread_data->kernel_stack, stack.StackBase);
+        }
         teb->DeallocationStack = stack.DeallocationStack;
 
         /* 32-bit stack.  `limit` is a GUEST ceiling;
