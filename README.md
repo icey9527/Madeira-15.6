@@ -18,6 +18,9 @@
 > **Madeira-15.6 is an unofficial, AI-written "vibe" backport to iPadOS 15.6, not an official Madeira release.**
 > It has not been reviewed by the upstream author and may be buggy or unstable; use at your own risk.
 > Please do not report issues from this fork to upstream. All credit for Madeira belongs to its original authors.
+>
+> **运行方式**：本移植版在越狱/已装 TrollStore（巨魔商店）的 iPadOS 15.6 设备上测试，通过 TrollStore 安装并获得 JIT 运行；下文上游关于 StikDebug / SideStore 的安装说明不一定适用于本移植版。
+> **How it runs**: this port is tested on iPadOS 15.6 with [TrollStore](https://github.com/opa334/TrollStore), installed and given JIT through TrollStore. The upstream StikDebug / SideStore instructions below may not apply to it.
 
 Madeira runs Windows PC games on an iPhone, with no jailbreak. Games run as they
 are, unmodified, inside a single iOS app.
