@@ -296,7 +296,7 @@ if source.count(setpso_old) != 1:
 source = source.replace(setpso_old, setpso_new)
 for setter in ('setVertexBuffer', 'setFragmentBuffer'):
     old = '      [encoder %s:(id<MTLBuffer>)body->buffer offset:body->offset atIndex:body->index];\n' % setter
-    new = ('      if (body->index == 30) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
+    new = ('      if (body->index >= 28) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
            + old)
     if source.count(old) != 1:
         raise SystemExit('DXMT winemetal_unix.c: %s site changed' % setter)

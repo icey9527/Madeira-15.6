@@ -9830,6 +9830,27 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
                     ERR("  [guest-state] plausible-ptr gregs=%d/16 (low => uninitialised frame, "
                         "high => only rsp clobbered)\n", plausible);
 
+
+                    /* Madeira-15.6: a call through a NULL function pointer leaves
+                     * no caller in the guest registers, only the return addresses
+                     * already on the guest stack (GAML, 2026-10-27: rip=0 at the
+                     * map screen, ebp=0). Dump the top of it so the caller can be
+                     * resolved against the module map. */
+                    if (cs[0] < 0x10000 && cs[5] > 0x10000 && cs[5] < 0x100000000ull)
+                    {
+                        uint32_t words[24];
+                        mach_vm_size_t gw = 0;
+                        if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)cs[5],
+                                sizeof(words), (mach_vm_address_t)words, &gw ) == KERN_SUCCESS
+                            && gw == sizeof(words))
+                        {
+                            int k;
+                            for (k = 0; k < 24; k += 6)
+                                ERR("  [guest-stack] esp+%02d: %08x %08x %08x %08x %08x %08x\n",
+                                    k * 4, words[k], words[k+1], words[k+2],
+                                    words[k+3], words[k+4], words[k+5]);
+                        }
+                    }
                     /* ml962 (Astra step 3): capture the OPERAND, not the innocent
                      * final load.
                      *
