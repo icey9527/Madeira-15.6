@@ -1834,7 +1834,18 @@ static void ios_thread_sampler_main(void)
         static int first_burst = 1;
         sleep(first_burst ? 5 : 20);
         first_burst = 0;
-        for (b = 0; b < 4; b++) { ios_thread_sampler_pass(b); usleep(250000); }
+        /* ml1203 (Madeira-15.6): a burst that never finished left no trace at
+         * all -- "armed" printed and nothing else, ever (GAML 2026-10-27), so
+         * a sampler stuck inside a pass looked exactly like one that never
+         * ran. Name the pass it is in for the first two bursts. */
+        static int bursts;
+        if (bursts < 2) wine_log_write( "[thread-sample] ml1203 burst %d start", bursts );
+        for (b = 0; b < 4; b++) {
+            if (bursts < 2) wine_log_write( "[thread-sample] ml1203 pass %d start", b );
+            ios_thread_sampler_pass(b);
+            usleep(250000);
+        }
+        bursts++;
         wine_log_write("[thread-sample] ml876 burst done");
         {   /* ml1115: alert (futex) traffic since the last burst, per second */
             extern volatile long long ios_alert_wakes, ios_alert_waits, ios_qpc_syscalls, ios_affinity_sets; extern volatile int ios_srv_req_count;
