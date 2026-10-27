@@ -1828,7 +1828,12 @@ static void ios_thread_sampler_main(void)
     wine_log_write("[thread-sample] ml876 armed (task-wide: burst of 4 passes / 250 ms every 20 s)");
     for (;;) {
         int b;
-        sleep(20);
+        /* ml1202 (Madeira-15.6): the first burst waits 5 s, not 20 -- a game that
+         * freezes early and is then quit never reached a single sample, so a
+         * frozen 32-bit game had no profile at all. */
+        static int first_burst = 1;
+        sleep(first_burst ? 5 : 20);
+        first_burst = 0;
         for (b = 0; b < 4; b++) { ios_thread_sampler_pass(b); usleep(250000); }
         wine_log_write("[thread-sample] ml876 burst done");
         {   /* ml1115: alert (futex) traffic since the last burst, per second */
