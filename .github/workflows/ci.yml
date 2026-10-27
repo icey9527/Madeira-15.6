@@ -11,6 +11,11 @@ name: port-ci
 on:
   push:
     branches: [port/ios15.6]
+  # A weekly no-change build keeps the action caches alive: GitHub drops cache
+  # entries unused for 7 days, and the first build after that rebuilds the iOS
+  # LLVM toolchain from scratch (15+ minutes) instead of restoring it.
+  schedule:
+    - cron: '23 6 * * 1'
   workflow_dispatch:
     inputs:
       runner:
@@ -54,6 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # A scheduled run starts from the default branch; build the port branch.
+          ref: ${{ github.event_name == 'schedule' && 'port/ios15.6' || github.ref }}
           # 子模块改为在 build-all.sh 里按需浅克隆（actions/checkout 的
           # 递归子模块是全量克隆，wine/FEX 的历史 + FEX 测试数据仓会把
           # macOS runner 本就紧张的磁盘吃光 —— 见 run #8 的 No space left）。
@@ -72,6 +79,12 @@ jobs:
 
       - name: Guard — 只允许 port/ios15.6
         run: |
+          # A scheduled run checks out port/ios15.6 above; its GITHUB_REF is the
+          # default branch, so accept it here and verify the checkout instead.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "定时缓存保温构建: $(git rev-parse --short HEAD) $(git branch --show-current)"
+            exit 0
+          fi
           case "$GITHUB_REF" in
             refs/heads/port/ios15.6) echo "分支正确: $GITHUB_REF" ;;
             *) echo "::error::CI 只允许在 port/ios15.6 分支运行（当前 $GITHUB_REF），不要拿原版分支跑构建"; exit 1 ;;
