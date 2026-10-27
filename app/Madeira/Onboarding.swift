@@ -704,11 +704,32 @@ struct SteamSettingsSection: View {
     @State private var confirmSignOut = false
     /// Settings › Steam › Game language (SteamLanguage); "" follows the device.
     @State private var language = SteamLanguage.chosen ?? ""
-    /// Settings › Steam › 下载服务器：Valve 的顺序，或先测速再排。
-    @State private var serverChoice = SteamServerChoice.current
+    /// Settings › Steam › 下载服务器：自动 / 测速优选 / 指定地区。
+    @State private var serverMode: ServerMode = ServerMode(SteamServerChoice.current)
+    @State private var regionCell = SteamServerChoice.current.cellID.map(Int.init) ?? 47
+
+    enum ServerMode: Hashable { case auto, fastest, region }
+
+    init(_ choice: SteamServerChoice) {
+        switch choice {
+        case .auto: self = .auto
+        case .fastest: self = .fastest
+        case .region: self = .region
+        }
+    }
 
     /// Shown when Steam sign-in or Madeira Dock is available.
     static var shown: Bool { SteamSignIn.isEnabled || MadeiraDock.enabled }
+
+    private func saveServerChoice() {
+        let choice: SteamServerChoice
+        switch serverMode {
+        case .auto: choice = .auto
+        case .fastest: choice = .fastest
+        case .region: choice = .region(regionCell)
+        }
+        choice.save()
+    }
 
     var body: some View {
         Section {
@@ -723,13 +744,21 @@ struct SteamSettingsSection: View {
                 ForEach(SteamLanguage.all, id: \.code) { Text($0.name).tag($0.code) }
             }
             .onChange(of: language) { value in SteamLanguage.choose(value.isEmpty ? nil : value) }
-            Picker("下载服务器", selection: $serverChoice) {
-                ForEach(SteamServerChoice.allCases, id: \.self) { Text($0.label).tag($0) }
+            Picker("下载服务器", selection: $serverMode) {
+                Text("自动（Valve 分配）").tag(ServerMode.auto)
+                Text("测速后选最快的").tag(ServerMode.fastest)
+                Text("指定下载地区").tag(ServerMode.region)
             }
-            .onChange(of: serverChoice) { value in
-                UserDefaults.standard.set(value.rawValue, forKey: SteamServerChoice.defaultsKey)
+            .onChange(of: serverMode) { _ in saveServerChoice() }
+            if serverMode == .region {
+                Picker("下载地区", selection: $regionCell) {
+                    ForEach(SteamServerChoice.regions, id: \.cell) { region in
+                        Text(region.name).tag(region.cell)
+                    }
+                }
+                .onChange(of: regionCell) { _ in saveServerChoice() }
             }
-            Text("下载前先测一遍 Valve 给出的服务器，按响应速度排序；已下载的文件不受影响。")
+            Text("「测速后选最快的」会在下载前逐个计时 Valve 给出的服务器；「指定下载地区」按 Steam 的下载地区编号请求服务器，改动只影响之后的下载。")
                 .font(.caption).foregroundStyle(.secondary)
             if MadeiraDock.enabled {
                 Button { open(.dock) } label: { Label("Madeira Dock", systemImage: "shippingbox") }
