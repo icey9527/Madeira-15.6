@@ -822,6 +822,46 @@ static void ios_thread_sampler_pass(int burst)
 #define ML979_GRAIN   0x40ull        /* 64-byte buckets */
 #define ML979_MAXTHREADS 12          /* guest threads tracked per profile */
 
+/* ml1201 (Madeira-15.6): a 32-bit WoW64 guest keeps its state somewhere other
+ * than the x86-64 ThreadState slot the ml981 test reads, so a 32-bit game
+ * profiled as "no guest threads found" and a frozen one could only be named by
+ * its spin address, never by its callers. Probe the frame at a few widths and
+ * offsets instead of one, and print the frame words once so the layout can be
+ * read off a device log. */
+static int ios_guest_rip_from_frame( uint64_t x28, uint64_t *rip_out, int *off_out, int *width_out )
+{
+    static const int offs[] = { 0x18, 0x20, 0x1c, 0x24, 0x14, 0x28, 0x10, 0x2c };
+    static const int widths[] = { 8, 4 };
+    static int dumped;
+    unsigned i, w;
+    if (!x28) return 0;
+    for (w = 0; w < sizeof(widths) / sizeof(widths[0]); w++) {
+        for (i = 0; i < sizeof(offs) / sizeof(offs[0]); i++) {
+            uint64_t v = 0;
+            int o = w ? (offs[i] & ~3) : offs[i];
+            if (widths[w] == 8) { if (!ios_ts_read( x28 + o, &v, 8 )) continue; }
+            else { uint32_t v32 = 0; if (!ios_ts_read( x28 + o, &v32, 4 )) continue; v = v32; }
+            if (v > 0x10000 && v < 0x8000000000ull) {
+                if (!dumped) {
+                    unsigned k;
+                    dumped = 1;
+                    wine_log_write( "[guest-frame] ml1201 x28=%#llx rip@+%#x width=%d = %#llx; frame:",
+                                    (unsigned long long)x28, o, widths[w], (unsigned long long)v );
+                    for (k = 0; k < 12; k++) {
+                        uint32_t q = 0;
+                        if (!ios_ts_read( x28 + k * 4u, &q, 4 )) break;
+                        wine_log_write( " +%#x=%#x", k * 4u, q );
+                    }
+                    wine_log_write( "\n" );
+                }
+                *rip_out = v; if (off_out) *off_out = o; if (width_out) *width_out = widths[w];
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 static void ios_guest_rip_profile( int gen )
 {
     extern uint64_t ios_native_rip_from_hostpc( uint64_t, uint64_t, const char ** );
@@ -858,8 +898,7 @@ static void ios_guest_rip_profile( int gen )
              * x28+0x18 -- the same test the sampling loop uses, so a thread can
              * never be selected here and then fail to resolve below. */
             if (thread_get_state( tl[k], ARM_THREAD_STATE64, (thread_state_t)&st, &cnt ) == KERN_SUCCESS
-                && ios_ts_read( st.__x[28] + 0x18, &bb, 8 )
-                && bb > 0x10000 && bb < 0x8000000000ull
+                && ios_guest_rip_from_frame( st.__x[28], &bb, NULL, NULL )   /* ml1201: 32-bit frames too */
                 && ios_ts_teb( pthread_from_mach_thread_np( tl[k] ) ))   /* ml1116: a Wine thread (has a TEB); native threads passed the x28 test by accident */
             {
                 tg[ntg] = tl[k];
@@ -920,7 +959,7 @@ static void ios_guest_rip_profile( int gen )
              * it documents as "+0x18 rip, then gregs[0..15]". Do the same -- one
              * 8-byte read at x28+0x18 is authoritative wherever the host pc is. */
             if (thread_get_state( tg[t], ARM_THREAD_STATE64, (thread_state_t)&st, &cnt ) == KERN_SUCCESS
-                && ios_ts_read( st.__x[28] + 0x18, &bb, 8 )
+                && ios_guest_rip_from_frame( st.__x[28], &bb, NULL, NULL )
                 && (rip = bb) > 0x10000 && rip < 0x8000000000ull)
             {
                 total++;
