@@ -17,7 +17,7 @@ OLD = """    aad->convert(adsi, adsh->pbSrc, &nsrc, adsh->pbDst, &ndst);
     adsh->cbDstLengthUsed = ndst;
 """
 
-NEW = """    aad->convert(adsi, adsh->pbSrc, &nsrc, adsh->pbDst, &ndst);
+NEW = r"""    aad->convert(adsi, adsh->pbSrc, &nsrc, adsh->pbDst, &ndst);
     TRACE("[adpcm] src=%lu dst=%lu used=%lu/%lu flags=%lx\n", adsh->cbSrcLength,
           adsh->cbDstLength, nsrc, ndst, adsh->fdwConvert);
     if (!nsrc && adsh->cbSrcLength)
