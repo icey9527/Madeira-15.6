@@ -1433,6 +1433,7 @@ static void ios_soft_report( const char *why )
 
 static void ios_bigres_note( void *base, size_t size );   /* defined below */
 
+static int ios_safe_read64( uint64_t addr, uint64_t *out );
 static void ios_jumbo_census( void *hint, size_t size, void *result, unsigned st )
 {
     /* ml131: report the 512MB-reservation census alongside every jumbo call —
@@ -1493,6 +1494,29 @@ static void ios_jumbo_census( void *hint, size_t size, void *result, unsigned st
             (unsigned long long)ios_guest_ctx_rip(),
             (unsigned long)size, (unsigned long)(size >> 20), hint, result, st,
             (unsigned long)(ios_jumbo_granted >> 20), ios_jumbo_ok, ios_jumbo_fail);
+    /* madeira-bcd [jumbo-tls]: the main image's allocator stack at this point
+     * (God of War keeps it in its TLS[0] block: index at +0xc, table at +0xf0).
+     * GoW pushes its first heap before it reserves the arena this call makes;
+     * the build 237 fault found the index at 0 and table[0] empty. Also reads
+     * where that push would land if the index were zero-extended instead of
+     * sign-extended (block + 0x8000000f0). */
+    if (ios_jumbo_seq <= 4 && NtCurrentTeb())
+    {
+        uint64_t arr = 0, blk = 0, w8 = 0, t0 = 0, t1 = 0, zx = 0;
+        void **blocks = NtCurrentTeb()->ThreadLocalStoragePointer;
+        if (blocks && !ios_safe_read64( (uint64_t)(uintptr_t)blocks, &arr ) && arr)
+        {
+            blk = arr;
+            int ok8 = !ios_safe_read64( blk + 0x8, &w8 );
+            int ok0 = !ios_safe_read64( blk + 0xf0, &t0 );
+            int ok1 = !ios_safe_read64( blk + 0xf8, &t1 );
+            int okz = !ios_safe_read64( blk + 0x8000000f0ULL, &zx );
+            dprintf( 2, "[jumbo-tls] #%u tls0=%p +0x8=%s0x%llx (index %d) table[0]=%s0x%llx table[1]=%s0x%llx | zext-target %p=%s0x%llx\n",
+                     ios_jumbo_seq, (void *)(uintptr_t)blk, ok8 ? "" : "?", (unsigned long long)w8, (int)(w8 >> 32),
+                     ok0 ? "" : "?", (unsigned long long)t0, ok1 ? "" : "?", (unsigned long long)t1,
+                     (void *)(uintptr_t)(blk + 0x8000000f0ULL), okz ? "" : "unmapped ", (unsigned long long)zx );
+        }
+    }
 }
 
 
@@ -7933,6 +7957,34 @@ static void ios_wow_exclude_range( void **start, void **end, ULONG_PTR wb, ULONG
     else if ((ULONG_PTR)*end > we) *start = (void *)we;             /* nothing below: keep the high side */
     /* else the request lies entirely inside the slot: leave it alone and let
        the caller's own fallback decide */
+}
+
+/* madeira-bcd: the part of [start, end) above every window and placeholder
+ * that overlaps it (the side ios_wow_exclude_range drops). */
+static void ios_wow_high_side( void *start, void *end, void **hs, void **he )
+{
+    ULONG_PTR lo = (ULONG_PTR)start, hi = (ULONG_PTR)end, moved;
+    unsigned i;
+
+    do
+    {
+        moved = 0;
+        for (i = 0; i < ios_wow_window_count; i++)
+        {
+            ULONG_PTR wb = ios_wow_windows[i].base, we;
+            if (!wb) continue;
+            we = wb + ios_wow_slot_reservation( &ios_wow_windows[i] );
+            if (wb < hi && we > lo) { lo = we; moved = 1; }
+        }
+        for (i = 0; i < ios_wow_placeholder_count; i++)
+        {
+            ULONG_PTR pb = ios_wow_placeholders[i].base, pe;
+            if (!pb || ios_wow_placeholders[i].adopted) continue;
+            pe = pb + IOS_WOW_WINDOW_SIZE + (ios_wow_placeholders[i].guard_owned ? ios_wow_guard_size() : 0);
+            if (pb < hi && pe > lo) { lo = pe; moved = 1; }
+        }
+    } while (moved && lo < hi);
+    if (lo < hi) { *hs = (void *)lo; *he = (void *)hi; }
 }
 
 /* Keep an UNCONSTRAINED kernel-pick placement out of every guest window and
@@ -14665,6 +14717,7 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
     {
         void *start = address_space_start;
         void *end = min( user_space_limit, host_addr_space_limit );
+        void *wow_hi_start = NULL, *wow_hi_end = NULL;   /* madeira-bcd: band above the 32-bit windows */
         /* task #35 furniture ceiling — see its definition. Kernel-pick views
          * below 16GB (TEBs, stacks, anon views, section views incl. the 4GB
          * top-of-space tenant from ml106) stay below 464G-64K; only the PA
@@ -14709,7 +14762,23 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
             void *excl_start = start, *excl_end = end;
 
             ios_wow_exclude_windows( &excl_start, &excl_end );
-            if (excl_start < excl_end) { start = excl_start; end = excl_end; }
+            if (excl_start < excl_end)
+            {
+                /* madeira-bcd: exclusion keeps the LOW side of a window, so a
+                 * 64-bit program was confined below the first slot's placeholder
+                 * (0x7038000000..0x7100000000, 3.2 GB) and never used the band
+                 * above it. Remember that high side for when the low one is full. */
+                if (excl_end < end)
+                {
+                    /* the whole space above the windows, not only up to the furniture
+                     * ceiling: [0x7200000000, ceiling) was already taken on device (the
+                     * fallback never placed anything there); a caller's own limit_high
+                     * still bounds it */
+                    void *hi_end = limit_high ? end : (void *)min( user_space_limit, host_addr_space_limit );
+                    ios_wow_high_side( excl_end, hi_end, &wow_hi_start, &wow_hi_end );
+                }
+                start = excl_start; end = excl_end;
+            }
         }
 
         /* Once the session is armed, keep the free 4 GB-aligned candidate slot
@@ -14850,13 +14919,20 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
 
                 {
                 static unsigned long vs_storm;
-                static unsigned vs_fails;
+                static unsigned vs_fails, vs_relaxed;
                 /* ml366: FAILED must never be storm-gated — ml365's mmdevapi
                  * c0000017 loads left NO [va-scan] evidence because boot-time
                  * SLOW lines had already spent this site's storm budget. A
                  * failure is the one verdict worth a line every time (own
-                 * generous cap so a retry loop cannot flood the log). */
-                if (ptr ? ios_storm_gate( &vs_storm ) : (vs_fails++ < 256))
+                 * generous cap so a retry loop cannot flood the log).
+                 * madeira-bcd: a failure the unclamped retry absorbs gets its
+                 * own smaller budget (64, then every 1024th): in GTA V
+                 * Enhanced (log 2026-10-08 16:38:52, build 455) 256 of them
+                 * had spent the cap 7 minutes into the session, so nothing
+                 * could be seen when the Social Club helper failed to create
+                 * a thread 6 minutes later. */
+                if (ptr ? ios_storm_gate( &vs_storm )
+                        : ceiling_relaxable ? (++vs_relaxed <= 64 || !(vs_relaxed % 1024)) : (vs_fails++ < 256))
                 dprintf( 2, "[va-scan] %s window=%p..%p size=%p align=%p %s tries=%u skips=%u"
                             " | seen=%p..%p views=%u maxgap=%p tailgap=%p stop=%s"
                             " | firstfail=%p errno=%d(%s) %s%s\n",
@@ -14876,6 +14952,22 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
             {
                 TRACE( "got mem with map_free_area %p-%p\n", ptr, (char *)ptr + size );
                 goto done;
+            }
+            /* madeira-bcd: the band below the 32-bit windows is full; use the
+             * one above them before relaxing or failing (Ghost of Tsushima got
+             * STATUS_NO_MEMORY for 1 MB with ~8 GB free above the placeholder
+             * and stopped itself). */
+            if (wow_hi_start && (size_t)((char *)wow_hi_end - (char *)wow_hi_start) >= view_size)
+            {
+                static unsigned long hi_n;
+
+                ptr = map_reserved_area( wow_hi_start, wow_hi_end, host_size, top_down, unix_prot, align_mask );
+                if (!ptr) ptr = map_free_area( wow_hi_start, wow_hi_end, host_size, top_down, unix_prot, align_mask );
+                if (++hi_n <= 16 || !(hi_n % 256))
+                    dprintf( 2, "[wow-window] #%lu band below the 32-bit windows full: 0x%lx bytes %s above them in %p..%p%s\n",
+                             hi_n, (unsigned long)size, ptr ? "placed" : "NOT placed", wow_hi_start, wow_hi_end,
+                             ptr ? "" : " (falling back as before)" );
+                if (ptr) goto done;
             }
             /* ml117: THE CEILING IS ADVISORY, NEVER FATAL. It exists only to
              * bias Wine's furniture low so the top 16GB-aligned slots stay free
