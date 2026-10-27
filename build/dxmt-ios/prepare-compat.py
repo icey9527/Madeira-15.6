@@ -318,6 +318,19 @@ if source.count(draw_old) != 1:
 source = source.replace(draw_old, draw_new)
 probe_marker = 'madeira_d11_probe'
 
+# The render command stream itself: which commands the PE sends and with
+# which buffer index. The probe above saw shader names but never the
+# argument buffer, so this names what arrives instead.
+cmd_old = ('  while (next) {\n'
+           '    switch ((enum WMTRenderCommandType)next->type) {\n')
+cmd_new = ('  while (next) {\n'
+           '    if (madeira_d11_probe()) { static unsigned madeira_d11_cmds; if (madeira_d11_cmds++ < 80) fprintf(stderr, "[d11-cmd] type=%u%c", (unsigned)next->type, 10); }\n'
+           '    switch ((enum WMTRenderCommandType)next->type) {\n')
+if source.count(cmd_old) != 1:
+    raise SystemExit('DXMT winemetal_unix.c: render command loop changed')
+source = source.replace(cmd_old, cmd_new)
+probe_marker = 'madeira_d11_cmds'
+
 output = output_root / relative
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(source, encoding='utf-8')
