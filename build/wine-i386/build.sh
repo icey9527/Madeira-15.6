@@ -48,6 +48,14 @@ MAC_TARGET="$(uname -m)-apple-macos$(sw_vers -productVersion)"
 export CC="$(xcrun --sdk macosx -f clang) -target $MAC_TARGET -isysroot $SDKROOT"
 export CXX="$(xcrun --sdk macosx -f clang++) -target $MAC_TARGET -isysroot $SDKROOT"
 
+# ------------------------------------------------------------ source tree
+# Built from a prepared copy, not from wine/ directly: msadp32.acm carries a
+# Madeira fix (a block-short tail consumed nothing, so a caller looping "while
+# input remains" never advanced -- Galaxy Angel froze in acmStreamConvert).
+# Every other entry is a symlink back into the submodule.
+SOURCE="$R/build/wine-i386/source"
+python3 "$R/build/wine-i386/prepare.py" "$R/wine" "$SOURCE"
+
 # ---------------------------------------------------------------- configure
 # Its own tree, like build-arm64ec: reconfiguring build-macos with an extra
 # arch would regenerate every module Makefile the ntdll-unix build relies on.
@@ -55,7 +63,7 @@ if [ ! -f "$B/config.status" ]; then
     mkdir -p "$B"
     # --enable-winegstreamer: the PE half never touches GStreamer, but configure
     # drops the module without GStreamer's development files (docs/MEDIA.md).
-    (cd "$B" && ../configure --enable-win64 --enable-archs=i386 --without-x --without-vulkan \
+    (cd "$B" && "$SOURCE/configure" --enable-win64 --enable-archs=i386 --without-x --without-vulkan \
                              --without-freetype --without-gnutls --disable-tests \
                              --enable-winegstreamer)
 fi
