@@ -760,24 +760,39 @@ final class DepotDownloader {
         return hosts
     }
 
+    /// 上一次测速的结果：同一批主机 10 分钟内直接复用。
+    /// 每次 install/resume 都重新测一遍会白白多等 1–3 秒（日志里 first_ms=2500
+    /// 就是探测超时），而 CDN 的远近不会在几分钟内变。
+    private nonisolated static let rankedLock = NSLock()
+    private nonisolated(unsafe) static var rankedCache: (key: String, hosts: [String], at: Date)?
+
     /// 每个候选 CDN 发一个 HEAD，按响应时间从快到慢排；超时的排在最后。
-    /// 只挑「先问谁」的顺序，不改变可用服务器集合。
+    /// 只挑「先问谁」的顺序，不改变可用服务器集合。只探测前 8 台：
+    /// 后面的主机本来就排在后面，测了也轮不到，不值得让用户等。
     private nonisolated static func rankByLatency(_ hosts: [String]) async -> [String] {
+        let key = String(hosts.count) + "|" + hosts.joined(separator: ",")
+        rankedLock.lock()
+        if let cache = rankedCache, cache.key == key, Date().timeIntervalSince(cache.at) < 600 {
+            rankedLock.unlock()
+            return cache.hosts
+        }
+        rankedLock.unlock()
+        let probe = Array(hosts.prefix(8))
         var timed: [(host: String, seconds: Double)] = []
         await withTaskGroup(of: (String, Double)?.self) { group in
-            for host in hosts {
+            for host in probe {
                 group.addTask {
                     guard let url = URL(string: host.hasSuffix("/") ? host : host + "/") else { return nil }
                     var request = URLRequest(url: url)
                     request.httpMethod = "HEAD"
-                    request.timeoutInterval = 2.5
+                    request.timeoutInterval = 0.8
                     request.cachePolicy = .reloadIgnoringLocalCacheData
                     let started = Date()
                     do {
                         _ = try await Self.probeSession.data(for: request)
                         return (host, Date().timeIntervalSince(started))
                     } catch {
-                        return (host, 2.5)
+                        return (host, 0.8)
                     }
                 }
             }
@@ -789,16 +804,20 @@ final class DepotDownloader {
         timed.sort { $0.seconds < $1.seconds }
         let ranked = timed.map(\.host)
         let missing = hosts.filter { host in !ranked.contains(host) }
+        let result = ranked + missing
+        rankedLock.lock()
+        rankedCache = (key, result, Date())
+        rankedLock.unlock()
         let best = timed.first.map { Int($0.seconds * 1000) } ?? 0
         SteamLog.event("[steam-cdn] ranked=\(ranked.count) fastest=\(ranked.first ?? "-") first_ms=\(best)")
-        return ranked + missing
+        return result
     }
 
     /// 测速专用的会话：短超时，不缓存，不拖垮正常下载。
     private nonisolated static let probeSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 2.5
-        config.timeoutIntervalForResource = 3
+        config.timeoutIntervalForRequest = 0.8
+        config.timeoutIntervalForResource = 1.2
         config.httpMaximumConnectionsPerHost = 2
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
