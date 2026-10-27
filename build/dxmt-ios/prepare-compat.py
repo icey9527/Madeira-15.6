@@ -310,7 +310,7 @@ draw_new = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_or
             '        fprintf(stderr, "[d11-draw] enter%c", 10);\n'
             '        const void *cpu = madeira_d11_ab ? [(id<MTLBuffer>)madeira_d11_ab contents] : 0;\n'
             '        static unsigned madeira_d11_draws;\n'
-            '        if (madeira_d11_draws++ < 24)\n'
+            '        if (madeira_d11_draws++ < 300)\n'
             '          fprintf(stderr, "[d11-ab] pso=%p ab=%p off=%u cpu=%p%c", madeira_d11_pso, madeira_d11_ab, (unsigned)madeira_d11_ab_off, cpu, 10);\n'
             '        if (cpu) {\n'
             '          const uint64_t *q = (const uint64_t *)((const char *)cpu + madeira_d11_ab_off);\n'
