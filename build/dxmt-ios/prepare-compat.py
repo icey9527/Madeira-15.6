@@ -243,13 +243,88 @@ for pattern in ('[sampler gpuResourceID]', '[ret gpuResourceID]', '[t gpuResourc
         raise SystemExit(f'DXMT winemetal_unix.c still calls {pattern}')
 gpu_marker = 'madeira_gpu_resource_id'
 
+# Madeira-15.6 (D3D11 M0): log-only probe for the argument-buffer work. Names
+# the shader functions a pipeline was built from and dumps the first qwords of
+# the argument buffer at draw time, so the native side can be shown to see the
+# same table PE writes. MADEIRA_D11_PROBE=1 turns it on; nothing changes when
+# it is off.
+probe_helpers = r"""#include <stdarg.h>
+/* Madeira-15.6: D3D11 argument-buffer probe (M0). Log-only. */
+static int madeira_d11_probe(void) {
+  static int on = -1;
+  if (on < 0) {
+    const char *e = getenv("MADEIRA_D11_PROBE");
+    on = e && e[0] == '1' && !e[1];
+  }
+  return on;
+}
+static unsigned madeira_d11_said;
+static void madeira_d11_log(const char *fmt, ...) {
+  va_list ap;
+  if (madeira_d11_said++ >= 60) return;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  fflush(stderr);
+}
+static void *madeira_d11_pso, *madeira_d11_ab;
+static unsigned madeira_d11_ab_off;
+
+"""
+probe_site = '_MTLLibrary_newFunction(void *obj) {\n  struct unixcall_generic_obj_uint64_obj_ret *params = obj;\n'
+if source.count(probe_site) != 1:
+    raise SystemExit('DXMT winemetal_unix.c: newFunction site changed')
+source = source.replace(probe_site, probe_helpers + probe_site)
+# 2) function name at creation
+fn_old = '  params->ret = (obj_handle_t)[library newFunctionWithName:name];\n  [name release];\n'
+fn_new = ('  params->ret = (obj_handle_t)[library newFunctionWithName:name];\n'
+          '  if (madeira_d11_probe())\n'
+          '    madeira_d11_log("[d11-fn] %p %s\n", (void *)params->ret, [name UTF8String]);\n'
+          '  [name release];\n')
+if source.count(fn_old) != 1:
+    raise SystemExit('DXMT winemetal_unix.c: newFunction body changed')
+source = source.replace(fn_old, fn_new)
+# 3) pipeline -> function names
+# 4) remember pipeline and argument buffer
+setpso_old = ('      struct wmtcmd_render_setpso *body = (struct wmtcmd_render_setpso *)next;\n'
+              '      [encoder setRenderPipelineState:(id<MTLRenderPipelineState>)body->pso];\n')
+setpso_new = ('      struct wmtcmd_render_setpso *body = (struct wmtcmd_render_setpso *)next;\n'
+              '      madeira_d11_pso = (void *)body->pso;\n'
+              '      [encoder setRenderPipelineState:(id<MTLRenderPipelineState>)body->pso];\n')
+if source.count(setpso_old) != 1:
+    raise SystemExit('DXMT winemetal_unix.c: setPSO case changed')
+source = source.replace(setpso_old, setpso_new)
+for setter in ('setVertexBuffer', 'setFragmentBuffer'):
+    old = '      [encoder %s:(id<MTLBuffer>)body->buffer offset:body->offset atIndex:body->index];\n' % setter
+    new = ('      if (body->index == 30) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
+           + old)
+    if source.count(old) != 1:
+        raise SystemExit('DXMT winemetal_unix.c: %s site changed' % setter)
+    source = source.replace(old, new)
+# 5) dump the table at draw
+draw_old = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_order_relaxed);\n'
+            '      [encoder drawPrimitives:(MTLPrimitiveType)body->primitive_type\n')
+draw_new = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_order_relaxed);\n'
+            '      if (madeira_d11_probe() && madeira_d11_ab) {\n'
+            '        const uint64_t *q = (const uint64_t *)((const char *)[(id<MTLBuffer>)madeira_d11_ab contents] + madeira_d11_ab_off);\n'
+            '        if (q)\n'
+            '          madeira_d11_log("[d11-ab] pso=%p q=%#llx,%#llx,%#llx,%#llx,%#llx,%#llx\n", madeira_d11_pso,\n'
+            '                          (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2],\n'
+            '                          (unsigned long long)q[3], (unsigned long long)q[4], (unsigned long long)q[5]);\n'
+            '      }\n'
+            '      [encoder drawPrimitives:(MTLPrimitiveType)body->primitive_type\n')
+if source.count(draw_old) != 1:
+    raise SystemExit('DXMT winemetal_unix.c: draw site changed')
+source = source.replace(draw_old, draw_new)
+probe_marker = 'madeira_d11_probe'
+
 output = output_root / relative
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(source, encoding='utf-8')
 
 # The file the build compiles is the only thing that matters, so check it.
 written = output.read_text(encoding='utf-8')
-for marker in (mtlcad_marker, gpu_marker):
+for marker in (mtlcad_marker, gpu_marker, probe_marker):
     if marker not in written:
         raise SystemExit(f'{relative}: {marker!r} missing from the written file')
 print(f'iOS {sys.argv[3]} gpuResourceID guarded in {relative} ({total} sites)')
