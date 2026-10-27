@@ -9840,7 +9840,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
                     {
                         uint32_t words[24];
                         mach_vm_size_t gw = 0;
-                        if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)cs[5],
+                        /* gregs hold the GUEST address; the host form is the
+                         * 32-bit window base plus it. Reading cs[5] directly
+                         * asked the kernel for an address below 4 GB and got
+                         * nothing back (the first cut of this dump never
+                         * printed). */
+                        extern unsigned long ios_wow_base(void);
+                        const uint64_t guest_sp_host = (uint64_t)ios_wow_base() + cs[5];
+                        if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)guest_sp_host,
                                 sizeof(words), (mach_vm_address_t)words, &gw ) == KERN_SUCCESS
                             && gw == sizeof(words))
                         {
