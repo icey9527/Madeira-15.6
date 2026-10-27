@@ -250,6 +250,7 @@ gpu_marker = 'madeira_gpu_resource_id'
 # it is off.
 NL = chr(92) + 'n'   # a C string's newline, written without an escape in this file
 probe_helpers = r"""#include <stdarg.h>
+#include <unistd.h>
 /* Madeira-15.6: D3D11 argument-buffer probe (M0). Log-only. */
 static int madeira_d11_probe(void) {
   static int on = -1;
@@ -297,7 +298,7 @@ if source.count(setpso_old) != 1:
 source = source.replace(setpso_old, setpso_new)
 for setter in ('setVertexBuffer', 'setFragmentBuffer'):
     old = '      [encoder %s:(id<MTLBuffer>)body->buffer offset:body->offset atIndex:body->index];\n' % setter
-    new = ('      if (madeira_d11_probe()) { static unsigned madeira_d11_bufs; if (madeira_d11_bufs++ < 40) fprintf(stderr, "[d11-buf] idx=%u off=%u%c", (unsigned)body->index, (unsigned)body->offset, 10); } if (body->index >= 16) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
+    new = ('      if (madeira_d11_probe()) { static unsigned madeira_d11_bufs; if (madeira_d11_bufs++ < 40) fprintf(stderr, "[d11-buf] pid=%d idx=%u off=%u%c", (int)getpid(), (unsigned)body->index, (unsigned)body->offset, 10); } if (body->index >= 16) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
            + old)
     if source.count(old) != 1:
         raise SystemExit('DXMT winemetal_unix.c: %s site changed' % setter)
@@ -311,7 +312,7 @@ draw_new = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_or
             '        const void *cpu = madeira_d11_ab ? [(id<MTLBuffer>)madeira_d11_ab contents] : 0;\n'
             '        static unsigned madeira_d11_draws;\n'
             '        if (madeira_d11_draws++ < 300)\n'
-            '          fprintf(stderr, "[d11-ab] pso=%p ab=%p off=%u cpu=%p%c", madeira_d11_pso, madeira_d11_ab, (unsigned)madeira_d11_ab_off, cpu, 10);\n'
+            '          fprintf(stderr, "[d11-ab] pid=%d pso=%p ab=%p off=%u cpu=%p%c", (int)getpid(), madeira_d11_pso, madeira_d11_ab, (unsigned)madeira_d11_ab_off, cpu, 10);\n'
             '        if (cpu) {\n'
             '          const uint64_t *q = (const uint64_t *)((const char *)cpu + madeira_d11_ab_off);\n'
             '          fprintf(stderr, "[d11-ab] q=%#llx,%#llx,%#llx,%#llx%c", (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3], 10);\n'
