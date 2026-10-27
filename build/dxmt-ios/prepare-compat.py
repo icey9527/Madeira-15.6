@@ -248,6 +248,7 @@ gpu_marker = 'madeira_gpu_resource_id'
 # the argument buffer at draw time, so the native side can be shown to see the
 # same table PE writes. MADEIRA_D11_PROBE=1 turns it on; nothing changes when
 # it is off.
+NL = chr(92) + 'n'   # a C string's newline, written without an escape in this file
 probe_helpers = r"""#include <stdarg.h>
 /* Madeira-15.6: D3D11 argument-buffer probe (M0). Log-only. */
 static int madeira_d11_probe(void) {
@@ -305,12 +306,15 @@ for setter in ('setVertexBuffer', 'setFragmentBuffer'):
 draw_old = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_order_relaxed);\n'
             '      [encoder drawPrimitives:(MTLPrimitiveType)body->primitive_type\n')
 draw_new = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_order_relaxed);\n'
-            '      if (madeira_d11_probe() && madeira_d11_ab) {\n'
-            '        const uint64_t *q = (const uint64_t *)((const char *)[(id<MTLBuffer>)madeira_d11_ab contents] + madeira_d11_ab_off);\n'
-            '        if (q)\n'
-            '          madeira_d11_log("[d11-ab] pso=%p q=%#llx,%#llx,%#llx,%#llx,%#llx,%#llx\\n", madeira_d11_pso,\n'
-            '                          (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2],\n'
-            '                          (unsigned long long)q[3], (unsigned long long)q[4], (unsigned long long)q[5]);\n'
+            '      if (madeira_d11_probe()) {\n'
+            '        const void *cpu = madeira_d11_ab ? [(id<MTLBuffer>)madeira_d11_ab contents] : 0;\n'
+            '        static unsigned madeira_d11_draws;\n'
+            '        if (madeira_d11_draws++ < 24)\n'
+            '          fprintf(stderr, "[d11-ab] pso=%p ab=%p off=%u cpu=%p%c", madeira_d11_pso, madeira_d11_ab, (unsigned)madeira_d11_ab_off, cpu, 10);\n'
+            '        if (cpu) {\n'
+            '          const uint64_t *q = (const uint64_t *)((const char *)cpu + madeira_d11_ab_off);\n'
+            '          fprintf(stderr, "[d11-ab] q=%#llx,%#llx,%#llx,%#llx%c", (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3], 10);\n'
+            '        }\n'
             '      }\n'
             '      [encoder drawPrimitives:(MTLPrimitiveType)body->primitive_type\n')
 if source.count(draw_old) != 1:
