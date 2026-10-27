@@ -307,6 +307,7 @@ draw_old = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_or
             '      [encoder drawPrimitives:(MTLPrimitiveType)body->primitive_type\n')
 draw_new = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_order_relaxed);\n'
             '      if (madeira_d11_probe()) {\n'
+            '        fprintf(stderr, "[d11-draw] enter%c", 10);\n'
             '        const void *cpu = madeira_d11_ab ? [(id<MTLBuffer>)madeira_d11_ab contents] : 0;\n'
             '        static unsigned madeira_d11_draws;\n'
             '        if (madeira_d11_draws++ < 24)\n'
