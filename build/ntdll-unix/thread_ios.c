@@ -1466,9 +1466,8 @@ NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR limit, SIZE_T reserve_size, SIZE
             static int said;
             teb->Tib.StackLimit = (ULONG_PTR)thread_data->kernel_stack;
             if (said++ < 3)
-                ERR_(seh)("[stack-union] ml1204 frame check spans the kernel stack too: "
-                          "[%p, %p)
-", thread_data->kernel_stack, stack.StackBase);
+                ERR_(seh)("[stack-union] ml1204 frame check spans the kernel stack too: [%p, %p)\n",
+                          thread_data->kernel_stack, stack.StackBase);
         }
         teb->DeallocationStack = stack.DeallocationStack;
 
