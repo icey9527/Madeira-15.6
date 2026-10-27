@@ -324,7 +324,7 @@ probe_marker = 'madeira_d11_probe'
 cmd_old = ('  while (next) {\n'
            '    switch ((enum WMTRenderCommandType)next->type) {\n')
 cmd_new = ('  while (next) {\n'
-           '    if (madeira_d11_probe()) { static unsigned madeira_d11_cmds; if (madeira_d11_cmds++ < 80) fprintf(stderr, "[d11-cmd] type=%u%c", (unsigned)next->type, 10); }\n'
+           '    if (madeira_d11_probe()) { static unsigned madeira_d11_cmds; if (madeira_d11_cmds++ < 400) fprintf(stderr, "[d11-cmd] type=%u%c", (unsigned)next->type, 10); }\n'
            '    switch ((enum WMTRenderCommandType)next->type) {\n')
 if source.count(cmd_old) != 1:
     raise SystemExit('DXMT winemetal_unix.c: render command loop changed')
