@@ -35,7 +35,7 @@ NEW = """  if (GuestRIP < 0x10000) {
 
 
 def main(root):
-    path = Path(root) / "FEXCore/Source/Interface/Core/Core.cpp"
+    path = Path(root) / "FEX/FEXCore/Source/Interface/Core/Core.cpp"
     text = path.read_text(encoding="utf-8")
     if NEW.splitlines()[1] in text:
         print("FEX low-RIP guard already patched")
