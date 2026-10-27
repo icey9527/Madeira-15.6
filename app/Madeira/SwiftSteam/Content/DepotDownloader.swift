@@ -49,7 +49,7 @@ final class DepotDownloader {
     private let session: SteamCMSession
     private var depotKeys: [UInt32: Data] = [:]
     private var cdnAuthTokens: [String: String] = [:]  // "depot|host" -> "?auth=…" fragment
-    private let maxConcurrentChunks = 8
+    private let maxConcurrentChunks = 16   // Madeira-15.6: 8 to 16; the CDN is per-connection limited
     private let attemptsPerChunk = 5
     private let hostPoolSize = 6
 
@@ -59,7 +59,7 @@ final class DepotDownloader {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 300
-        config.httpMaximumConnectionsPerHost = 8
+        config.httpMaximumConnectionsPerHost = 16
         return URLSession(configuration: config)
     }()
 
