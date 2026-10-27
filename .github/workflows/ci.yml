@@ -118,10 +118,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: ccache-macos26-v2-${{ runner.arch }}-${{ hashFiles('build/fex-ios/build.sh') }}-${{ github.run_id }}
+          key: ccache-macos26-v2-${{ runner.arch }}-${{ hashFiles('build/fex-ios/build.sh', 'build/fex-ios/prepare.py') }}-${{ github.run_id }}
           restore-keys: |
             ccache-macos26-v2-${{ runner.arch }}-
-            ${{ runner.arch == 'X64' && format('ccache-macos26-v1-{0}-', hashFiles('build/fex-ios/build.sh')) || 'ccache-macos26-ARM64-v1-' }}
+            ${{ runner.arch == 'X64' && format('ccache-macos26-v1-{0}-', hashFiles('build/fex-ios/build.sh', 'build/fex-ios/prepare.py')) || 'ccache-macos26-ARM64-v1-' }}
 
       - name: Cache VC++ 运行时 DLL（12 个，内容静态，静态 key）
         if: env.APP_ONLY != '1'
@@ -304,7 +304,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: FEX/build-ios
-          key: fex-build-ios15.6-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.fexsha.outputs.sha }}-${{ hashFiles('build/fex-ios/build.sh') }}
+          key: fex-build-ios15.6-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.fexsha.outputs.sha }}-${{ hashFiles('build/fex-ios/build.sh', 'build/fex-ios/prepare.py') }}
 
       - name: Restore FEX WoW64 module build
         id: fex-wow64-cache
@@ -315,7 +315,7 @@ jobs:
           # build/fex-wow64/build.sh 从 pinned FEX 源码构建，key 里带上 build-all.sh
           # 的哈希，补丁一改就必然重建。
           path: FEX/build-wow64
-          key: fex-wow64-ios15.6-${{ runner.arch }}-${{ steps.fexsha.outputs.sha }}-${{ hashFiles('build/fex-wow64/build.sh', 'tools/ci/build-all.sh') }}
+          key: fex-wow64-ios15.6-${{ runner.arch }}-${{ steps.fexsha.outputs.sha }}-${{ hashFiles('build/fex-wow64/build.sh', 'tools/ci/build-all.sh', 'build/fex-ios/prepare.py') }}
 
       - name: Restore FEX ARM64EC module build
         id: fex-arm64ec-cache
@@ -326,7 +326,7 @@ jobs:
           # 由 build/fex-arm64ec/build.sh 从 pinned FEX 源码构建，key 带上两个
           # build 脚本的哈希（build-all.sh 里有 FEX 的 CI 侧补丁）。
           path: FEX/build-arm64ec
-          key: fex-arm64ec-ios15.6-${{ runner.arch }}-${{ steps.fexsha.outputs.sha }}-${{ hashFiles('build/fex-arm64ec/build.sh', 'tools/ci/build-all.sh') }}
+          key: fex-arm64ec-ios15.6-${{ runner.arch }}-${{ steps.fexsha.outputs.sha }}-${{ hashFiles('build/fex-arm64ec/build.sh', 'tools/ci/build-all.sh', 'build/fex-ios/prepare.py') }}
 
       - name: native（FEXCore）
         id: native

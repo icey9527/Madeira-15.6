@@ -4,6 +4,7 @@
 # development build's CMakeCache.
 set -eu
 R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+python3 "$R/build/fex-ios/prepare.py" "$R"
 B="$R/FEX/build-ios"
 cmake -S "$R/FEX" -B "$B" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}" -DCMAKE_BUILD_TYPE=Release \

@@ -24,6 +24,7 @@ set -eu
 R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin:$PATH"
 unset IPHONEOS_DEPLOYMENT_TARGET SDKROOT CC CXX
+python3 "$R/build/fex-ios/prepare.py" "$R"   # the low-RIP guard patch, idempotent
 B="$R/FEX/build-arm64ec"
 TOOLCHAIN="$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal"
 if [ ! -f "$B/CMakeCache.txt" ]; then

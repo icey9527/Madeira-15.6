@@ -10,6 +10,7 @@ export PATH="$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin:$PATH"
 # The workflow exports IPHONEOS_DEPLOYMENT_TARGET/SDKROOT for the iOS half; the
 # PE cross build here is a macOS-host build and must not inherit them.
 unset IPHONEOS_DEPLOYMENT_TARGET SDKROOT CC CXX
+python3 "$R/build/fex-ios/prepare.py" "$R"   # the low-RIP guard patch, idempotent
 B="$R/FEX/build-wow64"
 TOOLCHAIN="$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal"
 # Re-root package discovery inside the MinGW sysroot and turn the three
