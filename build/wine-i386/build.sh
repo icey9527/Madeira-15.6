@@ -118,6 +118,10 @@ for t in "${TARGETS[@]}"; do
 done
 if [ ${#FAILED[@]} -gt 0 ]; then
     printf 'FAIL %s\n' "${FAILED[@]}"
+    # The module log is not in the uploaded artifacts: print what the last
+    # compile said instead of only naming the module.
+    echo "== last 40 lines of $LOG =="
+    tail -40 "$LOG"
     echo "== ${#FAILED[@]} modules failed; nothing installed (log: $LOG) =="
     exit 1
 fi
