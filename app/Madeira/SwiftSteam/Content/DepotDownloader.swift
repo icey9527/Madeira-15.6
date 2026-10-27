@@ -44,6 +44,30 @@ struct SteamDownloadProgress: Equatable, Sendable {
 ///   directory names are folded case-insensitively (Windows semantics on a
 ///   case-sensitive iOS volume).
 /// - Each chunk retries on other content servers before the install fails.
+/// Settings › Steam › 下载服务器.
+///
+/// Valve returns the CDN hosts a download may use in its own order, which is
+/// not necessarily the fastest from this network. `nearest` measures how long
+/// each host takes to answer a HEAD request before any depot bytes are
+/// requested, and puts the quickest first; `directory` keeps Valve's order.
+enum SteamServerChoice: String, CaseIterable, Hashable {
+    case directory = "directory"
+    case nearest = "nearest"
+
+    static let defaultsKey = "madeiraSteamServerChoice"
+
+    static var current: SteamServerChoice {
+        SteamServerChoice(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .nearest
+    }
+
+    var label: String {
+        switch self {
+        case .directory: return "按 Valve 分配的顺序"
+        case .nearest: return "测速后选最快的（默认）"
+        }
+    }
+}
+
 @MainActor
 final class DepotDownloader {
     private let session: SteamCMSession
@@ -670,8 +694,55 @@ final class DepotDownloader {
         }
         let fallback = "https://steampipe.akamaized.net"
         if !hosts.contains(fallback) { hosts.append(fallback) }
+        if SteamServerChoice.current == .nearest, hosts.count > 1 {
+            hosts = await Self.rankByLatency(hosts)
+        }
         return hosts
     }
+
+    /// 每个候选 CDN 发一个 HEAD，按响应时间从快到慢排；超时的排在最后。
+    /// 只挑「先问谁」的顺序，不改变可用服务器集合。
+    private nonisolated static func rankByLatency(_ hosts: [String]) async -> [String] {
+        var timed: [(host: String, seconds: Double)] = []
+        await withTaskGroup(of: (String, Double)?.self) { group in
+            for host in hosts {
+                group.addTask {
+                    guard let url = URL(string: host.hasSuffix("/") ? host : host + "/") else { return nil }
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "HEAD"
+                    request.timeoutInterval = 2.5
+                    request.cachePolicy = .reloadIgnoringLocalCacheData
+                    let started = Date()
+                    do {
+                        _ = try await Self.probeSession.data(for: request)
+                        return (host, Date().timeIntervalSince(started))
+                    } catch {
+                        return (host, 2.5)
+                    }
+                }
+            }
+            for await result in group {
+                if let result { timed.append((result.0, result.1)) }
+            }
+        }
+        guard !timed.isEmpty else { return hosts }
+        timed.sort { $0.seconds < $1.seconds }
+        let ranked = timed.map(\.host)
+        let missing = hosts.filter { host in !ranked.contains(host) }
+        let best = timed.first.map { Int($0.seconds * 1000) } ?? 0
+        SteamLog.event("[steam-cdn] ranked=\(ranked.count) fastest=\(ranked.first ?? "-") first_ms=\(best)")
+        return ranked + missing
+    }
+
+    /// 测速专用的会话：短超时，不缓存，不拖垮正常下载。
+    private nonisolated static let probeSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 2.5
+        config.timeoutIntervalForResource = 3
+        config.httpMaximumConnectionsPerHost = 2
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
 
     nonisolated static func usableContentHost(_ host: String) -> Bool {
         guard host.contains("."), !host.contains(" "), !host.contains("/"), !host.contains("*"),

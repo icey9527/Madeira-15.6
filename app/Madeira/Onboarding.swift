@@ -704,6 +704,8 @@ struct SteamSettingsSection: View {
     @State private var confirmSignOut = false
     /// Settings › Steam › Game language (SteamLanguage); "" follows the device.
     @State private var language = SteamLanguage.chosen ?? ""
+    /// Settings › Steam › 下载服务器：Valve 的顺序，或先测速再排。
+    @State private var serverChoice = SteamServerChoice.current
 
     /// Shown when Steam sign-in or Madeira Dock is available.
     static var shown: Bool { SteamSignIn.isEnabled || MadeiraDock.enabled }
@@ -721,6 +723,14 @@ struct SteamSettingsSection: View {
                 ForEach(SteamLanguage.all, id: \.code) { Text($0.name).tag($0.code) }
             }
             .onChange(of: language) { value in SteamLanguage.choose(value.isEmpty ? nil : value) }
+            Picker("下载服务器", selection: $serverChoice) {
+                ForEach(SteamServerChoice.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .onChange(of: serverChoice) { value in
+                UserDefaults.standard.set(value.rawValue, forKey: SteamServerChoice.defaultsKey)
+            }
+            Text("下载前先测一遍 Valve 给出的服务器，按响应速度排序；已下载的文件不受影响。")
+                .font(.caption).foregroundStyle(.secondary)
             if MadeiraDock.enabled {
                 Button { open(.dock) } label: { Label("Madeira Dock", systemImage: "shippingbox") }
                 if let status = dock.status {
