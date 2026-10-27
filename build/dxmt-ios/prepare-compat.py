@@ -271,7 +271,7 @@ static void *madeira_d11_pso, *madeira_d11_ab;
 static unsigned madeira_d11_ab_off;
 
 """
-probe_site = '_MTLLibrary_newFunction(void *obj) {\n  struct unixcall_generic_obj_uint64_obj_ret *params = obj;\n'
+probe_site = 'static NTSTATUS\n_MTLLibrary_newFunction(void *obj) {\n  struct unixcall_generic_obj_uint64_obj_ret *params = obj;\n'
 if source.count(probe_site) != 1:
     raise SystemExit('DXMT winemetal_unix.c: newFunction site changed')
 source = source.replace(probe_site, probe_helpers + probe_site)
@@ -279,7 +279,7 @@ source = source.replace(probe_site, probe_helpers + probe_site)
 fn_old = '  params->ret = (obj_handle_t)[library newFunctionWithName:name];\n  [name release];\n'
 fn_new = ('  params->ret = (obj_handle_t)[library newFunctionWithName:name];\n'
           '  if (madeira_d11_probe())\n'
-          '    madeira_d11_log("[d11-fn] %p %s\n", (void *)params->ret, [name UTF8String]);\n'
+          '    madeira_d11_log("[d11-fn] %p %s\\n", (void *)params->ret, [name UTF8String]);\n'
           '  [name release];\n')
 if source.count(fn_old) != 1:
     raise SystemExit('DXMT winemetal_unix.c: newFunction body changed')
@@ -308,7 +308,7 @@ draw_new = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_or
             '      if (madeira_d11_probe() && madeira_d11_ab) {\n'
             '        const uint64_t *q = (const uint64_t *)((const char *)[(id<MTLBuffer>)madeira_d11_ab contents] + madeira_d11_ab_off);\n'
             '        if (q)\n'
-            '          madeira_d11_log("[d11-ab] pso=%p q=%#llx,%#llx,%#llx,%#llx,%#llx,%#llx\n", madeira_d11_pso,\n'
+            '          madeira_d11_log("[d11-ab] pso=%p q=%#llx,%#llx,%#llx,%#llx,%#llx,%#llx\\n", madeira_d11_pso,\n'
             '                          (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2],\n'
             '                          (unsigned long long)q[3], (unsigned long long)q[4], (unsigned long long)q[5]);\n'
             '      }\n'
