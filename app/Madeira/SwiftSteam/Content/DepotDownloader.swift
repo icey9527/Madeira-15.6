@@ -47,60 +47,216 @@ struct SteamDownloadProgress: Equatable, Sendable {
 /// 设置 › Steam › 下载服务器。
 ///
 /// Steam 的 content server 列表按 **cell id**（下载地区）返回，Windows 客户端
-/// 的「下载地区」设置改的就是这个编号；编号表见 `regions`（与 Steam 客户端
-/// 一致，0 表示自动）。`fastest` 不指定地区，而是把 Valve 给出的主机逐个计时
-/// 后把最快的排在前面。
+/// 的「下载地区」设置改的就是这个编号；编号表见 `regions`（Steam 客户端
+/// 的完整表，1–184）。不指定地区时用登录时 Steam 分配的那个。
 enum SteamServerChoice: Hashable {
+    /// Valve 的下载地区。选中后请求 content server 时用这个 cell id，
+    /// 与 Windows 客户端「下载地区」的作用相同；`.auto` 用登录时 Steam 给的编号。
     case auto
-    case fastest
     case region(Int)
 
     static let defaultsKey = "madeiraSteamServerChoice"
 
-    /// 常用地区，编号取自 Steam 客户端的地区表（0–184）。
+    /// Steam 客户端的完整地区表（cell id 1–184，名称取自 Steam 自己）。
+    /// 常用地区换成中文名，其余保留原文，便于对照 Steam 客户端。
     static let regions: [(cell: Int, name: String)] = [
+        (1, "美国 - 芝加哥"),
+        (2, "美国 - 纽约"),
+        (3, "West Atlantic"),
+        (4, "英国 - 伦敦"),
+        (5, "德国 - 法兰克福"),
+        (6, "W. Canada to US"),
+        (7, "Russia - Moscow"),
+        (8, "韩国 - 首尔"),
+        (9, "台湾"),
+        (10, "US - San Jose"),
+        (11, "US - Phoenix"),
+        (12, "US - Miami"),
+        (13, "East Atlantic"),
+        (14, "法国 - 巴黎"),
+        (15, "荷兰"),
+        (16, "Romania"),
+        (17, "West Pacific"),
+        (18, "East Pacific"),
+        (19, "Asia To Australia"),
+        (20, "Canada - Toronto"),
+        (21, "E. Canada to US"),
+        (22, "新西兰"),
+        (23, "NA to SA"),
+        (24, "West Africa to UK"),
+        (25, "巴西 - 圣保罗"),
+        (26, "South Africa - Johannesburg"),
+        (27, "俄罗斯 - 欧洲"),
+        (28, "Australia - NSW (Internode)"),
+        (29, "Iceland, Greenland, and Faroe Islands"),
+        (30, "Israel"),
+        (31, "美国 - 西雅图"),
+        (32, "日本 - 东京"),
+        (33, "香港"),
+        (34, "泰国"),
+        (35, "新加坡"),
+        (36, "India - Mumbai"),
+        (37, "意大利 - 罗马"),
+        (38, "Poland - Warsaw"),
+        (39, "Russia - Yekaterinburg"),
+        (40, "西班牙和葡萄牙"),
+        (41, "Denmark"),
+        (42, "Czech Republic"),
+        (43, "Greece"),
+        (44, "印度尼西亚"),
+        (45, "菲律宾"),
         (46, "中国大陆 - 北京"),
         (47, "中国大陆 - 上海"),
         (48, "中国大陆 - 成都"),
+        (49, "US - Denver"),
+        (50, "US - Atlanta"),
+        (51, "Australia - QLD"),
+        (52, "澳大利亚 - 新南威尔士"),
+        (53, "澳大利亚 - 维多利亚"),
+        (54, "Australia - SA"),
+        (55, "Australia - WA"),
+        (56, "Australia - NSW (3FL)"),
+        (57, "Australia - VIC (Gamespace)"),
+        (58, "Australia - SA (Adam Internet)"),
+        (59, "Australia - SA (Internode)"),
+        (60, "Australia - WA (3FL)"),
+        (61, "Australia - WA (EGN)"),
+        (62, "Russia - Novosibirsk"),
+        (63, "US - Washington, DC"),
+        (64, "美国 - 洛杉矶"),
+        (65, "美国 - 达拉斯"),
+        (66, "Sweden - Stockholm"),
+        (67, "Norway"),
+        (68, "Finland"),
+        (69, "Ireland"),
+        (70, "Cambodia"),
+        (71, "越南"),
+        (72, "马来西亚"),
+        (73, "Ukraine"),
+        (74, "US - San Diego"),
+        (75, "US - Sacramento"),
+        (76, "US - Minneapolis"),
+        (77, "US - St. Louis"),
+        (78, "US - Houston"),
+        (79, "US - Detroit"),
+        (80, "US - Pittsburgh"),
+        (81, "Canada - Montreal"),
+        (82, "US - Boston"),
+        (83, "US - Philadelphia"),
+        (84, "US - Charlotte"),
+        (85, "UK - Manchester"),
+        (86, "Belgium"),
+        (87, "Germany - Dusseldorf"),
+        (88, "Switzerland"),
+        (89, "Germany - Hamburg"),
+        (90, "Germany - Berlin"),
+        (91, "Germany - Munich"),
+        (92, "Austria"),
+        (93, "Hungary"),
+        (94, "Canada - Vancouver"),
+        (95, "US - Columbus"),
+        (96, "France - Marseille"),
+        (97, "South Africa - Cape Town"),
+        (98, "South Africa - Cape Town (MWEB)"),
+        (99, "South Africa - Johannesburg (MWEB)"),
+        (100, "South Africa - Cape Town (Web Africa)"),
+        (101, "South Africa - Johannesburg (IS Gaming)"),
+        (102, "LAN Event (USA)"),
+        (103, "LAN Event (Europe)"),
+        (104, "LAN Event (Asia)"),
+        (105, "US - Washington, DC (Comcast)"),
+        (106, "US - Seattle (Comcast)"),
+        (107, "New Zealand (Helix)"),
+        (108, "New Zealand (Orcon)"),
+        (109, "New Zealand (Slingshot)"),
+        (110, "New Zealand (snap!)"),
+        (111, "New Zealand (TelstraClear)"),
+        (112, "New Zealand (InSPire)"),
+        (113, "New Zealand (Xnet)"),
+        (114, "MX to US"),
+        (115, "Mexico"),
+        (116, "Argentina"),
+        (117, "Chile"),
+        (118, "Peru"),
+        (119, "Colombia"),
+        (120, "Australia - WA (WAIX)"),
+        (121, "Australia - VIC (VIC-IX)"),
+        (122, "Australia - QLD (QLD-IX)"),
+        (123, "Middle East to Europe"),
+        (124, "Turkey"),
+        (125, "Egypt"),
+        (126, "Saudi Arabia"),
+        (127, "United Arab Emirates"),
+        (128, "Pakistan"),
+        (129, "Luxembourg"),
+        (130, "West Africa"),
+        (131, "East Africa"),
+        (132, "Northwest Africa"),
+        (133, "Canada - Edmonton"),
+        (134, "Canada - Calgary"),
+        (135, "Canada - Winnipeg"),
+        (136, "Canada - Ottawa"),
+        (137, "China (Perfect World Unicom)"),
+        (138, "China (Perfect World Telecom)"),
+        (139, "Central America"),
+        (140, "Caribbean"),
+        (141, "India - Chennai"),
+        (142, "India - Delhi"),
+        (143, "India - Bangalore"),
+        (144, "India - Hyderabad"),
+        (145, "India - Kolkata"),
+        (146, "US - Honolulu"),
+        (147, "US - Anchorage"),
         (148, "中国大陆 - 广州"),
+        (149, "Russia - St. Petersburg"),
+        (150, "Russia - Rostov-na-Donu"),
+        (151, "Russia - Kazan"),
+        (152, "Russia - Vladivostok"),
+        (153, "Brazil - Recife"),
+        (154, "Brazil - Brasilia"),
+        (155, "Brazil - Rio de Janeiro"),
+        (156, "Brazil - Porto Alegre"),
+        (157, "Russia - Irkutsk"),
+        (158, "Kazakhstan"),
         (159, "中国大陆 - 武汉"),
         (160, "中国大陆 - 西安"),
+        (161, "Mongolia"),
+        (162, "Venezuela"),
+        (163, "Ecuador"),
+        (164, "Bolivia"),
+        (165, "Belarus"),
+        (166, "中国大陆 - 哈尔滨"),
+        (167, "中国大陆 - 昆明"),
         (168, "中国大陆 - 青岛"),
-        (9, "台湾"),
-        (33, "香港"),
-        (35, "新加坡"),
-        (32, "日本 - 东京"),
+        (169, "中国大陆 - 乌鲁木齐"),
+        (170, "中国大陆 - 郑州"),
+        (171, "中国大陆 - 长沙"),
+        (172, "Caucasus"),
+        (173, "Central Asia"),
+        (174, "Pacific Islands"),
+        (175, "Sweden - Malmo"),
+        (176, "Sweden - Gothenburg"),
+        (177, "日本 - 札幌"),
+        (178, "日本 - 仙台"),
+        (179, "日本 - 名古屋"),
         (180, "日本 - 大阪"),
-        (8, "韩国 - 首尔"),
+        (181, "日本 - 福冈"),
         (182, "韩国 - 釜山"),
-        (64, "美国 - 洛杉矶"),
-        (31, "美国 - 西雅图"),
-        (1, "美国 - 芝加哥"),
-        (2, "美国 - 纽约"),
-        (65, "美国 - 达拉斯"),
-        (4, "英国 - 伦敦"),
-        (5, "德国 - 法兰克福"),
-        (15, "荷兰"),
-        (14, "法国 - 巴黎"),
-        (25, "巴西 - 圣保罗"),
-        (27, "俄罗斯 - 欧洲"),
-        (22, "新西兰"),
-        (53, "澳大利亚 - 维多利亚"),
+        (183, "Poland - Katowice"),
+        (184, "Italy - Milan"),
     ]
 
     static var current: SteamServerChoice {
         let raw = UserDefaults.standard.string(forKey: defaultsKey) ?? ""
-        if raw == "auto" { return .auto }
         if raw.hasPrefix("region:"), let cell = Int(raw.dropFirst("region:".count)) {
             return .region(cell)
         }
-        return .fastest
+        return .auto
     }
 
     var stored: String {
         switch self {
         case .auto: return "auto"
-        case .fastest: return "fastest"
         case .region(let cell): return "region:\(cell)"
         }
     }
@@ -108,16 +264,15 @@ enum SteamServerChoice: Hashable {
     var label: String {
         switch self {
         case .auto: return "自动（Valve 分配）"
-        case .fastest: return "测速后选最快的（默认）"
         case .region(let cell):
             return Self.regions.first { $0.cell == cell }?.name ?? "地区 \(cell)"
         }
     }
 
-    /// 请求 content server 列表时使用的 cell id；`fastest` 用 0（不限地区）。
+    /// 请求 content server 列表时使用的 cell id；`.auto` 用登录时 Steam 给的那个。
     var cellID: UInt32? {
         switch self {
-        case .auto, .fastest: return nil
+        case .auto: return nil
         case .region(let cell): return UInt32(cell)
         }
     }
@@ -754,74 +909,8 @@ final class DepotDownloader {
         }
         let fallback = "https://steampipe.akamaized.net"
         if !hosts.contains(fallback) { hosts.append(fallback) }
-        if SteamServerChoice.current == .fastest, hosts.count > 1 {
-            hosts = await Self.rankByLatency(hosts)
-        }
         return hosts
     }
-
-    /// 上一次测速的结果：同一批主机 10 分钟内直接复用。
-    /// 每次 install/resume 都重新测一遍会白白多等 1–3 秒（日志里 first_ms=2500
-    /// 就是探测超时），而 CDN 的远近不会在几分钟内变。
-    private nonisolated static let rankedLock = NSLock()
-    private nonisolated(unsafe) static var rankedCache: (key: String, hosts: [String], at: Date)?
-
-    /// 每个候选 CDN 发一个 HEAD，按响应时间从快到慢排；超时的排在最后。
-    /// 只挑「先问谁」的顺序，不改变可用服务器集合。只探测前 8 台：
-    /// 后面的主机本来就排在后面，测了也轮不到，不值得让用户等。
-    private nonisolated static func rankByLatency(_ hosts: [String]) async -> [String] {
-        let key = String(hosts.count) + "|" + hosts.joined(separator: ",")
-        rankedLock.lock()
-        if let cache = rankedCache, cache.key == key, Date().timeIntervalSince(cache.at) < 600 {
-            rankedLock.unlock()
-            return cache.hosts
-        }
-        rankedLock.unlock()
-        let probe = Array(hosts.prefix(8))
-        var timed: [(host: String, seconds: Double)] = []
-        await withTaskGroup(of: (String, Double)?.self) { group in
-            for host in probe {
-                group.addTask {
-                    guard let url = URL(string: host.hasSuffix("/") ? host : host + "/") else { return nil }
-                    var request = URLRequest(url: url)
-                    request.httpMethod = "HEAD"
-                    request.timeoutInterval = 0.8
-                    request.cachePolicy = .reloadIgnoringLocalCacheData
-                    let started = Date()
-                    do {
-                        _ = try await Self.probeSession.data(for: request)
-                        return (host, Date().timeIntervalSince(started))
-                    } catch {
-                        return (host, 0.8)
-                    }
-                }
-            }
-            for await result in group {
-                if let result { timed.append((result.0, result.1)) }
-            }
-        }
-        guard !timed.isEmpty else { return hosts }
-        timed.sort { $0.seconds < $1.seconds }
-        let ranked = timed.map(\.host)
-        let missing = hosts.filter { host in !ranked.contains(host) }
-        let result = ranked + missing
-        rankedLock.lock()
-        rankedCache = (key, result, Date())
-        rankedLock.unlock()
-        let best = timed.first.map { Int($0.seconds * 1000) } ?? 0
-        SteamLog.event("[steam-cdn] ranked=\(ranked.count) fastest=\(ranked.first ?? "-") first_ms=\(best)")
-        return result
-    }
-
-    /// 测速专用的会话：短超时，不缓存，不拖垮正常下载。
-    private nonisolated static let probeSession: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 0.8
-        config.timeoutIntervalForResource = 1.2
-        config.httpMaximumConnectionsPerHost = 2
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: config)
-    }()
 
     nonisolated static func usableContentHost(_ host: String) -> Bool {
         guard host.contains("."), !host.contains(" "), !host.contains("/"), !host.contains("*"),
