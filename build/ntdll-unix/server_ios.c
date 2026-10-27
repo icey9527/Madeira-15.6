@@ -1999,7 +1999,19 @@ static int wait_select_reply( void *cookie )
         ret = read( ntdll_get_thread_data()->wait_fd[0], &reply, sizeof(reply) );
         if (ret == sizeof(reply))
         {
-            if (!reply.cookie) abort_thread( reply.signaled );  /* thread got killed */
+            if (!reply.cookie)  /* thread got killed */
+            {
+#ifdef WINE_IOS
+                /* A wait inside an uninterrupted section (virtual_locked_server_call,
+                 * an APC run from a wait) must not exit holding the section's mutex,
+                 * which is shared by every process here. A Chromium GPU helper that
+                 * ended itself left virtual_mutex held this way and every process
+                 * stopped in NtAllocateVirtualMemory. Fail the wait; the thread exits
+                 * when it leaves its sections, as for a dead request pipe. */
+                if (ios_defer_section_abort()) return STATUS_THREAD_IS_TERMINATING;
+#endif
+                abort_thread( reply.signaled );
+            }
             if (wine_server_get_ptr(reply.cookie) == cookie) return reply.signaled;
             /* we stole another reply, wait for the real one */
             signaled = wait_select_reply( cookie );
@@ -4544,14 +4556,20 @@ void server_init_process_done(void)
 
     assert( !status );
 #ifdef WINE_IOS
-    /* On iOS, the parent's PE code (CreateProcessInternalW) should call
-     * NtResumeThread to unsuspend the child. But since we use thread-based
-     * CreateProcess, the resume mechanism may not work correctly.
-     * Force suspend=0 so the child proceeds immediately. */
+    /* A child created with CREATE_SUSPENDED waits in init_syscall_frame's
+     * wait_suspend() until its parent resumes it, as on Windows. Chromium's
+     * sandbox broker (GMod's CEF helpers) sets the target up while it is paused
+     * and kills a target that is already running. MADEIRA_IGNORE_SUSPEND=1
+     * restores the old behaviour of starting such a child at once. */
     if (suspend)
     {
-        dprintf(STDERR_FILENO, "[Wine init_done] overriding suspend=%d → 0 for iOS\n", suspend);
-        suspend = 0;
+        const char *ign = getenv( "MADEIRA_IGNORE_SUSPEND" );
+        if (ign && ign[0] == '1')
+        {
+            dprintf(STDERR_FILENO, "[Wine init_done] overriding suspend=%d → 0 (MADEIRA_IGNORE_SUSPEND)\n", suspend);
+            suspend = 0;
+        }
+        else dprintf(STDERR_FILENO, "[Wine init_done] created suspended; waiting for the parent's resume\n");
     }
     {
         extern void *pLdrInitializeThunk;
