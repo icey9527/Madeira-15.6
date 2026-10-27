@@ -708,13 +708,15 @@ struct SteamSettingsSection: View {
     @State private var serverMode: ServerMode = ServerMode(SteamServerChoice.current)
     @State private var regionCell = SteamServerChoice.current.cellID.map(Int.init) ?? 47
 
-    enum ServerMode: Hashable { case auto, fastest, region }
+    enum ServerMode: Hashable {
+        case auto, fastest, region
 
-    init(_ choice: SteamServerChoice) {
-        switch choice {
-        case .auto: self = .auto
-        case .fastest: self = .fastest
-        case .region: self = .region
+        init(_ choice: SteamServerChoice) {
+            switch choice {
+            case .auto: self = .auto
+            case .fastest: self = .fastest
+            case .region: self = .region
+            }
         }
     }
 
