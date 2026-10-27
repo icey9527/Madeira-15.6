@@ -886,9 +886,9 @@ struct SteamGameLanguagePicker: View {
         let supported = Set((game?.languages ?? []) + (game?.depotLanguages ?? []))
         let current = SteamLanguage.gameChoice(UInt32(appID))
         let options = SteamLanguage.all.filter { supported.isEmpty || supported.contains($0.code) || $0.code == current }
-        Picker("Game language", selection: Binding(get: { current ?? "" },
+        Picker("游戏语言", selection: Binding(get: { current ?? "" },
                                                    set: { choices.choose(appID, $0.isEmpty ? nil : $0) })) {
-            Text("Default (\(SteamLanguage.name(SteamLanguage.download)))").tag("")
+            Text("默认（\(SteamLanguage.name(SteamLanguage.download))）").tag("")
             ForEach(options, id: \.code) { Text($0.name).tag($0.code) }
         }
         .pickerStyle(.menu)
@@ -947,7 +947,7 @@ struct SteamGameSheet: View {
                     }
                     Section {
                         if item.installed == nil { SteamGameLanguagePicker(appID: appID) }
-                        if let freeSpace { LabeledContent15("Free space on this device", value: formatBytes(freeSpace)) }
+                        if let freeSpace { LabeledContent15("此设备上的可用空间", value: formatBytes(freeSpace)) }
                         Text(SteamGameSheet.downloadNote)
                             .font(.footnote).foregroundStyle(.secondary)
                     }
@@ -957,7 +957,7 @@ struct SteamGameSheet: View {
                         }
                     }
                 } else {
-                    EmptyStateView("Game unavailable", systemImage: "questionmark.square.dashed",
+                    EmptyStateView("游戏不可用", systemImage: "questionmark.square.dashed",
                                            description: Text("刷新 Steam 游戏库后重试。"))
                 }
             }
@@ -992,13 +992,13 @@ struct SteamGameSheet: View {
         } else if let download = steam.downloads[appID] {
             switch download.state {
             case .active, .queued:
-                Button { steam.pause(appID) } label: { steamActionLabel("Pause", symbol: "pause.fill") }
+                Button { steam.pause(appID) } label: { steamActionLabel("暂停", symbol: "pause.fill") }
                     .buttonStyle(.bordered)
             case .paused:
-                Button { steam.install(appID) } label: { steamActionLabel("Resume", symbol: "arrow.down.circle.fill") }
+                Button { steam.install(appID) } label: { steamActionLabel("继续", symbol: "arrow.down.circle.fill") }
                     .buttonStyle(.borderedProminent)
             case .failed:
-                Button { steam.install(appID) } label: { steamActionLabel("Try again", symbol: "arrow.clockwise") }
+                Button { steam.install(appID) } label: { steamActionLabel("重试", symbol: "arrow.clockwise") }
                     .buttonStyle(.borderedProminent)
             }
         } else if item.owned != nil {
@@ -1181,10 +1181,10 @@ struct SteamCloudSection: View {
                 Label("已同步", systemImage: "checkmark.icloud").foregroundStyle(.secondary)
             } else {
                 // One-sided leftovers: a file deleted on one side, or automatic sync turned off.
-                LabeledContent15("Not synced", value: Self.saves(waiting))
+                LabeledContent15("未同步", value: Self.saves(waiting))
             }
         }
-        if same > 0 { LabeledContent15("Same on both", value: "\(same)") }
+        if same > 0 { LabeledContent15("两端相同", value: "\(same)") }
         if let problem = state.problem {
             Text(problem).font(.callout).foregroundStyle(.orange)
         }
@@ -1237,7 +1237,7 @@ struct SteamEntrySection: View {
             if direct {
                 // The game's own program, from Steam's launch configuration or chosen here.
                 if resolving && entry.steamProgram == nil {
-                    LabeledContent15("Program") { ProgressView() }
+                    LabeledContent15("程序") { ProgressView() }
                 } else if programs.isEmpty && entry.steamProgram == nil {
                     Text("未在此游戏的安装文件夹中找到 Windows 程序。")
                         .font(.caption).foregroundStyle(.orange)
@@ -1281,13 +1281,13 @@ struct SteamEntrySection: View {
             }
             if managed, let recorded = games.languages[appID] {
                 if downloads { SteamGameLanguagePicker(appID: appID) }
-                LabeledContent15("Installed language", value: SteamLanguage.name(recorded))
+                LabeledContent15("已安装语言", value: SteamLanguage.name(recorded))
                 if downloads, download == nil,
                    let wanted = steam.game(appID)?.languageToDownload(recorded: recorded, installedDepots: games.depots[appID] ?? []) {
                     Button { steam.repair(appID) } label: {
-                        Label("Download in \(SteamLanguage.name(wanted))", systemImage: "character.bubble")
+                        Label("下载 \(SteamLanguage.name(wanted)) 版本", systemImage: "character.bubble")
                     }.disabled(!steam.signedIn)
-                    Text("Adds the game's \(SteamLanguage.name(wanted)) content and tells Steam to start it in that language. Files of the current language are kept.")
+                    Text("添加此游戏的 \(SteamLanguage.name(wanted)) 内容，并让 Steam 以该语言启动游戏。当前语言的文件会保留。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -1297,8 +1297,8 @@ struct SteamEntrySection: View {
                 Text("检查已安装的内容，并从当前 Steam 版本下载缺失或已更改的文件。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            LabeledContent15("App ID", value: String(appID))
-            if let freeSpace { LabeledContent15("Free space on this device", value: formatBytes(freeSpace)) }
+            LabeledContent15("应用 ID", value: String(appID))
+            if let freeSpace { LabeledContent15("此设备上的可用空间", value: formatBytes(freeSpace)) }
             if let status = dock.status {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("上次 Dock 启动结果").font(.caption).foregroundStyle(.secondary)

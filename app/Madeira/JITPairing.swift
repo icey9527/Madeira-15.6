@@ -133,11 +133,11 @@ import UserNotifications
         phase = .pin(pin)
         log("code shown")
         if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
-            task.updateTitle("Pairing code \(pin)", subtitle: "Enter it on this \(Self.deviceKind) to pair with Madeira")
+            task.updateTitle("配对码 \(pin)", subtitle: "在您的 \(Self.deviceKind) 上输入以与 Madeira 配对")
             task.progress.completedUnitCount = 1
         }
         if UIApplication.shared.applicationState != .active {
-            notify("Madeira pairing code: \(pin)", body: "Enter this code on your \(Self.deviceKind) to finish pairing.")
+            notify("Madeira 配对码：\(pin)", body: "在您的 \(Self.deviceKind) 上输入此代码以完成配对。")
         }
     }
 
@@ -155,7 +155,7 @@ import UserNotifications
                 phase = .paired(device: device ?? "this \(Self.deviceKind)")
                 log("paired")
                 if UIApplication.shared.applicationState != .active {
-                    notify("Paired with Madeira", body: "Return to Madeira to finish setting up JIT.")
+                    notify("已与 Madeira 配对", body: "返回 Madeira 以完成 JIT 设置。")
                 }
                 endBackground(success: true)
             } catch {
@@ -278,7 +278,7 @@ import UserNotifications
         continued = task
         task.progress.totalUnitCount = 2
         if case .pin(let pin) = phase {
-            task.updateTitle("Pairing code \(pin)", subtitle: "Enter it on this \(Self.deviceKind) to pair with Madeira")
+            task.updateTitle("配对码 \(pin)", subtitle: "在您的 \(Self.deviceKind) 上输入以与 Madeira 配对")
             task.progress.completedUnitCount = 1
         }
         task.expirationHandler = {

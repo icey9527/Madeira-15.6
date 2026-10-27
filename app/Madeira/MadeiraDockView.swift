@@ -142,7 +142,7 @@ struct MadeiraDockView: View {
                 }
                 Section("Steam 账户") {
                     if let name = signIn.accountName {
-                        LabeledContent15("Signed in", value: name)
+                        LabeledContent15("已登录", value: name)
                     } else {
                         Button("登录 Steam") { showSignIn = true }
                     }

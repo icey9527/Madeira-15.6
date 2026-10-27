@@ -627,7 +627,7 @@ struct JITSetupView: View {
                     }
                     LabeledContent15("StikDebug",
                                    value: StikJITHelper.isAvailable ? "Installed" : "Not detected")
-                    LabeledContent15("Built-in helper",
+                    LabeledContent15("内置辅助工具",
                                    value: MadeiraBuiltInJIT.isAvailable ? "Available" : "Unavailable")
                 } header: {
                     Text("JIT 方式")
@@ -637,7 +637,7 @@ struct JITSetupView: View {
 
                 if coordinator.method != .stikDebug {
                     Section {
-                        LabeledContent15("Pairing", value: pairingLabel)
+                        LabeledContent15("配对", value: pairingLabel)
                         if OnDevicePairing.isSupported {
                             Button(coordinator.pairingSource == .onDevice ? "Pair in Madeira again" : "Pair in Madeira") {
                                 pairing.start()

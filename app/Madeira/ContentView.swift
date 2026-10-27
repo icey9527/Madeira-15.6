@@ -4556,31 +4556,31 @@ struct MappingPanel: View {
             if GamepadInput.keyboardMouseAvailable, !control.action.isPad, control.action != .none, control.action != .keyboardToggle {
                 bindingSection
             }
-            section("Pointer, sticks & special", [
+            section("指针、摇杆与特殊按键", [
                 ("L click", .mouseLeft), ("R click", .mouseRight),
                 ("WASD", .joystickWASD), ("Arrows", .joystickArrows),
                 ("Keyboard", .keyboardToggle), ("None", .none),
             ])
-            section("Letters", letters)
-            section("Numbers", digits)
-            section("Function", fkeys)
-            section("Modifiers & editing", [
+            section("字母键", letters)
+            section("数字键", digits)
+            section("功能键", fkeys)
+            section("修饰键与编辑操作", [
                 ("Esc", .key(0x1B)), ("Tab", .key(0x09)), ("Caps", .key(0x14)),
                 ("Shift", .key(0x10)), ("Ctrl", .key(0x11)), ("Alt", .key(0x12)),
                 ("Space", .key(0x20)), ("Enter", .key(0x0D)), ("Bksp", .key(0x08)),
                 ("Win", .key(0x5B)),
             ])
-            section("Navigation", [
+            section("导航", [
                 ("←", .key(0x25)), ("↑", .key(0x26)), ("→", .key(0x27)), ("↓", .key(0x28)),
                 ("Ins", .key(0x2D)), ("Del", .key(0x2E)), ("Home", .key(0x24)),
                 ("End", .key(0x23)), ("PgUp", .key(0x21)), ("PgDn", .key(0x22)),
             ])
-            section("Symbols", [
+            section("符号", [
                 ("-", .key(0xBD)), ("=", .key(0xBB)), ("[", .key(0xDB)), ("]", .key(0xDD)),
                 ("\\", .key(0xDC)), (";", .key(0xBA)), ("'", .key(0xDE)), (",", .key(0xBC)),
                 (".", .key(0xBE)), ("/", .key(0xBF)), ("`", .key(0xC0)),
             ])
-            section("Numpad", numpad)
+            section("数字小键盘", numpad)
         }
     }
 
@@ -4591,16 +4591,16 @@ struct MappingPanel: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.orange.opacity(0.95))
                 .fixedSize(horizontal: false, vertical: true)
-            section("Face", [("A", .pad("A")), ("B", .pad("B")), ("X", .pad("X")), ("Y", .pad("Y"))])
-            section("D-pad", [("D↑", .pad("D↑")), ("D↓", .pad("D↓")),
+            section("正面按键", [("A", .pad("A")), ("B", .pad("B")), ("X", .pad("X")), ("Y", .pad("Y"))])
+            section("方向键", [("D↑", .pad("D↑")), ("D↓", .pad("D↓")),
                               ("D←", .pad("D←")), ("D→", .pad("D→"))])
-            section("Bumpers & triggers", [("LB", .pad("LB")), ("RB", .pad("RB")),
+            section("肩键与扳机", [("LB", .pad("LB")), ("RB", .pad("RB")),
                                            ("LT", .pad("LT")), ("RT", .pad("RT"))])
-            section("Sticks", [("LS", .pad("LS")), ("RS", .pad("RS")),
+            section("摇杆", [("LS", .pad("LS")), ("RS", .pad("RS")),
                                ("L3", .pad("L3")), ("R3", .pad("R3"))])
             // Start and Select are XInput's Menu and View; the layout keeps the
             // XInput names, the chips and the buttons read Start/Select.
-            section("System", [("Start", .pad("Menu")), ("Select", .pad("View")),
+            section("系统键", [("Start", .pad("Menu")), ("Select", .pad("View")),
                                ("Guide", .pad("Guide"))])
         }
     }

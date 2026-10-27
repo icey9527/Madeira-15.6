@@ -2367,7 +2367,7 @@ struct LibraryGroupedGames<LocalCell: View>: View {
         VStack(alignment: .leading, spacing: 24) {
             if groups.isEmpty {
                 if search.isEmpty {
-                    EmptyStateView("Make yourself at home", systemImage: "gamecontroller", description: Text("在“文件”App 中，将游戏文件夹复制到 Madeira › wine › drive_c，然后点按 + 并选择游戏的 .exe 文件。"))
+                    EmptyStateView("随意逛逛吧", systemImage: "gamecontroller", description: Text("在“文件”App 中，将游戏文件夹复制到 Madeira › wine › drive_c，然后点按 + 并选择游戏的 .exe 文件。"))
                 } else {
                     Text("没有符合搜索条件的游戏。").foregroundStyle(.secondary)
                 }
@@ -2761,7 +2761,7 @@ struct LibraryView: View {
                                           part: steamFirst ? .notInstalled : .all, open: { selected = $0 })
                     }
                 } else if model.entries.filter({ $0.desktop != true && $0.steamAppID == nil }).isEmpty {
-                    EmptyStateView("Make yourself at home", systemImage: "gamecontroller", description: Text("在“文件”App 中，将游戏文件夹复制到 Madeira › wine › drive_c，然后点按 + 并选择游戏的 .exe 文件。"))
+                    EmptyStateView("随意逛逛吧", systemImage: "gamecontroller", description: Text("在“文件”App 中，将游戏文件夹复制到 Madeira › wine › drive_c，然后点按 + 并选择游戏的 .exe 文件。"))
                 } else {
                     cells(entries, width: viewport.size.width)
                 }
@@ -3158,10 +3158,10 @@ struct LibraryDetail: View {
                             }
                         }
                     }
-                    LabeledContent15("Control opacity") {
+                    LabeledContent15("控件不透明度") {
                         Slider(value: Binding(get: { entry.controlOpacity ?? 0.7 }, set: { entry.controlOpacity = $0 }), in: 0.15...1)
                     }
-                    LabeledContent15("Control size") {
+                    LabeledContent15("控件大小") {
                         Slider(value: Binding(get: { entry.controlSize ?? 1 }, set: { entry.controlSize = $0 }), in: 0.5...2)
                     }
                     Text("在游戏内菜单中排列按键，并为按键选择 XInput、鼠标或键盘操作。").font(.caption).foregroundStyle(.secondary)
@@ -3174,7 +3174,7 @@ struct LibraryDetail: View {
                     NavigationLink {
                         LibraryGameConfigEditor(text: Binding(get: { entry.config ?? "" }, set: { entry.config = $0.isEmpty ? nil : $0 }))
                     } label: {
-                        LabeledContent15("This game's config", value: Self.configSummary(entry.config))
+                        LabeledContent15("此游戏的配置", value: Self.configSummary(entry.config))
                     }
                 } header: { Text("高级") } footer: {
                     Text("仅对当前游戏生效，格式与 madeira.cfg 相同。运行时读取到同名选项时，此处设置的值优先于 madeira.cfg；env.NAME 行会在 madeira.cfg 之后导出，dxmt 选项则会追加到 madeira.cfg。更改将在下次启动时生效。")
@@ -3330,7 +3330,7 @@ struct ControllerBindsPage: View {
         }
         if effective("RS").stickKeys == nil {
             Section("右摇杆映射为鼠标") {
-                LabeledContent15("Vertical speed") {
+                LabeledContent15("垂直速度") {
                     HStack {
                         Slider(value: Binding(get: { mouseVertical ?? 1 }, set: { mouseVertical = abs($0 - 1) < 0.01 ? nil : $0 }), in: 0.25...1.5, step: 0.05)
                         Text("\(Int(((mouseVertical ?? 1) * 100).rounded()))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
@@ -3516,7 +3516,7 @@ struct DockOfflineMark: View {
 struct ControllerModeChoice: View {
     @Binding var mode: String?
     var body: some View {
-        LabeledContent15("Controller") {
+        LabeledContent15("手柄") {
             Picker("手柄", selection: Binding(get: { mode ?? "" }, set: { mode = $0.isEmpty ? nil : $0 })) {
                 Text("游戏自身支持").tag("")
                 Text("XInput 和 DirectInput").tag("dinput")
@@ -3731,11 +3731,11 @@ struct RuntimeMemorySyncSettings: View {
 
     var body: some View {
         Section {
-            mbPicker("JIT pool", key: "pool", value: $poolMB, choices: Self.poolChoices,
+            mbPicker("JIT 内存池", key: "pool", value: $poolMB, choices: Self.poolChoices,
                      zero: "Default (896 MB)", label: { "\($0) MB" })
-            mbPicker("Video memory", key: "vram-mb", value: $vramMB, choices: Self.vramChoices,
+            mbPicker("显存", key: "vram-mb", value: $vramMB, choices: Self.vramChoices,
                      zero: "Automatic", label: Self.gb)
-            mbPicker("Swap tier", key: "swap-mb", value: $swapMB, choices: Self.swapChoices,
+            mbPicker("交换内存等级", key: "swap-mb", value: $swapMB, choices: Self.swapChoices,
                      zero: "Off", label: Self.gb)
             Picker("交换内存覆盖范围", selection: Binding(get: { coverage }, set: { mode in
                 coverage = mode; changed = true
@@ -3796,7 +3796,7 @@ struct LibraryPointerSettings: View {
         Text(input.touchMode ? "Tap the screen to position and click. Hold and move to drag. Two fingers: right click or scroll."
              : (input.relative ? "Drag to send relative mouse movement for mouse-look. Tap to click." : "Drag the pointer like a trackpad. Tap to click."))
             .font(.caption).foregroundStyle(.secondary)
-        LabeledContent15("Touch sensitivity") {
+        LabeledContent15("触控灵敏度") {
             Slider(value: input.relative ? $input.sensRel : $input.sensAbs, in: 0.1...8)
         }
     }
@@ -3997,13 +3997,13 @@ struct LibraryHUD: View {
                 // holds the desktop back, Show desktop reveals it.
                 HStack(spacing: 14) {
                     if dockStart.failure != nil {
-                        launchGlyph("Close session", "stop.circle") { model.requestQuit() }
+                        launchGlyph("关闭会话", "stop.circle") { model.requestQuit() }
                     }
                     launchGlyph(showLogs ? "Hide live log" : "Show live log", "text.alignleft", on: showLogs) {
                         model.toggleLaunchLogs()
                     }
                     if dockStart.holding {
-                        launchGlyph("Show desktop", "macwindow") { dockStart.showDesktop(model) }
+                        launchGlyph("显示桌面", "macwindow") { dockStart.showDesktop(model) }
                             .accessibilityHint("显示 Windows 桌面")
                     }
                 }
@@ -4095,8 +4095,8 @@ struct LibraryHUD: View {
                         if openedEditor { model.menu = false }
                     }
                 }
-                LabeledContent15("Opacity") { Slider(value: $model.opacity, in: 0.15...1) }
-                LabeledContent15("Size") { Slider(value: $controls.sizeScale, in: 0.5...2) }
+                LabeledContent15("不透明度") { Slider(value: $model.opacity, in: 0.15...1) }
+                LabeledContent15("大小") { Slider(value: $controls.sizeScale, in: 0.5...2) }
                 Button { controls.visible = true; controls.editing = true; model.menu = false } label: { Label("编辑控件", systemImage: "slider.horizontal.3") }
                 if GamepadInput.keyboardMouseAvailable {
                     ControllerModeChoice(mode: Binding(get: { model.controllerMode }, set: { model.controllerMode = $0; model.saveCurrentProfile() }))
@@ -4114,7 +4114,7 @@ struct LibraryHUD: View {
                 // Saved to the game with the rest of the session's profile.
                 // MADEIRA_SESSION_TOOLS=0 hides it.
                 if sessionTools {
-                    LabeledContent15("Aspect & scaling") {
+                    LabeledContent15("画面比例与缩放") {
                         Picker("画面比例与缩放", selection: $model.displayMode) {
                             ForEach(DisplayMode.allCases, id: \.self) { mode in Label(mode.label, systemImage: mode.symbol).tag(mode) }
                         }.pickerStyle(.menu).labelsHidden()
@@ -4152,7 +4152,7 @@ struct LibraryHUD: View {
                             LogStore.shared.log("[capture] frame capture requested from the in-game menu")
                         }
                     } label: { Label("捕获下一帧", systemImage: "camera.viewfinder") }
-                    LabeledContent15("GPU sync") {
+                    LabeledContent15("GPU 同步") {
                         Picker("GPU 同步", selection: Binding(get: { fenceMode }, set: { mode in
                             fenceMode = mode; FPSOverlayFenceMode.current = mode
                             madeira_set_fence_mode(Int32(mode == 0 ? 7 : mode))

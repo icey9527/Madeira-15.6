@@ -21,21 +21,59 @@ import shutil
 import sys
 from pathlib import Path
 
+# A Swift string literal body: anything, with escapes, but not an unescaped quote.
+STRING = r'"((?:[^"\\]|\\.)*)"'
+
 # SwiftUI/UIKit entry points whose first argument is shown to the user.
 LABELS = (
     "Text", "Label", "Button", "Toggle", "Section", "TextField", "SecureField",
     "Picker", "Stepper", "Link", "NavigationLink", "Menu", "navigationTitle",
     "navigationBarTitle", "alert", "confirmationDialog", "accessibilityLabel",
     "accessibilityHint", "tabItem", "badge", "help",
+    # Our own iOS 15 wrappers and in-repo helpers (see Library.swift / Onboarding.swift).
+    "LabeledContent15", "EmptyStateView", "steamActionLabel", "mbPicker",
+    "launchGlyph", "header", "section", "primary", "secondary",
+    # UIKit setters and notification helpers that take the visible text first.
+    "setTitle", "updateTitle", "notify",
 )
-PATTERN = re.compile(r'\b(' + "|".join(LABELS) + r')\s*\(\s*"((?:[^"\\]|\\.)*)"')
+PATTERN = re.compile(r'\b(' + "|".join(LABELS) + r')\s*\(\s*' + STRING)
+
+# Constructors whose visible text is a labelled argument, not the first argument.
+# Kept as an explicit allow-list so ordinary `title:`/`message:` metadata is never
+# mistaken for UI text (e.g. ConfigCatalog's generated option titles).
+LABELLED_CONSTRUCTORS = (
+    "UIAlertController", "UIAction", "UIBarButtonItem", "UIAlertAction",
+    "BGContinuedProcessingTaskRequest",
+)
+LABELLED_KEYS = ("title", "message", "subtitle")
+PATTERN_LABELLED = re.compile(
+    r'\b(' + "|".join(LABELLED_CONSTRUCTORS) + r')\s*\(\s*'
+    r'(?:' + "|".join(LABELLED_KEYS) + r')\s*:\s*' + STRING,
+)
+# `Text(verbatim: "...")` shows its argument as-is.
+PATTERN_VERBATIM = re.compile(r'(\bText\s*\(\s*verbatim\s*:)\s*' + STRING)
+# `notify("title", body: "...")` / `updateTitle("...", subtitle: "...")`: the
+# trailing parts are visible too, but only on the helper call itself.
+PATTERN_TAIL = re.compile(
+    r'(\b(?:notify|updateTitle)\s*\([^\n]*?\b(?:body|subtitle)\s*:)\s*' + STRING,
+)
+
+# Deliberately no "cond ? \"A\" : \"B\"" rule: string literals nested inside a
+# \\(…) interpolation (pluralisation, " · newer") look identical and translating
+# a fragment would corrupt the sentence.
+PATTERNS = (PATTERN, PATTERN_LABELLED, PATTERN_VERBATIM, PATTERN_TAIL)
 
 
 def iter_literals(root: Path):
     for path in sorted(root.rglob("*.swift")):
         text = path.read_text(encoding="utf-8")
-        for match in PATTERN.finditer(text):
-            yield path, match.group(2)
+        for pattern in PATTERNS:
+            for match in pattern.finditer(text):
+                # group 1 is the call/prefix, group 2 is the literal body.
+                for index in range(2, pattern.groups + 1):
+                    literal = match.group(index)
+                    if literal is not None:
+                        yield path, literal
 
 
 def load_catalogue(path: Path) -> dict[str, str]:
@@ -144,14 +182,27 @@ def command_apply(args: argparse.Namespace) -> int:
 
         def substitute(match: re.Match[str]) -> str:
             nonlocal replaced
-            literal = match.group(2)
-            target = translated.get(literal)
-            if target is None:
-                return match.group(0)
-            replaced += 1
-            return f'{match.group(1)}("{target}"'
+            # Replace exactly the literal body (group 2), keeping its quotes and
+            # any prefix such as `Text(verbatim:`, `title: ` or
+            # `notify("…", body: `.
+            base = match.start(0)
+            text = match.group(0)
+            edits: list[tuple[int, int, str]] = []
+            for index in range(2, match.re.groups + 1):
+                literal = match.group(index)
+                target = translated.get(literal) if literal is not None else None
+                if target is None:
+                    continue
+                start, end = match.span(index)
+                edits.append((start - base, end - base, target))
+                replaced += 1
+            for start, end, replacement in sorted(edits, reverse=True):
+                text = text[:start] + replacement + text[end:]
+            return text
 
-        updated = PATTERN.sub(substitute, original)
+        updated = original
+        for pattern in PATTERNS:
+            updated = pattern.sub(substitute, updated)
         if updated != original:
             if args.backup:
                 shutil.copyfile(path, path.with_suffix(path.suffix + ".orig"))
