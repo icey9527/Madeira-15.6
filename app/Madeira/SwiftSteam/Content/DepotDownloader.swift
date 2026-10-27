@@ -44,27 +44,86 @@ struct SteamDownloadProgress: Equatable, Sendable {
 ///   directory names are folded case-insensitively (Windows semantics on a
 ///   case-sensitive iOS volume).
 /// - Each chunk retries on other content servers before the install fails.
-/// Settings › Steam › 下载服务器.
+/// 设置 › Steam › 下载服务器。
 ///
-/// Valve returns the CDN hosts a download may use in its own order, which is
-/// not necessarily the fastest from this network. `nearest` measures how long
-/// each host takes to answer a HEAD request before any depot bytes are
-/// requested, and puts the quickest first; `directory` keeps Valve's order.
-enum SteamServerChoice: String, CaseIterable, Hashable {
-    case directory = "directory"
-    case nearest = "nearest"
+/// Steam 的 content server 列表按 **cell id**（下载地区）返回，Windows 客户端
+/// 的「下载地区」设置改的就是这个编号；编号表见 `regions`（与 Steam 客户端
+/// 一致，0 表示自动）。`fastest` 不指定地区，而是把 Valve 给出的主机逐个计时
+/// 后把最快的排在前面。
+enum SteamServerChoice: Hashable {
+    case auto
+    case fastest
+    case region(Int)
 
     static let defaultsKey = "madeiraSteamServerChoice"
 
+    /// 常用地区，编号取自 Steam 客户端的地区表（0–184）。
+    static let regions: [(cell: Int, name: String)] = [
+        (46, "中国大陆 - 北京"),
+        (47, "中国大陆 - 上海"),
+        (48, "中国大陆 - 成都"),
+        (148, "中国大陆 - 广州"),
+        (159, "中国大陆 - 武汉"),
+        (160, "中国大陆 - 西安"),
+        (168, "中国大陆 - 青岛"),
+        (9, "台湾"),
+        (33, "香港"),
+        (35, "新加坡"),
+        (32, "日本 - 东京"),
+        (180, "日本 - 大阪"),
+        (8, "韩国 - 首尔"),
+        (182, "韩国 - 釜山"),
+        (64, "美国 - 洛杉矶"),
+        (31, "美国 - 西雅图"),
+        (1, "美国 - 芝加哥"),
+        (2, "美国 - 纽约"),
+        (65, "美国 - 达拉斯"),
+        (4, "英国 - 伦敦"),
+        (5, "德国 - 法兰克福"),
+        (15, "荷兰"),
+        (14, "法国 - 巴黎"),
+        (25, "巴西 - 圣保罗"),
+        (27, "俄罗斯 - 欧洲"),
+        (22, "新西兰"),
+        (53, "澳大利亚 - 维多利亚"),
+    ]
+
     static var current: SteamServerChoice {
-        SteamServerChoice(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .nearest
+        let raw = UserDefaults.standard.string(forKey: defaultsKey) ?? ""
+        if raw == "auto" { return .auto }
+        if raw.hasPrefix("region:"), let cell = Int(raw.dropFirst("region:".count)) {
+            return .region(cell)
+        }
+        return .fastest
+    }
+
+    var stored: String {
+        switch self {
+        case .auto: return "auto"
+        case .fastest: return "fastest"
+        case .region(let cell): return "region:\(cell)"
+        }
     }
 
     var label: String {
         switch self {
-        case .directory: return "按 Valve 分配的顺序"
-        case .nearest: return "测速后选最快的（默认）"
+        case .auto: return "自动（Valve 分配）"
+        case .fastest: return "测速后选最快的（默认）"
+        case .region(let cell):
+            return Self.regions.first { $0.cell == cell }?.name ?? "地区 \(cell)"
         }
+    }
+
+    /// 请求 content server 列表时使用的 cell id；`fastest` 用 0（不限地区）。
+    var cellID: UInt32? {
+        switch self {
+        case .auto, .fastest: return nil
+        case .region(let cell): return UInt32(cell)
+        }
+    }
+
+    func save() {
+        UserDefaults.standard.set(stored, forKey: Self.defaultsKey)
     }
 }
 
@@ -658,7 +717,8 @@ final class DepotDownloader {
     private func contentServers(appID: UInt32) async throws -> [String] {
         var hosts: [String] = []
         do {
-            guard let url = URL(string: "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/?cell_id=\(session.cellID)&max_servers=20") else {
+            let cell = SteamServerChoice.current.cellID ?? session.cellID
+            guard let url = URL(string: "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/?cell_id=\(cell)&max_servers=20") else {
                 throw SteamError.chunkDownloadFailed("Bad content directory URL")
             }
             let (data, response) = try await Self.http.data(from: url)
@@ -694,7 +754,7 @@ final class DepotDownloader {
         }
         let fallback = "https://steampipe.akamaized.net"
         if !hosts.contains(fallback) { hosts.append(fallback) }
-        if SteamServerChoice.current == .nearest, hosts.count > 1 {
+        if SteamServerChoice.current == .fastest, hosts.count > 1 {
             hosts = await Self.rankByLatency(hosts)
         }
         return hosts
