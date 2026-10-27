@@ -1085,3 +1085,60 @@ for relative, pairs, markers in d3d9_files:
             raise SystemExit(f'{relative}: {marker!r} missing from the written file')
     print(f'iOS {sys.argv[3]} d3d9 locked-texture flush: {relative}')
 
+# ---- Madeira-15.6: D3D9 performance fixes ported from iediot/Madeira -------
+# These are dxmt *source* changes upstream carries as commits on its own dxmt
+# fork; carrying them here keeps the submodule pointer on willfaust/dxmt.
+perf_files = (
+    # iediot/Madeira 2ef9f07: a draw uploaded only the registers the sticky
+    # high-water mark had recorded, so a constant the shader reads but the app
+    # never set was left holding a previous draw's value. Size the upload by the
+    # shader's own highest constant register, and key the constant cache by the
+    # shader itself so two shaders with different reads never share an upload.
+    ('d3d9/d3d9_device.cpp', (
+        ('  uint32_t vs_f_regs = resolve_const_f_extent(pod.vs_const_f_max, vs_uses_relative, vs_file_size);\n'
+         '  uint32_t ps_f_regs = resolve_const_f_extent(pod.ps_const_f_max, ps_uses_relative, D3D9_MAX_PS_CONST_F);\n',
+         '  // Madeira-15.6 (iediot 2ef9f07): cover every register the shader reads.\n'
+         '  const uint32_t vs_meta_max = (!ffp_vs && vs) ? vs->metadata().max_float_const_index : 0u;\n'
+         '  const uint32_t ps_meta_max = ps ? ps->metadata().max_float_const_index : 0u;\n'
+         '  uint32_t vs_f_regs = resolve_const_f_extent(std::max<uint32_t>(pod.vs_const_f_max, vs_meta_max), vs_uses_relative, vs_file_size);\n'
+         '  uint32_t ps_f_regs = resolve_const_f_extent(std::max<uint32_t>(pod.ps_const_f_max, ps_meta_max), ps_uses_relative, D3D9_MAX_PS_CONST_F);\n'),
+        ('  const void *vs_defs_key =\n'
+         '      !ffp_vs ? (vs_uses_relative ? static_cast<const void *>(vs) : nullptr) : static_cast<const void *>(&kFfpConstKey);\n',
+         '  const void *vs_defs_key =\n'
+         '      !ffp_vs ? static_cast<const void *>(vs) : static_cast<const void *>(&kFfpConstKey);\n'),
+        ('  const void *ps_defs_key =\n'
+         '      ps ? (ps_uses_relative ? static_cast<const void *>(ps) : nullptr) : static_cast<const void *>(&kFfpConstKey);\n',
+         '  const void *ps_defs_key =\n'
+         '      ps ? static_cast<const void *>(ps) : static_cast<const void *>(&kFfpConstKey);\n'),
+    ), ('max_float_const_index',)),
+    # iediot/Madeira e2e36eb: the dynamic-buffer trim kept a flat 64 entries,
+    # which for a buffer whose entries are megabytes pins far more than needed.
+    # Reserve about 8 MB per buffer instead (clamped to the old 64..4096 range).
+    ('dxmt/dxmt_dynamic.cpp', (
+        ('#include "dxmt_dynamic.hpp"\n',
+         '#include <algorithm>\n#include "dxmt_dynamic.hpp"\n'),
+        ('    enum { DYN_KEEP_ELIGIBLE = 64 };\n    if (en > DYN_KEEP_ELIGIBLE) {\n',
+         '    // Madeira-15.6 (iediot e2e36eb): ~8 MB per buffer, not a flat 64 entries.\n'
+         '    unsigned DYN_KEEP_ELIGIBLE = 64;\n'
+         '    if (en && !fifo.empty() && fifo.front().allocation.ptr()) {\n'
+         '      const uint64_t entry_bytes = std::max<uint64_t>(fifo.front().allocation->census_bytes_, 256);\n'
+         '      DYN_KEEP_ELIGIBLE = (unsigned)std::clamp<uint64_t>((8ull << 20) / entry_bytes, 64, 4096);\n'
+         '    }\n'
+         '    if (en > DYN_KEEP_ELIGIBLE) {\n'),
+    ), ('DYN_KEEP_ELIGIBLE',)),
+)
+for relative, pairs, markers in perf_files:
+    out = output_root / relative
+    src = (out if out.exists() else source_root / relative).read_text(encoding='utf-8')
+    for original, replacement in pairs:
+        if src.count(original) != 1:
+            raise SystemExit(f'{relative}: perf fix expected 1 match, found {src.count(original)}: {original[:60]!r}')
+        src = src.replace(original, replacement)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(src, encoding='utf-8')
+    written = out.read_text(encoding='utf-8')
+    for marker in markers:
+        if marker not in written:
+            raise SystemExit(f'{relative}: {marker!r} missing from the written file')
+    print(f'iOS {sys.argv[3]} d3d9 performance (iediot): {relative}')
+
