@@ -477,27 +477,35 @@ static void madeira_force_gbk_codepage(NSString *prefix)
  * startup, so this becomes the GDI font the game's CreateFontA request finds. */
 static void madeira_install_cjk_font(NSString *prefix)
 {
-    NSString *src = [[NSBundle mainBundle] pathForResource:@"MicrosoftYaHei"
-                                                    ofType:@"otf"
-                                               inDirectory:@"fonts"];
-    if (!src) {
-        LOG("cjk font missing from bundle");
-        return;
-    }
-    NSString *dir = [prefix stringByAppendingPathComponent:@"drive_c/windows/Fonts"];
-    NSString *dst = [dir stringByAppendingPathComponent:@"msyh.otf"];
     NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *dir = [prefix stringByAppendingPathComponent:@"drive_c/windows/Fonts"];
     [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSDictionary *sattr = [fm attributesOfItemAtPath:src error:nil];
-    NSDictionary *dattr = [fm attributesOfItemAtPath:dst error:nil];
-    if (sattr && dattr && [sattr[NSFileSize] isEqual:dattr[NSFileSize]]) return;
-    [fm removeItemAtPath:dst error:nil];
-    NSError *error = nil;
-    if ([fm copyItemAtPath:src toPath:dst error:&error]) {
-        LOG("cjk font installed: %{public}s", dst.UTF8String);
-    } else {
-        LOG("cjk font install FAILED: %{public}s", dst.UTF8String);
+    /* Every face in the bundle's fonts/ folder, under its own file name: a game
+     * that asks for SimSun, one that asks for SimHei and one that asks for MS
+     * Gothic each need a real face to match, and wine enumerates this directory
+     * by file name at startup. */
+    NSArray<NSURL *> *urls = [[NSBundle mainBundle] URLsForResourcesWithExtension:nil subdirectory:@"fonts"];
+    if (!urls.count) LOG("no fonts in the bundle");
+    for (NSURL *url in urls) {
+        NSString *name = url.lastPathComponent;
+        NSString *ext = name.pathExtension.lowercaseString;
+        if (![ext isEqualToString:@"otf"] && ![ext isEqualToString:@"ttf"] && ![ext isEqualToString:@"ttc"]) continue;
+        NSString *dst = [dir stringByAppendingPathComponent:name];
+        NSDictionary *sattr = [fm attributesOfItemAtPath:url.path error:nil];
+        NSDictionary *dattr = [fm attributesOfItemAtPath:dst error:nil];
+        if (sattr && dattr && [sattr[NSFileSize] isEqual:dattr[NSFileSize]]) continue;
+        [fm removeItemAtPath:dst error:nil];
+        NSError *error = nil;
+        if ([fm copyItemAtPath:url.path toPath:dst error:&error]) {
+            LOG("font installed: %{public}s", dst.UTF8String);
+        } else {
+            LOG("font install FAILED: %{public}s", dst.UTF8String);
+        }
     }
+    /* The face used to be copied under this name; drop the duplicate. */
+    NSString *legacy = [dir stringByAppendingPathComponent:@"msyh.otf"];
+    if ([fm fileExistsAtPath:legacy] && [fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"MicrosoftYaHei.otf"]])
+        [fm removeItemAtPath:legacy error:nil];
 }
 
 void madeira_seed_prefix_if_needed(const char *prefix_path) {
