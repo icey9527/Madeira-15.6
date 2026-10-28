@@ -567,10 +567,21 @@ static void madeira_install_cjk_font(NSString *prefix)
             LOG("font install FAILED: %{public}s", dst.UTF8String);
         }
     }
-    /* The face used to be copied under this name; drop the duplicate. */
-    NSString *legacy = [dir stringByAppendingPathComponent:@"msyh.otf"];
-    if ([fm fileExistsAtPath:legacy] && [fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"MicrosoftYaHei.otf"]])
-        [fm removeItemAtPath:legacy error:nil];
+    /* Two earlier stand-ins for 微软雅黑: msyh.otf (an old copy under the Windows
+     * file name) and MicrosoftYaHei.otf (Noto Sans CJK SC renamed). The bundle
+     * now carries the real msyh.ttc, and the look-alike must go or Wine keeps
+     * offering it -- BaldrSky only offers 微软雅黑, and rendered with Noto's
+     * narrower glyphs (2026-10-28 screenshot comparison). */
+    NSString *real = [dir stringByAppendingPathComponent:@"msyh.ttc"];
+    if ([fm fileExistsAtPath:real]) {
+        for (NSString *stale in @[@"MicrosoftYaHei.otf", @"msyh.otf"]) {
+            NSString *path = [dir stringByAppendingPathComponent:stale];
+            if ([fm fileExistsAtPath:path]) {
+                [fm removeItemAtPath:path error:nil];
+                LOG("font: removed the %{public}s stand-in", stale.UTF8String);
+            }
+        }
+    }
 
     /* Register them, so a game's font picker can actually see them. Two names
      * per collection file: Windows lists the faces of a .ttc separately, and a
@@ -582,9 +593,13 @@ static void madeira_install_cjk_font(NSString *prefix)
         @"\"KaiTi (TrueType)\"=\"simkai.ttf\"",
         @"\"MS Gothic (TrueType)\"=\"msgothic.ttc\"",
         @"\"MS PGothic (TrueType)\"=\"msgothic.ttc\"",
-        @"\"Microsoft YaHei (TrueType)\"=\"MicrosoftYaHei.otf\"",
+        @"\"Microsoft YaHei (TrueType)\"=\"msyh.ttc\"",
     ];
     NSString *reg = [prefix stringByAppendingPathComponent:@"system.reg"];
+    /* A prefix made by the previous build has this key pointing at the
+     * stand-in; ios_reg_ensure_lines only ADDS missing keys, so rewrite it. */
+    ios_reg_replace_pairs(reg, @[ @[ @"\"Microsoft YaHei (TrueType)\"=\"MicrosoftYaHei.otf\"",
+                                   @"\"Microsoft YaHei (TrueType)\"=\"msyh.ttc\"" ] ]);
     NSArray<NSString *> *sections = @[
         @"[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Fonts]",
         @"[Software\\\\Wow6432Node\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Fonts]",
