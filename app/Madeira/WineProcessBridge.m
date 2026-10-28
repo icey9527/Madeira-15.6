@@ -496,6 +496,47 @@ static void madeira_force_gbk_codepage(NSString *prefix)
     }
 }
 
+/* Insert .reg lines into a section, after its header, skipping any key the
+ * section already has. Used for Wine's font list, which is a registry key: a
+ * game enumerates THAT, not the Fonts directory, so faces copied in after the
+ * prefix was made are invisible to it (BaldrSky offered only the built-ins and
+ * substituted a face whose metrics differ -- the vertically squashed text).
+ * Returns the number of lines added. */
+static int ios_reg_ensure_lines(NSString *path, NSString *section, NSArray<NSString *> *lines)
+{
+    NSError *error = nil;
+    NSMutableString *text = [NSMutableString stringWithContentsOfFile:path
+                                                             encoding:NSUTF8StringEncoding
+                                                                error:&error];
+    if (!text) return 0;
+    NSRange header = [text rangeOfString:section options:NSCaseInsensitiveSearch];
+    if (header.location == NSNotFound) return 0;   /* wineboot has not written it yet */
+    NSRange lineEnd = [text rangeOfString:@"\n" options:0
+                                   range:NSMakeRange(header.location, text.length - header.location)];
+    if (lineEnd.location == NSNotFound) return 0;
+    NSUInteger insertAt = NSMaxRange(lineEnd);
+    /* The body runs to the next line that starts a new section. */
+    NSRange next = [text rangeOfString:@"\n[" options:0
+                                 range:NSMakeRange(insertAt, text.length - insertAt)];
+    NSUInteger bodyEnd = (next.location == NSNotFound) ? text.length : next.location + 1;
+    NSString *body = [text substringWithRange:NSMakeRange(insertAt, bodyEnd - insertAt)];
+    NSMutableString *add = [NSMutableString string];
+    int added = 0;
+    for (NSString *line in lines) {
+        NSString *key = [[line componentsSeparatedByString:@"="] firstObject];
+        if (key.length && [body rangeOfString:key options:NSCaseInsensitiveSearch].location != NSNotFound) continue;
+        [add appendFormat:@"%@\n", line];
+        added++;
+    }
+    if (!added) return 0;
+    [text insertString:add atIndex:insertAt];
+    if (![text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+        LOG("font registry: %{public}s write FAILED", path.fileSystemRepresentation);
+        return 0;
+    }
+    return added;
+}
+
 /* The app bundle carries a full Noto Sans CJK SC face whose internal family
  * name is Microsoft YaHei / 微软雅黑.  Wine enumerates C:\windows\Fonts at
  * startup, so this becomes the GDI font the game's CreateFontA request finds. */
@@ -530,6 +571,28 @@ static void madeira_install_cjk_font(NSString *prefix)
     NSString *legacy = [dir stringByAppendingPathComponent:@"msyh.otf"];
     if ([fm fileExistsAtPath:legacy] && [fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"MicrosoftYaHei.otf"]])
         [fm removeItemAtPath:legacy error:nil];
+
+    /* Register them, so a game's font picker can actually see them. Two names
+     * per collection file: Windows lists the faces of a .ttc separately, and a
+     * game asking for NSimSun or MS PGothic must find the same file. */
+    NSArray<NSString *> *faces = @[
+        @"\"SimSun (TrueType)\"=\"simsun.ttc\"",
+        @"\"NSimSun (TrueType)\"=\"simsun.ttc\"",
+        @"\"SimHei (TrueType)\"=\"simhei.ttf\"",
+        @"\"KaiTi (TrueType)\"=\"simkai.ttf\"",
+        @"\"MS Gothic (TrueType)\"=\"msgothic.ttc\"",
+        @"\"MS PGothic (TrueType)\"=\"msgothic.ttc\"",
+        @"\"Microsoft YaHei (TrueType)\"=\"MicrosoftYaHei.otf\"",
+    ];
+    NSString *reg = [prefix stringByAppendingPathComponent:@"system.reg"];
+    NSArray<NSString *> *sections = @[
+        @"[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Fonts]",
+        @"[Software\\\\Wow6432Node\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Fonts]",
+    ];
+    for (NSString *section in sections) {
+        int added = ios_reg_ensure_lines(reg, section, faces);
+        if (added) LOG("font registry: %d face(s) registered in %{public}s", added, section.UTF8String);
+    }
 }
 
 void madeira_seed_prefix_if_needed(const char *prefix_path) {
