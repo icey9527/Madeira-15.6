@@ -1343,6 +1343,30 @@ diag_files = (
          '    if (n < 3 || (n % 300) == 0)\n'
          '      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }\n'),
     ), ('d9-present] dev Present')),
+    # wined3d drops a combined TARGET+Z/STENCIL clear when the bound DS is
+    # smaller than RT0. Native D3D9 does not: each attachment is cleared at its
+    # own size, which the code below already does. BaldrSky's title screen came
+    # up showing the previous scene instead of its white background, and a
+    # silently dropped clear is the shape of that (2026-10-28).
+    ('d3d9/d3d9_device.cpp', (
+        ('  if (ds && (Flags & D3DCLEAR_TARGET) && (Flags & (D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL))) {\n'
+         '    MTLD3D9Surface *rt0 = m_renderTargets[0].ptr();\n'
+         '    if (rt0 && (ds->desc().Width < rt0->desc().Width || ds->desc().Height < rt0->desc().Height))\n'
+         '      return D3D_OK;\n'
+         '  }\n',
+         '  if (ds && (Flags & D3DCLEAR_TARGET) && (Flags & (D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL))) {\n'
+         '    MTLD3D9Surface *rt0 = m_renderTargets[0].ptr();\n'
+         '    if (rt0 && (ds->desc().Width < rt0->desc().Width || ds->desc().Height < rt0->desc().Height)) {\n'
+         '      /* Madeira-15.6: wined3d drops this clear whole; native D3D9 clears each\n'
+         '       * attachment at its own size, and the paths below do exactly that. The\n'
+         '       * drop left BaldrSky showing the previous scene behind its title. */\n'
+         '      static unsigned madeira_clear_mismatch;\n'
+         '      if (madeira_clear_mismatch++ < 8)\n'
+         '        Logger::warn(str::format("[d9-clear] mismatched sizes, keeping the clear: ds=",\n'
+         '            ds->desc().Width, "x", ds->desc().Height, " rt0=", rt0->desc().Width, "x", rt0->desc().Height));\n'
+         '    }\n'
+         '  }\n'),
+    ), ('d9-clear] mismatched sizes')),
     # A command buffer that never retires stops the finish thread, which stops
     # every Present downstream -- silently. Poll instead of blocking, and name
     # the frame that is stuck (TheShell: 4 Invalid Resource frames, then Present
