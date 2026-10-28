@@ -657,7 +657,7 @@ jobs:
           # rebuilds, which is what every run did before this cache existed (the step
           # costs 2m09s of each build).
           path: app/Madeira/arm64ec-windows/d3d11.dll
-          key: dxmt-pe-ios15.6-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-${{ hashFiles('build/dxmt-pe/build.sh', 'build/dxmt-pe/prepare-meson.py', 'build/dxmt-pe/native-osx.txt', 'build/dxmt-pe/verify-metallib.py', 'build/llvm-ios/build.sh') }}
+          key: dxmt-pe-ios15.6-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-${{ hashFiles('build/dxmt-pe/build.sh', 'build/dxmt-pe/prepare-meson.py', 'build/dxmt-pe/native-osx.txt', 'build/dxmt-pe/verify-metallib.py', 'build/llvm-ios/build.sh', 'build/dxmt-ios/**') }}
 
       - name: DXMT PE（arm64ec d3d11.dll，内嵌库编成 iOS Metal）
         id: dxmt-pe
