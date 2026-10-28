@@ -3999,7 +3999,7 @@ struct LibraryHUD: View {
                     if dockStart.failure != nil {
                         launchGlyph("关闭会话", "stop.circle") { model.requestQuit() }
                     }
-                    launchGlyph(showLogs ? "Hide live log" : "Show live log", "text.alignleft", on: showLogs) {
+                    launchGlyph(showLogs ? "隐藏实时日志" : "显示实时日志", "text.alignleft", on: showLogs) {
                         model.toggleLaunchLogs()
                     }
                     if dockStart.holding {

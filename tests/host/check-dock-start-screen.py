@@ -72,12 +72,12 @@ require(poll.index('if dockStart.holding {') < poll.index('showGameView(reason: 
 row = library[library.index("The starting screen's controls are one row of glyph-only buttons"):]
 row = row[:row.index('if model.launchSlow')]
 require('HStack(spacing: 14)' in row, 'one row of glyph buttons')
-order = [row.index('"Close session", "stop.circle"'), row.index('"Hide live log" : "Show live log", "text.alignleft"'),
-         row.index('"Show desktop", "macwindow"')]
+# Order by system image: the labels are localized in this fork, the symbols are not.
+order = [row.index('"stop.circle"'), row.index('"text.alignleft"'), row.index('"macwindow"')]
 require(order == sorted(order), 'glyph order: close session, live log, show desktop')
 require('if dockStart.failure != nil {' in row and 'if dockStart.holding {' in row and 'dockStart.showDesktop(model)' in row,
         'close session only once the Dock stopped; show desktop only while the desktop is held back')
-require('Text("Madeira Dock stopped")' in library and 'DockInstallers.note' in library and 'DockStartStatus.text(' in library,
+require('Text("Madeira Dock 已停止")' in library and 'DockInstallers.note' in library and 'DockStartStatus.text(' in library,
         'the starting screen shows the Dock status, the one-time-install note, and a stop with its words')
 status = library[library.index('    private var dockStatus: String {'):]
 status = status[:status.index('\n    }\n')]

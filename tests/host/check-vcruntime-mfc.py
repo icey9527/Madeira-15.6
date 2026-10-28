@@ -34,7 +34,7 @@ def check(what, cond):
 wf_file = root / ".github/workflows/build-ipa.yml"
 step = None
 if wf_file.exists():
-    wf = wf_file.read_text()
+    wf = wf_file.read_text(encoding='utf-8')
     step = wf[wf.index("- name: Fetch the VC++ runtime DLLs from Microsoft"):]
     step = step[:step.index("\n      - name:", 10)]
     want = re.search(r'WANT="([^"]+)"', step)
@@ -64,7 +64,7 @@ check("mfc140u finds only mfc140u's payloads", found("mfc140u") == ["F_CENTRAL_m
 if step is not None:
     check("the arm64 build is then refused by the PE machine check", "== 0x8664" in step and "is_x64" in step)
 
-m = (root / "app/Madeira/WineProcessBridge.m").read_text()
+m = (root / "app/Madeira/WineProcessBridge.m").read_text(encoding='utf-8')
 blk = m[m.index('const char *mfcEnv = getenv("MADEIRA_MFC");'):]
 blk = blk[:blk.index('LOG("Symlinked %d MS VC++ Runtime DLLs')]
 check("MFC is off only for MADEIRA_MFC=0", "BOOL mfcOff = mfcEnv && mfcEnv[0] == '0';" in blk)
@@ -74,9 +74,9 @@ check("on: MFC goes through the same symlink as the runtime DLLs",
       blk.index('hasPrefix:@"mfc"') < blk.index("createSymbolicLinkAtPath:dst withDestinationPath:src"))
 check("the game's env lines are exported before the links are made",
       m.index('const char *gameCfg = getenv("MADEIRA_CFG_GAME");') < m.index('const char *mfcEnv = getenv("MADEIRA_MFC");'))
-doc = (root / "tools/fetch-vcruntime.md").read_text()
+doc = (root / "tools/fetch-vcruntime.md").read_text(encoding='utf-8')
 check("tools/fetch-vcruntime.md lists MFC", "mfc140.dll" in doc and "mfc140u.dll" in doc and "Fourteen files" in doc)
-cat = (root / "app/Madeira/ConfigCatalog.generated.swift").read_text()
+cat = (root / "app/Madeira/ConfigCatalog.generated.swift").read_text(encoding='utf-8')
 check("catalog lists env.MADEIRA_MFC, on by default",
       re.search(r'key: "env.MADEIRA_MFC".*kind: \.bool, defaultValue: "1"', cat) is not None)
 
