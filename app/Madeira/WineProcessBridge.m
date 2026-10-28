@@ -21,6 +21,7 @@
 #include <dirent.h>
 #include "../../build/madeira_cfg.h"   /* ml1095: one config file */
 #include <sys/stat.h>
+#include <pwd.h>
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
@@ -362,6 +363,29 @@ static char *g_prefix_path = NULL;
  * env.MADEIRA_CFG_EARLY_DOCS = 0 in madeira.cfg. Pure C, host-tested
  * (tests/host/check-cfg-early-docs.py). */
 static const char *g_madeira_docs_early = "not-run";
+/* madeira-env-locked: MADEIRA_ENV_LOCKED is a comma-separated list of names
+ * the host set on purpose. Without it a madeira.cfg line -- or a library
+ * game's own config -- could replace the program the front end was asked to
+ * launch, and the user taps one thing while another starts, with nothing on
+ * screen to say so. The match is on the whole name between commas, so a lock
+ * on MADEIRA_EXE does not also catch MADEIRA_EXEC_FOO. Nothing is locked
+ * unless a host asks for it. */
+static int madeira_env_is_locked(const char *name)
+{
+    const char *locked = getenv("MADEIRA_ENV_LOCKED");
+    if (!locked || !*locked || !name || !*name) return 0;
+    size_t n = strlen(name);
+    for (const char *p = locked; *p; ) {
+        while (*p == ' ' || *p == ',') p++;
+        const char *start = p;
+        while (*p && *p != ',') p++;
+        const char *end = p;
+        while (end > start && end[-1] == ' ') end--;
+        if ((size_t)(end - start) == n && !strncmp(start, name, n)) return 1;
+    }
+    return 0;
+}
+
 static int madeira_cfg_off_word(const char *v)
 {
     return v && (!strcmp(v, "0") || !strcmp(v, "off") || !strcmp(v, "no"));
@@ -1293,6 +1317,20 @@ static void *wine_process_thread(void *arg) {
                     if ([[NSFileManager defaultManager] createFileAtPath:swapPath contents:nil attributes:@{NSFileProtectionKey: NSFileProtectionNone}]) {
                         setenv("MADEIRA_SWAP_FILE", swapPath.UTF8String, 1);
                         setenv("MADEIRA_SWAP_MB", [NSString stringWithFormat:@"%ld", capMB].UTF8String, 1);
+                        /* madeira-bcd: swap-min-kb (madeira.cfg or the game's config) lowers
+                         * the tier's 8 MB eligibility floor. Upstream's virtual_ios.c reads
+                         * MADEIRA_SWAP_MIN_KB only in its "blocks" coverage, so swap-min-kb
+                         * selects that; an env.MADEIRA_SWAP_COVERAGE line, exported below,
+                         * still wins. */
+                        long minKB = (long)madeira_cfg_int("swap-min-kb", 0);
+                        if (minKB > 0) {
+                            setenv("MADEIRA_SWAP_MIN_KB", [NSString stringWithFormat:@"%ld", minKB].UTF8String, 1);
+                            setenv("MADEIRA_SWAP_COVERAGE", "blocks", 1);
+                            fprintf(stderr, "[swap] app: commits from %ld KB are eligible (swap-min-kb, coverage=blocks)\n", minKB);
+                        } else {
+                            unsetenv("MADEIRA_SWAP_MIN_KB");
+                            unsetenv("MADEIRA_SWAP_COVERAGE");
+                        }
                         LOG("ml1077 swap tier armed: %{public}s, %ld MB", swapPath.UTF8String, capMB);
                         fprintf(stderr, "[swap] ml1077 app: backing file %s, cap %ld MB\n", swapPath.UTF8String, capMB);
                     }
@@ -1367,6 +1405,11 @@ static void *wine_process_thread(void *arg) {
                                 k.UTF8String, getenv(k.UTF8String), v.UTF8String);
                         continue;
                     }
+                    if (madeira_env_is_locked(k.UTF8String)) {
+                        fprintf(stderr, "[madeira-env] %s is set by the app; "
+                                "the config value is ignored\n", k.UTF8String);
+                        continue;
+                    }
                     setenv(k.UTF8String, v.UTF8String, 1);
                     LOG("madeira.cfg env: %{public}s=%{public}s", k.UTF8String, v.UTF8String);
                     fprintf(stderr, "[madeira-env] ml1062 %s=%s\n", k.UTF8String, v.UTF8String);
@@ -1385,6 +1428,11 @@ static void *wine_process_thread(void *arg) {
                     NSString *k = [[line substringWithRange:NSMakeRange(4, eq.location - 4)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
                     NSString *v = [[line substringFromIndex:eq.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
                     if (!k.length) continue;
+                    if (madeira_env_is_locked(k.UTF8String)) {
+                        fprintf(stderr, "[madeira-env] %s is set by the app; "
+                                "the config value is ignored\n", k.UTF8String);
+                        continue;
+                    }
                     setenv(k.UTF8String, v.UTF8String, 1);
                     LOG("game config env: %{public}s=%{public}s", k.UTF8String, v.UTF8String);
                     fprintf(stderr, "[madeira-env] game %s=%s\n", k.UTF8String, v.UTF8String);
@@ -1620,6 +1668,43 @@ static void *wine_process_thread(void *arg) {
                         repaired, already);
             }
 
+            /* madeira-bcd: the same folders for the user Wine actually runs as.
+             * ml719 covers C:\users\madeira (the template's user), but Wine
+             * names the profile after the unix user -- "mobile" on iOS -- so
+             * %USERPROFILE% is C:\users\mobile, where Documents may be
+             * missing or a dangling link. Ghost of Tsushima then stops with
+             * "Unable to create the game's save folder" before touching the
+             * filesystem. Make every folder games write to a real directory
+             * (Saved Games and AppData too), for both names. */
+            {
+                NSMutableOrderedSet *names = [NSMutableOrderedSet orderedSetWithObject:@"madeira"];
+                struct passwd *pw = getpwuid(getuid());
+                if (pw && pw->pw_name && pw->pw_name[0]) [names addObject:@(pw->pw_name)];
+                const char *envUser = getenv("USER");
+                if (envUser && envUser[0]) [names addObject:@(envUser)];
+                NSArray *rels = @[ @"Documents", @"Desktop", @"Downloads", @"Music", @"Pictures",
+                                   @"Videos", @"Saved Games", @"AppData/Local", @"AppData/LocalLow",
+                                   @"AppData/Roaming" ];
+                int made = 0;
+                for (NSString *name in names) {
+                    NSString *home = [prefix stringByAppendingPathComponent:
+                        [@"drive_c/users" stringByAppendingPathComponent:name]];
+                    for (NSString *rel in rels) {
+                        NSString *path = [home stringByAppendingPathComponent:rel];
+                        const char *cp = path.fileSystemRepresentation;
+                        struct stat lst, tgt;
+                        if (lstat(cp, &lst) == 0) {
+                            if (!S_ISLNK(lst.st_mode) || stat(cp, &tgt) == 0) continue;
+                            unlink(cp);                       /* dangling link */
+                        }
+                        if ([fm createDirectoryAtPath:path withIntermediateDirectories:YES
+                                           attributes:nil error:nil]) made++;
+                    }
+                }
+                dprintf(STDERR_FILENO, "[shell-dir] user folders for %s: %d created\n",
+                        [[names.array componentsJoinedByString:@", "] UTF8String], made);
+            }
+
             // Layer Microsoft's real VC++ Runtime DLLs ON TOP of the ARM64EC
             // bundle (only for x86_64 guests). These overwrite Wine's stub
             // builtins — Wine then loads the real MS x86_64 implementation
@@ -1630,10 +1715,51 @@ static void *wine_process_thread(void *arg) {
             // that exercise the full C++ runtime (parallel_for, atomic_wait,
             // <filesystem>, etc.) don't trip __wine_unimplemented stubs.
             if (use_arm64ec) {
-                NSString *vcrtSource = [bundlePath stringByAppendingPathComponent:@"x86_64-vcruntime"];
-                NSArray *vcrtDlls = [fm contentsOfDirectoryAtPath:vcrtSource error:nil];
+                /* madeira-vcruntime-sources: two sources, not one.
+                 *
+                 * The bundle is read-only and signature-sealed, so DLLs placed
+                 * there can only arrive by rebuilding the app -- which for a
+                 * sideloaded build is the entire install cycle. Documents is
+                 * user-writable (UIFileSharingEnabled), so it is searched
+                 * first and a user-supplied file shadows a bundled one. */
+                NSString *vcrtBundleSource = [bundlePath stringByAppendingPathComponent:@"x86_64-vcruntime"];
+                NSString *vcrtDocsSource = [NSSearchPathForDirectoriesInDomains(
+                    NSDocumentDirectory, NSUserDomainMask, YES).firstObject
+                    stringByAppendingPathComponent:@"vcruntime"];
+                NSMutableArray *vcrtNames = [NSMutableArray array];
+                NSMutableDictionary *vcrtHome = [NSMutableDictionary dictionary];
+                for (NSString *dir in @[vcrtDocsSource, vcrtBundleSource]) {
+                    for (NSString *f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+                        /* Skip anything that is not a DLL. Without this the
+                         * placeholder README.txt that has to exist for Xcode's
+                         * resource copy to succeed is symlinked into system32,
+                         * and the "Symlinked N" count counts it. */
+                        if (![[f pathExtension] isEqualToString:@"dll"]) continue;
+                        if (vcrtHome[[f lowercaseString]]) continue;  /* Documents wins */
+                        vcrtHome[[f lowercaseString]] = [dir stringByAppendingPathComponent:f];
+                        [vcrtNames addObject:f];
+                    }
+                }
+                NSArray *vcrtDlls = vcrtNames;
                 int vcrtLinked = 0, vcrtSkipped = 0;
+                /* madeira-bcd: MFC (mfc140.dll, mfc140u.dll) comes from the same
+                 * VC_redist.x64.exe since 2026-10-09: Horizon Zero Dawn imports
+                 * mfc140.dll and stopped at once with c0000135 without it (log
+                 * 12:51:47, build 466). Wine has no MFC of its own, so nothing
+                 * else changes. env.MADEIRA_MFC = 0 leaves it out of system32. */
+                const char *mfcEnv = getenv("MADEIRA_MFC");
+                BOOL mfcOff = mfcEnv && mfcEnv[0] == '0';
                 for (NSString *dll in vcrtDlls) {
+                    if ([[dll lowercaseString] hasPrefix:@"mfc"]) {
+                        NSString *dst = [sys32Dir stringByAppendingPathComponent:dll];
+                        if (mfcOff) {
+                            [fm removeItemAtPath:dst error:nil];   /* a link from an earlier session */
+                            vcrtSkipped++;
+                            dprintf(STDERR_FILENO, "[WineProc] %s left out (MADEIRA_MFC=0)\n", dll.UTF8String);
+                            continue;
+                        }
+                        dprintf(STDERR_FILENO, "[WineProc] MFC %s linked (MADEIRA_MFC=0 leaves it out)\n", dll.UTF8String);
+                    }
                     /* NOTE 2026-07-03 (late): retried lifting BOTH exemptions
                      * below after the fast-write bisect, hoping trap-mode had
                      * fixed the corruption class (and to keep hot CRT calls
@@ -1669,7 +1795,7 @@ static void *wine_process_thread(void *arg) {
                         vcrtSkipped++;
                         continue;
                     }
-                    NSString *src = [vcrtSource stringByAppendingPathComponent:dll];
+                    NSString *src = vcrtHome[[dll lowercaseString]];
                     NSString *dst = [sys32Dir stringByAppendingPathComponent:dll];
                     [fm removeItemAtPath:dst error:nil];
                     if ([fm createSymbolicLinkAtPath:dst withDestinationPath:src error:nil])

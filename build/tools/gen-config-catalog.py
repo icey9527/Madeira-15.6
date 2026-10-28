@@ -104,6 +104,11 @@ OVERLAY = {
                         "wineserver and ntdll; not meant to be set by hand."},
     "env.MADEIRA_HIDPAD_NAME": {"category": "Controllers",
                 "note": "Set by the app: the product string a generic HID gamepad reports (the physical pad's name)."},
+    "env.MADEIRA_MFC": {"category": "App & front end", "title": "MFC runtime (mfc140)", "kind": "bool",
+                "default": "1",
+                "note": "On (default): mfc140.dll and mfc140u.dll come from the same VC_redist.x64.exe as the "
+                        "C++ runtime and are linked into system32. 0 leaves MFC out, for a game that brings its own.",
+                "sources": ["app/Madeira/WineProcessBridge.m"]},
     "env.MADEIRA_HIDPAD_XINPUT": {"category": "Controllers", "title": "HID mode: keep player 1 on XInput too", "kind": "bool",
                 "default": "0",
                 "note": "1: with the HID controller on, player 1 also stays an XInput pad. Off by default, so a game "
@@ -205,7 +210,7 @@ def scan():
             if not path.endswith(EXT) or any(s in path for s in SKIP):
                 continue
             try:
-                txt = open(os.path.join(ROOT, path), errors="ignore").read()
+                txt = open(os.path.join(ROOT, path), encoding="utf-8", errors="ignore").read()
             except OSError:
                 continue
             lines = txt.split("\n")
@@ -273,13 +278,13 @@ def render(opts):
 def main():
     text = render(scan())
     if "--check" in sys.argv:
-        cur = open(OUT).read() if os.path.exists(OUT) else ""
+        cur = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else ""
         if cur != text:
             print("ConfigCatalog.generated.swift is out of date: run build/tools/gen-config-catalog.py")
             return 1
         print("ConfigCatalog.generated.swift is current")
         return 0
-    open(OUT, "w").write(text)
+    open(OUT, "w", encoding="utf-8", newline=chr(10)).write(text)
     print(f"wrote {OUT}")
     return 0
 
