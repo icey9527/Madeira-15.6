@@ -87,8 +87,21 @@ meson setup "$PE_BUILD" "$DXMT" \
   -Dwine_build_path="$WINE_PATH_ABS" \
   --wipe
 
-say "meson compile"
-meson compile -C "$PE_BUILD"
+say "meson compile (only the four DLLs)"
+# Only these four are shipped: everything else in the tree (airconv's static
+# library, the CLI, the macOS nativemetal backend) is either built for iOS by
+# build.sh or needs a windows-hosted LLVM we do not carry here.
+PE_TARGETS="src/d3d11/d3d11.dll src/dxgi/dxgi.dll src/winemetal/winemetal.dll src/d3d10/d3d10core.dll"
+missing=""
+for t in $PE_TARGETS; do
+  ninja -C "$PE_BUILD" -t targets all 2>/dev/null | grep -q "^$t:" || missing="$missing $t"
+done
+if [ -n "$missing" ]; then
+  echo "  ninja 里没有这些目标:$missing —— 退回全量编译" >&2
+  meson compile -C "$PE_BUILD"
+else
+  ninja -C "$PE_BUILD" $PE_TARGETS
+fi
 
 say "stage the PE DLLs"
 mkdir -p "$OUT"
