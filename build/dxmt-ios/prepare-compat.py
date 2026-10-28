@@ -1264,6 +1264,37 @@ diag_files = (
          '          " h=", pPresentationParameters->BackBufferHeight));\n'
          '    // Non-Ex only: an Ex device never enters NotReset (wine/DXVK gate the store\n'),
     ), ('d9-reset')),
+    # Madeira-15.6: [d9-reset] reports how many DEFAULT-pool resources the app
+    # still holds (BaldrSky fullscreen: losable=2, Reset refused three times,
+    # then no more frames -- the game is wedged in NotReset, audio and input
+    # alive). The count alone does not say what those two are, and the gate must
+    # not be relaxed on a guess. Log every count edge with its byte size: 0
+    # bytes is an implicit backbuffer/depth-stencil or a state block, a real
+    # size is a texture or surface. Capped so a long session stays readable.
+    ('d3d9/d3d9_device.hpp', (
+        ('  onLosableResourceCreated(int64_t bytes = 0) {\n'
+         '    m_losableResourceCount.fetch_add(1, std::memory_order_relaxed);\n',
+         '  onLosableResourceCreated(int64_t bytes = 0) {\n'
+         '    m_losableResourceCount.fetch_add(1, std::memory_order_relaxed);\n'
+         '    {\n'
+         '      static unsigned madeira_los_logs;\n'
+         '      uint32_t now = m_losableResourceCount.load(std::memory_order_relaxed);\n'
+         '      if (madeira_los_logs++ < 200)\n'
+         '        Logger::warn(str::format("[d9-los]+ bytes=", (long long)bytes,\n'
+         '            " live=", now));\n'
+         '    }\n'),
+        ('  onLosableResourceDestroyed(int64_t bytes = 0) {\n'
+         '    m_losableResourceCount.fetch_sub(1, std::memory_order_relaxed);\n',
+         '  onLosableResourceDestroyed(int64_t bytes = 0) {\n'
+         '    m_losableResourceCount.fetch_sub(1, std::memory_order_relaxed);\n'
+         '    {\n'
+         '      static unsigned madeira_los_dlogs;\n'
+         '      uint32_t now = m_losableResourceCount.load(std::memory_order_relaxed);\n'
+         '      if (madeira_los_dlogs++ < 200)\n'
+         '        Logger::warn(str::format("[d9-los]- bytes=", (long long)bytes,\n'
+         '            " live=", now));\n'
+         '    }\n'),
+    ), ('d9-los')),
 )
 for relative, pairs, markers in diag_files:
     out = output_root / relative
