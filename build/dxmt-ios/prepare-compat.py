@@ -1294,10 +1294,12 @@ diag_files = (
         # Which class is holding the resource: the byte count alone cannot tell a
         # state block from an implicit surface when both report 0 (BaldrSky's
         # fullscreen Reset is blocked by exactly one 0-byte and one 32 KB entry).
-        ('  onLosableResourceCreated(int64_t bytes = 0) {\n'
+        ('  void\n'
+         '  onLosableResourceCreated(int64_t bytes = 0) {\n'
          '    m_losableResourceCount.fetch_add(1, std::memory_order_relaxed);\n',
          '  const char *madeira_last_kind = "?";\n'
          '  void madeiraLosableKind(const char *k) { madeira_last_kind = k; }\n'
+         '  void\n'
          '  onLosableResourceCreated(int64_t bytes = 0) {\n'
          '    m_losableResourceCount.fetch_add(1, std::memory_order_relaxed);\n'
          '    {\n'
