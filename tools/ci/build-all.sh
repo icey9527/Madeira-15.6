@@ -987,14 +987,19 @@ stage_app() {
   fi
 
   DD="$R/ci-DD/Madeira-DD"
+  # Debug for the test channel (symbols, assertions, readable crash logs),
+  # Release for a shipped build. Same DerivedData path either way: Xcode keeps
+  # the two configurations side by side and the app cache expects that path.
+  CONFIG="${MADEIRA_CONFIG:-Debug}"
+  DEBUG_DYLIB="${MADEIRA_DEBUG_DYLIB:-YES}"
   step "xcodebuild 编译冒烟 (Debug, 未签名, DerivedData=$DD)"
   rc=0
   tic
   xcodebuild -project app/Madeira.xcodeproj -scheme Madeira \
-    -configuration Debug -destination 'generic/platform=iOS' \
+    -configuration "$CONFIG" -destination 'generic/platform=iOS' \
     -derivedDataPath "$DD" \
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-    ENABLE_DEBUG_DYLIB=YES \
+    ENABLE_DEBUG_DYLIB="$DEBUG_DYLIB" \
     COMPILER_INDEX_STORE_ENABLE=NO \
     OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -warn-long-expression-type-checking=500 -Xfrontend -warn-long-function-bodies=1000' \
     -showBuildTimingSummary \

@@ -110,11 +110,15 @@ jobs:
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "title=Madeira iOS 15.6 移植 Nightly（dev 测试构建）" >> "$GITHUB_OUTPUT"
             echo "file=Madeira-15.6-dev-unsigned.ipa" >> "$GITHUB_OUTPUT"
+            echo "configuration=Debug" >> "$GITHUB_OUTPUT"
+            echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
           else
             echo "tag=stable" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             echo "title=Madeira iOS 15.6 移植 正式版" >> "$GITHUB_OUTPUT"
             echo "file=Madeira-15.6-stable-unsigned.ipa" >> "$GITHUB_OUTPUT"
+            echo "configuration=Release" >> "$GITHUB_OUTPUT"
+            echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Record runner hardware
@@ -704,6 +708,9 @@ jobs:
 
       - name: app（xcodebuild 编译冒烟）
         id: app
+        env:
+          MADEIRA_CONFIG: ${{ steps.channel.outputs.configuration }}
+          MADEIRA_DEBUG_DYLIB: ${{ steps.channel.outputs.debug_dylib }}
         run: tools/ci/build-all.sh app
 
       - name: Save App incremental build
@@ -724,7 +731,7 @@ jobs:
         if: success() && env.APP_ONLY != '1'
         run: |
           DD="$GITHUB_WORKSPACE/ci-DD/Madeira-DD"
-          APP="$DD/Build/Products/Debug-iphoneos/Madeira.app"
+          APP="$DD/Build/Products/${{ steps.channel.outputs.configuration }}-iphoneos/Madeira.app"
           if [ -x "$APP/Madeira" ]; then
             # Upstream v0.1.3 structure, read off the shipped IPA: `Madeira` is
             # a thin launcher that loads `@rpath/Madeira.debug.dylib`, and the
