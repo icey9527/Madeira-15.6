@@ -1236,3 +1236,46 @@ for relative, pairs, markers in perf_files:
             raise SystemExit(f'{relative}: {marker!r} missing from the written file')
     print(f'iOS {sys.argv[3]} d3d9 performance (iediot): {relative}')
 
+# Madeira-15.6: a Reset that fails leaves the device in NotReset, and a game
+# asking TestCooperativeLevel every frame then retries Reset forever with no
+# picture (BaldrSky, 2026-10-28: 1404 Resets in 23 s, audio playing, no present).
+# Both failure points returned silently; name them once each.
+diag_files = (
+    ('d3d9/d3d9_device.cpp', (
+        ('  if (!m_isEx && m_losableResourceCount.load(std::memory_order_relaxed) != 0) {\n'
+         '    m_deviceState.store(DeviceState::NotReset, std::memory_order_relaxed);\n'
+         '    return D3DERR_INVALIDCALL;\n'
+         '  }\n',
+         '  if (!m_isEx && m_losableResourceCount.load(std::memory_order_relaxed) != 0) {\n'
+         '    static unsigned reset_refusals;\n'
+         '    if (reset_refusals++ < 8)\n'
+         '      Logger::warn(str::format("[d9-reset] refused: losable=",\n'
+         '          m_losableResourceCount.load(std::memory_order_relaxed), " ex=", m_isEx));\n'
+         '    m_deviceState.store(DeviceState::NotReset, std::memory_order_relaxed);\n'
+         '    return D3DERR_INVALIDCALL;\n'
+         '  }\n'),
+        ('  if (FAILED(hr)) {\n'
+         '    // Non-Ex only: an Ex device never enters NotReset (wine/DXVK gate the store\n',
+         '  if (FAILED(hr)) {\n'
+         '    static unsigned reset_failures;\n'
+         '    if (reset_failures++ < 8)\n'
+         '      Logger::warn(str::format("[d9-reset] swapchain failed hr=", (uint32_t)hr,\n'
+         '          " w=", pPresentationParameters->BackBufferWidth,\n'
+         '          " h=", pPresentationParameters->BackBufferHeight));\n'
+         '    // Non-Ex only: an Ex device never enters NotReset (wine/DXVK gate the store\n'),
+    ), ('d9-reset')),
+)
+for relative, pairs, markers in diag_files:
+    out = output_root / relative
+    src = (out if out.exists() else source_root / relative).read_text(encoding='utf-8')
+    for original, replacement in pairs:
+        if src.count(original) != 1:
+            raise SystemExit(f'{relative}: reset diag expected 1 match, found {src.count(original)}')
+        src = src.replace(original, replacement)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(src, encoding='utf-8')
+    for marker in markers:
+        if marker not in out.read_text(encoding='utf-8'):
+            raise SystemExit(f'{relative}: {marker} missing')
+    print(f'iOS {sys.argv[3]} d3d9 reset diagnostics: {relative}')
+
