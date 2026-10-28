@@ -1340,8 +1340,15 @@ void main_loop(void)
                 static struct timespec qdump_last;
                 if (qdump_on < 0)
                 {
+                    /* Desktop mode always wants this; a game session can ask for it
+                     * too. A frozen game whose threads all park in the server wait
+                     * is either waiting on a message queue or on a kernel object,
+                     * and the dump names which -- BaldrSky's second fullscreen
+                     * switch stops presenting while everything waits, and the two
+                     * answers need opposite fixes (2026-10-28). */
                     const char *d = getenv("MADEIRA_DESKTOP");
-                    qdump_on = (d && *d == '1');
+                    const char *q = getenv("MADEIRA_SRV_DUMP");
+                    qdump_on = (d && *d == '1') || (q && q[0] == '1');
                 }
                 if (qdump_on)
                 {
