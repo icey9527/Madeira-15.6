@@ -9,6 +9,30 @@ BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
 DXMT_SRC="$REPO_ROOT/dxmt/src"
 DXMT_ROOT="$REPO_ROOT/dxmt"
+
+# One tree, one copy of every file — decided here, before any -I path is built.
+#
+# This build used to compile a patched .cpp straight out of compat-src while its
+# quoted includes fell back to the pristine tree through -I. That works until a
+# HEADER is patched: then a translation unit sees the header twice (the compat
+# copy through its own directory, the source copy through -I) and every symbol
+# in it is "redefinition". Merging into one throwaway tree makes include
+# resolution uniform, and the real source tree stays pristine, so a rerun
+# regenerates the same patches from the same input.
+#
+# The merged tree sits at dxmt/build-src, not under build/, because
+# winemetal_unix.c includes "../../../../build/madeira_cfg.h" — four levels up
+# from its own directory must still be the repository root.
+python3 "$BUILD_DIR/prepare-compat.py" "$DXMT_SRC" "$BUILD_DIR/compat-src" "${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
+OVERLAY="$DXMT_ROOT/build-src"
+rm -rf "$OVERLAY"
+mkdir -p "$OVERLAY"
+cp -R "$DXMT_SRC/." "$OVERLAY/"
+if [ -d "$BUILD_DIR/compat-src" ]; then
+    cp -R "$BUILD_DIR/compat-src/." "$OVERLAY/"
+fi
+DXMT_SRC="$OVERLAY"
+echo "  merged tree: $(find "$OVERLAY" -type f | wc -l | tr -d ' ') files ($(du -sh "$OVERLAY" | cut -f1))"
 LLVM_SRC="$REPO_ROOT/toolchains/llvm-project/llvm"
 LLVM_BUILD="$REPO_ROOT/toolchains/llvm-ios-build"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -227,27 +251,6 @@ else
         exit 1
     fi
 fi
-
-python3 "$BUILD_DIR/prepare-compat.py" "$DXMT_SRC" "$BUILD_DIR/compat-src" "${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
-
-# One tree, one copy of every file.
-#
-# This build used to compile a patched .cpp straight out of compat-src while its
-# quoted includes fell back to the pristine tree through -I. That is fine until a
-# HEADER is patched: dxmt_context.cpp then saw dxmt_ring_bump_allocator.hpp twice
-# (compat copy through its own directory, source copy through -I$DXMT_SRC/dxmt)
-# and every symbol in it was "redefinition". Merging into one throwaway tree
-# makes include resolution uniform, and keeps the source tree pristine so a
-# rerun regenerates compat-src from the same input.
-OVERLAY="$BUILD_DIR/dxmt-src"
-rm -rf "$OVERLAY"
-mkdir -p "$OVERLAY"
-cp -R "$DXMT_SRC/." "$OVERLAY/"
-if [ -d "$BUILD_DIR/compat-src" ]; then
-    cp -R "$BUILD_DIR/compat-src/." "$OVERLAY/"
-fi
-DXMT_SRC="$OVERLAY"
-echo "  merged tree: $(find "$OVERLAY" -type f | wc -l | tr -d ' ') files ($(du -sh "$OVERLAY" | cut -f1))"
 
 echo "=== winemetal unix (Objective-C) ==="
 compile_objc "$DXMT_SRC/winemetal/unix/winemetal_unix.c" winemetal_unix
