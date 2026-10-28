@@ -286,6 +286,25 @@ fn_new = ('  params->ret = (obj_handle_t)[library newFunctionWithName:name];\n'
 if source.count(fn_old) != 1:
     raise SystemExit('DXMT winemetal_unix.c: newFunction body changed')
 source = source.replace(fn_old, fn_new)
+# A buffer Metal refuses to allocate comes back as handle 0, and every later
+# bind of it shows buf=0x0 -- which is exactly what the D3D11 sessions do at
+# index 16/29/30 (TheShell 13:22, all 80 sampled binds). Name the failure and
+# what was asked for, so the next log says whether it is the size, the options
+# or the CPU pointer.
+newbuf_old = ('  params->ret = (obj_handle_t)buffer;\n'
+              '  info->gpu_address = [buffer gpuAddress];\n')
+newbuf_new = ('  { static unsigned madeira_nil_bufs, madeira_ok_bufs;\n'
+              '    if (!buffer && madeira_nil_bufs++ < 20)\n'
+              '      fprintf(stderr, "[d11-newbuf] NIL len=%llu opts=%#llx cpu=%d%c",\n'
+              '              (unsigned long long)info->length, (unsigned long long)info->options,\n'
+              '              info->memory.ptr ? 1 : 0, 10);\n'
+              '    else if (buffer && madeira_ok_bufs++ < 6)\n'
+              '      fprintf(stderr, "[d11-newbuf] ok len=%llu opts=%#llx%c",\n'
+              '              (unsigned long long)info->length, (unsigned long long)info->options, 10); }\n'
+              + newbuf_old)
+if source.count(newbuf_old) != 1:
+    raise SystemExit('DXMT winemetal_unix.c: newBuffer tail changed')
+source = source.replace(newbuf_old, newbuf_new)
 # 3) pipeline -> function names
 # 4) remember pipeline and argument buffer
 setpso_old = ('      struct wmtcmd_render_setpso *body = (struct wmtcmd_render_setpso *)next;\n'
@@ -1295,6 +1314,30 @@ diag_files = (
          '            " live=", now));\n'
          '    }\n'),
     ), ('d9-los')),
+    # Madeira-15.6: the D3D11 front end binds its argument buffer at index 30
+    # (kArgumentBufferBindIndex) with a NULL MTLBuffer before every draw --
+    # TheShell 13:22: all 80 sampled binds at idx 16/29/30 were buf=0x0, while
+    # D3D9 sessions (GAML, BaldrSky) bind a real buffer at 29/30. The argument
+    # buffer comes from the ring allocator, so log its size and whether the
+    # allocation came back empty: that decides between "the ring handed out
+    # nothing" and "the PE never asked for one".
+    ('dxmt/dxmt_command_queue.hpp', (
+        ('  AllocateArgumentBuffer(uint64_t seq, size_t size) {\n'
+         '    auto [block, offset] = argbuf_allocator.allocate(seq, cpu_coherent.signaledValue(), size, 64);\n',
+         '  AllocateArgumentBuffer(uint64_t seq, size_t size) {\n'
+         '    auto [block, offset] = argbuf_allocator.allocate(seq, cpu_coherent.signaledValue(), size, 64);\n'
+         '    {\n'
+         '      static unsigned madeira_argbuf_ok, madeira_argbuf_null;\n'
+         '      if (!block.buffer) {\n'
+         '        if (madeira_argbuf_null++ < 40)\n'
+         '          Logger::warn(str::format("[d11-argbuf] NULL size=",\n'
+         '              (unsigned long long)size));\n'
+         '      } else if (madeira_argbuf_ok++ < 8) {\n'
+         '        Logger::warn(str::format("[d11-argbuf] ok size=",\n'
+         '            (unsigned long long)size));\n'
+         '      }\n'
+         '    }\n'),
+    ), ('d11-argbuf')),
 )
 for relative, pairs, markers in diag_files:
     out = output_root / relative
