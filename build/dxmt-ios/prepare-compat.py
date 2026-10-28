@@ -243,126 +243,13 @@ for pattern in ('[sampler gpuResourceID]', '[ret gpuResourceID]', '[t gpuResourc
         raise SystemExit(f'DXMT winemetal_unix.c still calls {pattern}')
 gpu_marker = 'madeira_gpu_resource_id'
 
-# Madeira-15.6 (D3D11 M0): log-only probe for the argument-buffer work. Names
-# the shader functions a pipeline was built from and dumps the first qwords of
-# the argument buffer at draw time, so the native side can be shown to see the
-# same table PE writes. MADEIRA_D11_PROBE=1 turns it on; nothing changes when
-# it is off.
-NL = chr(92) + 'n'   # a C string's newline, written without an escape in this file
-probe_helpers = r"""#include <stdarg.h>
-#include <unistd.h>
-/* Madeira-15.6: D3D11 argument-buffer probe (M0). Log-only. */
-static int madeira_d11_probe(void) {
-  static int on = -1;
-  if (on < 0) {
-    const char *e = getenv("MADEIRA_D11_PROBE");
-    on = e && e[0] == '1' && !e[1];
-  }
-  return on;
-}
-static unsigned madeira_d11_said;
-static void madeira_d11_log(const char *fmt, ...) {
-  va_list ap;
-  if (madeira_d11_said++ >= 60) return;
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-  fflush(stderr);
-}
-static void *madeira_d11_pso, *madeira_d11_ab;
-static unsigned madeira_d11_ab_off;
-
-"""
-probe_site = 'static NTSTATUS\n_MTLLibrary_newFunction(void *obj) {\n  struct unixcall_generic_obj_uint64_obj_ret *params = obj;\n'
-if source.count(probe_site) != 1:
-    raise SystemExit('DXMT winemetal_unix.c: newFunction site changed')
-source = source.replace(probe_site, probe_helpers + probe_site)
-# 2) function name at creation
-fn_old = '  params->ret = (obj_handle_t)[library newFunctionWithName:name];\n  [name release];\n'
-fn_new = ('  params->ret = (obj_handle_t)[library newFunctionWithName:name];\n'
-          '  if (madeira_d11_probe())\n'
-          '    madeira_d11_log("[d11-fn] %p %s\\n", (void *)params->ret, [name UTF8String]);\n'
-          '  [name release];\n')
-if source.count(fn_old) != 1:
-    raise SystemExit('DXMT winemetal_unix.c: newFunction body changed')
-source = source.replace(fn_old, fn_new)
-# A buffer Metal refuses to allocate comes back as handle 0, and every later
-# bind of it shows buf=0x0 -- which is exactly what the D3D11 sessions do at
-# index 16/29/30 (TheShell 13:22, all 80 sampled binds). Name the failure and
-# what was asked for, so the next log says whether it is the size, the options
-# or the CPU pointer.
-newbuf_old = ('  params->ret = (obj_handle_t)buffer;\n'
-              '  info->gpu_address = [buffer gpuAddress];\n')
-newbuf_new = ('  { static unsigned madeira_nil_bufs, madeira_ok_bufs;\n'
-              '    if (!buffer && madeira_nil_bufs++ < 20)\n'
-              '      fprintf(stderr, "[d11-newbuf] NIL len=%llu opts=%#llx cpu=%d%c",\n'
-              '              (unsigned long long)info->length, (unsigned long long)info->options,\n'
-              '              info->memory.ptr ? 1 : 0, 10);\n'
-              '    else if (buffer && madeira_ok_bufs++ < 6)\n'
-              '      fprintf(stderr, "[d11-newbuf] ok len=%llu opts=%#llx%c",\n'
-              '              (unsigned long long)info->length, (unsigned long long)info->options, 10); }\n'
-              + newbuf_old)
-if source.count(newbuf_old) != 1:
-    raise SystemExit('DXMT winemetal_unix.c: newBuffer tail changed')
-source = source.replace(newbuf_old, newbuf_new)
-# 3) pipeline -> function names
-# 4) remember pipeline and argument buffer
-setpso_old = ('      struct wmtcmd_render_setpso *body = (struct wmtcmd_render_setpso *)next;\n'
-              '      [encoder setRenderPipelineState:(id<MTLRenderPipelineState>)body->pso];\n')
-setpso_new = ('      struct wmtcmd_render_setpso *body = (struct wmtcmd_render_setpso *)next;\n'
-              '      madeira_d11_pso = (void *)body->pso;\n'
-              '      [encoder setRenderPipelineState:(id<MTLRenderPipelineState>)body->pso];\n')
-if source.count(setpso_old) != 1:
-    raise SystemExit('DXMT winemetal_unix.c: setPSO case changed')
-source = source.replace(setpso_old, setpso_new)
-for setter in ('setVertexBuffer', 'setFragmentBuffer'):
-    old = '      [encoder %s:(id<MTLBuffer>)body->buffer offset:body->offset atIndex:body->index];\n' % setter
-    new = ('      if (madeira_d11_probe()) { static unsigned madeira_d11_bufs; if (madeira_d11_bufs++ < 40) fprintf(stderr, "[d11-buf] pid=%d idx=%u off=%u buf=%p%c", (int)getpid(), (unsigned)body->index, (unsigned)body->offset, (void *)body->buffer, 10); } if (body->index >= 16) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
-           + old)
-    if source.count(old) != 1:
-        raise SystemExit('DXMT winemetal_unix.c: %s site changed' % setter)
-    source = source.replace(old, new)
-# 5) dump the table at draw
-draw_old = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_order_relaxed);\n'
-            '      [encoder drawPrimitives:(MTLPrimitiveType)body->primitive_type\n')
-draw_new = ('      atomic_fetch_add_explicit(&g_madeira_draw_calls, 1, memory_order_relaxed);\n'
-            '      if (madeira_d11_probe()) {\n'
-            '        fprintf(stderr, "[d11-draw] enter%c", 10);\n'
-            '        const void *cpu = madeira_d11_ab ? [(id<MTLBuffer>)madeira_d11_ab contents] : 0;\n'
-            '        static unsigned madeira_d11_draws;\n'
-            '        if (madeira_d11_draws++ < 300)\n'
-            '          fprintf(stderr, "[d11-ab] pid=%d pso=%p ab=%p off=%u cpu=%p%c", (int)getpid(), madeira_d11_pso, madeira_d11_ab, (unsigned)madeira_d11_ab_off, cpu, 10);\n'
-            '        if (cpu) {\n'
-            '          const uint64_t *q = (const uint64_t *)((const char *)cpu + madeira_d11_ab_off);\n'
-            '          fprintf(stderr, "[d11-ab] q=%#llx,%#llx,%#llx,%#llx%c", (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3], 10);\n'
-            '        }\n'
-            '      }\n'
-            '      [encoder drawPrimitives:(MTLPrimitiveType)body->primitive_type\n')
-if source.count(draw_old) != 1:
-    raise SystemExit('DXMT winemetal_unix.c: draw site changed')
-source = source.replace(draw_old, draw_new)
-probe_marker = 'madeira_d11_probe'
-
-# The render command stream itself: which commands the PE sends and with
-# which buffer index. The probe above saw shader names but never the
-# argument buffer, so this names what arrives instead.
-cmd_old = ('  while (next) {\n'
-           '    switch ((enum WMTRenderCommandType)next->type) {\n')
-cmd_new = ('  while (next) {\n'
-           '    if (madeira_d11_probe()) { static unsigned madeira_d11_cmds; if (madeira_d11_cmds++ < 400) fprintf(stderr, "[d11-cmd] type=%u%c", (unsigned)next->type, 10); }\n'
-           '    switch ((enum WMTRenderCommandType)next->type) {\n')
-if source.count(cmd_old) != 1:
-    raise SystemExit('DXMT winemetal_unix.c: render command loop changed')
-source = source.replace(cmd_old, cmd_new)
-probe_marker = 'madeira_d11_cmds'
-
 output = output_root / relative
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(source, encoding='utf-8')
 
 # The file the build compiles is the only thing that matters, so check it.
 written = output.read_text(encoding='utf-8')
-for marker in (mtlcad_marker, gpu_marker, probe_marker):
+for marker in (mtlcad_marker, gpu_marker):
     if marker not in written:
         raise SystemExit(f'{relative}: {marker!r} missing from the written file')
 print(f'iOS {sys.argv[3]} gpuResourceID guarded in {relative} ({total} sites)')
@@ -1374,30 +1261,6 @@ diag_files = (
          '  m_deviceState.store(DeviceState::Ok, std::memory_order_relaxed);\n'
          '  Logger::warn("[d9-reset] done");\n'),
     ), ('d9-reset] gpu drain begin')),
-    # Madeira-15.6: the D3D11 front end binds its argument buffer at index 30
-    # (kArgumentBufferBindIndex) with a NULL MTLBuffer before every draw --
-    # TheShell 13:22: all 80 sampled binds at idx 16/29/30 were buf=0x0, while
-    # D3D9 sessions (GAML, BaldrSky) bind a real buffer at 29/30. The argument
-    # buffer comes from the ring allocator, so log its size and whether the
-    # allocation came back empty: that decides between "the ring handed out
-    # nothing" and "the PE never asked for one".
-    ('dxmt/dxmt_command_queue.hpp', (
-        ('  AllocateArgumentBuffer(uint64_t seq, size_t size) {\n'
-         '    auto [block, offset] = argbuf_allocator.allocate(seq, cpu_coherent.signaledValue(), size, 64);\n',
-         '  AllocateArgumentBuffer(uint64_t seq, size_t size) {\n'
-         '    auto [block, offset] = argbuf_allocator.allocate(seq, cpu_coherent.signaledValue(), size, 64);\n'
-         '    {\n'
-         '      static unsigned madeira_argbuf_ok, madeira_argbuf_null;\n'
-         '      if (!block.buffer) {\n'
-         '        if (madeira_argbuf_null++ < 40)\n'
-         '          Logger::warn(str::format("[d11-argbuf] NULL size=",\n'
-         '              (unsigned long long)size));\n'
-         '      } else if (madeira_argbuf_ok++ < 8) {\n'
-         '        Logger::warn(str::format("[d11-argbuf] ok size=",\n'
-         '            (unsigned long long)size));\n'
-         '      }\n'
-         '    }\n'),
-    ), ('d11-argbuf')),
     # Madeira-15.6: the D3D11 argument-buffer ring is a 4 MB CPU-visible block
     # handed to Metal as a no-copy mapping. On device that mapping is refused
     # ([d11-newbuf] NIL len=4194304 cpu=1), so the ring hands out a block with
