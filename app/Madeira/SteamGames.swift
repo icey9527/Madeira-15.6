@@ -947,6 +947,18 @@ struct SteamGameSheet: View {
                     }
                     Section {
                         if item.installed == nil { SteamGameLanguagePicker(appID: appID) }
+                        if item.installed == nil, let game = steam.game(appID) {
+                            if let bytes = game.downloadBytes {
+                                LabeledContent15("下载大小", value: "约 " + formatBytes(Int64(clamping: bytes)))
+                            }
+                            if let bytes = game.installBytes {
+                                LabeledContent15("安装后占用", value: "约 " + formatBytes(Int64(clamping: bytes)))
+                            }
+                            if game.downloadBytes == nil && game.installBytes == nil {
+                                Text("Steam 没有给出这款游戏的大小。刷新 Steam 游戏库后再看一次。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                         if let freeSpace { LabeledContent15("此设备上的可用空间", value: formatBytes(freeSpace)) }
                         Text(SteamGameSheet.downloadNote)
                             .font(.footnote).foregroundStyle(.secondary)
