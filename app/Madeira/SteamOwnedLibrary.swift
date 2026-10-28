@@ -623,10 +623,30 @@ final class SteamOwnedLibrary: ObservableObject {
         var settled: [String: String] = [:]
         do {
             guard let context = try await cloudContext(appID) else { throw SteamFileError.invalid("This game's save folders could not be found.") }
-            for entry in wanted {
+            // Steam Cloud 的一个文件是两次往返（要下载地址 + 取内容），逐个下载时
+            // 延迟占满整个同步时间。取内容按 5 个并发进行，落地仍按顺序：备份与
+            // 进度条都以这个顺序为准。
+            let placable: [(SteamCloudEntry, (base: String, parts: [String]))] = wanted.compactMap { entry in
+                guard let place = context.paths.location(cloudPath: entry.path) else { return nil }
+                return (entry, (place.base, place.parts))
+            }
+            var fetched: [String: Data] = [:]
+            try await withThrowingTaskGroup(of: (String, Data).self) { group in
+                let window = 5
+                var next = 0
+                func add(_ index: Int) {
+                    let entry = placable[index].0
+                    group.addTask { (entry.key, try await self.cloudFile(appID, entry)) }
+                }
+                while next < min(window, placable.count) { add(next); next += 1 }
+                while let (key, data) = try await group.next() {
+                    fetched[key] = data
+                    if next < placable.count { add(next); next += 1 }
+                }
+            }
+            for (entry, place) in placable {
                 guard !inSession else { throw CancellationError() }
-                guard let place = context.paths.location(cloudPath: entry.path) else { continue }
-                let file = try await cloudFile(appID, entry)
+                guard let file = fetched[entry.key] else { continue }
                 let url = SteamCloudPaths.resolve(base: place.base, parts: place.parts)
                 let existed = FileManager.default.fileExists(atPath: url.path)
                 let label = SteamCloudPaths.split(entry.path).root ?? "remote"

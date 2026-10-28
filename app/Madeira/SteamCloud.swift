@@ -618,8 +618,10 @@ extension SteamCloudTransfer {
     /// is 3; Steam's storage otherwise takes PUT. Returns each part's HTTP status.
     @discardableResult
     static func send(_ file: Data, blocks: [SteamCloudUploadBlock]) async throws -> [Int] {
-        var statuses: [Int] = []
-        for block in blocks {
+        guard !blocks.isEmpty else { return [] }
+        var statuses = Array(repeating: 0, count: blocks.count)
+        // 上行的每个 part 是一次独立请求，串行时延迟叠加；4 个并发，状态按原顺序返回。
+        func uploadOne(_ block: SteamCloudUploadBlock) async throws -> Int {
             guard let url = block.url else { throw SteamFileError.invalid("Steam gave no usable address for an upload.") }
             var body = block.explicitBody
             if body.isEmpty {
@@ -633,8 +635,21 @@ extension SteamCloudTransfer {
             for header in block.headers { request.setValue(header.value, forHTTPHeaderField: header.name) }
             let (_, response) = try await uploadSession.upload(for: request, from: body)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            statuses.append(status)
             guard (200..<300).contains(status) else { throw SteamFileError.invalid("Steam Cloud upload failed (HTTP \(status)).") }
+            return status
+        }
+        try await withThrowingTaskGroup(of: (Int, Int).self) { group in
+            let window = 4
+            var next = 0
+            func add(_ index: Int) {
+                let block = blocks[index]
+                group.addTask { (index, try await uploadOne(block)) }
+            }
+            while next < min(window, blocks.count) { add(next); next += 1 }
+            while let (index, status) = try await group.next() {
+                statuses[index] = status
+                if next < blocks.count { add(next); next += 1 }
+            }
         }
         return statuses
     }
