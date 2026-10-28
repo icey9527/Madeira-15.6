@@ -1238,6 +1238,15 @@ diag_files = (
     # device state. These say which: a gate rejection, a Reset stuck draining the
     # GPU, or a Reset that finished.
     ('d3d9/d3d9_swapchain.cpp', (
+        # Is Present even called after the freeze? BaldrSky's three Resets all
+        # complete (gpu drain begin/done, then done) and no gate rejection
+        # follows, so "frozen" is either "the game stopped presenting" or
+        # "Present returns but nothing reaches the layer". Count the calls.
+        ('  D3D9_CENSUS_FRAME(D3D9_CENSUS_MTLD3D9SwapChain_Present);\n',
+         '  D3D9_CENSUS_FRAME(D3D9_CENSUS_MTLD3D9SwapChain_Present);\n'
+         '  { static unsigned madeira_present_calls; unsigned n = madeira_present_calls++;\n'
+         '    if (n < 3 || (n % 300) == 0)\n'
+         '      Logger::warn(str::format("[d9-present] call n=", n)); }\n'),
         ('  if (HRESULT state = m_device->presentStateGate(); state != D3D_OK)\n'
          '    return state;\n',
          '  if (HRESULT state = m_device->presentStateGate(); state != D3D_OK) {\n'
