@@ -23,6 +23,10 @@ DXMT_ROOT="$REPO_ROOT/dxmt"
 # The merged tree sits at dxmt/build-src, not under build/, because
 # winemetal_unix.c includes "../../../../build/madeira_cfg.h" — four levels up
 # from its own directory must still be the repository root.
+# Always regenerate: prepare-compat.py reads a file from its own output when one
+# is already there, so a second run in the same workspace would patch patched
+# text and die on a missing anchor.
+rm -rf "$BUILD_DIR/compat-src"
 python3 "$BUILD_DIR/prepare-compat.py" "$DXMT_SRC" "$BUILD_DIR/compat-src" "${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
 OVERLAY="$DXMT_ROOT/build-src"
 rm -rf "$OVERLAY"

@@ -52,14 +52,23 @@ python3 "$R/build/dxmt-pe/prepare-meson.py" "$R/dxmt"
 # shipped ours: the argument-buffer ring allocation probe added to
 # dxmt_command_queue.hpp on 2026-10-28 never appeared in a device log, while the
 # probes in winemetal_unix.c (unix side) did.
-python3 "$R/build/dxmt-ios/prepare-compat.py" "$R/dxmt/src" "$R/build/dxmt-ios/compat-src" \
+#
+# The output directory is OURS, not the unix build's. prepare-compat.py reads a
+# file from its own output when one is already there (that is how several patch
+# entries for the same file compose), so pointing it at build/dxmt-ios/compat-src
+# after the unix build filled that directory makes it read patched text, miss
+# anchors and abort: "d3d9_texture.cpp: expected 1 match, found 0". A private
+# directory, wiped first, always starts from the pristine tree.
+PE_COMPAT="$R/build/dxmt-pe/compat-src"
+rm -rf "$PE_COMPAT"
+python3 "$R/build/dxmt-ios/prepare-compat.py" "$R/dxmt/src" "$PE_COMPAT" \
     "${IPHONEOS_DEPLOYMENT_TARGET:-15.6}"
-if [ -d "$R/build/dxmt-ios/compat-src" ]; then
-    ( cd "$R/build/dxmt-ios/compat-src" && find . -type f -print0 ) |
+if [ -d "$PE_COMPAT" ]; then
+    ( cd "$PE_COMPAT" && find . -type f -print0 ) |
     while IFS= read -r -d '' f; do
         f="${f#./}"
         mkdir -p "$R/dxmt/src/$(dirname "$f")"
-        cp "$R/build/dxmt-ios/compat-src/$f" "$R/dxmt/src/$f"
+        cp "$PE_COMPAT/$f" "$R/dxmt/src/$f"
     done
 fi
 
