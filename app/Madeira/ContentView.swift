@@ -217,6 +217,12 @@ final class MetalBackedView: UIView {
     private static var drawableObservation: NSKeyValueObservation?
     private static var pendingSettle: DispatchWorkItem?
     private static var lastApplied = ""
+    /// The geometry the guest has actually drawn with. Touch mapping uses these,
+    /// not the freshly requested ones: the picture only follows on the next
+    /// Present, so a tap during a mode change must land on the frame the user can
+    /// see rather than on the one that is about to appear.
+    private static var appliedRect: CGRect = .zero
+    private static var appliedGuest: CGSize = .zero
 
     /// Sizes the presented layer's host view to gameRect(). `[display] apply`
     /// is logged when the result changes.
@@ -231,6 +237,8 @@ final class MetalBackedView: UIView {
         let line = String(format: "mode=%@ guest=%.0fx%.0f bounds=%.0fx%.0f -> rect=(%.0f,%.0f %.0fx%.0f)",
                           mode.rawValue, guest.width, guest.height, bounds.width, bounds.height,
                           r.minX, r.minY, r.width, r.height)
+        Self.appliedRect = r
+        Self.appliedGuest = guest
         if line != Self.lastApplied {
             Self.lastApplied = line
             fputs("[display] apply reason=\(reason) \(line)\n", stderr)
@@ -281,6 +289,11 @@ final class MetalBackedView: UIView {
         if host.superview !== w {
             host.removeFromSuperview()
             w.addSubview(host)
+            // The game layer is sized to the guest's rect, so a mode change that
+            // narrows the picture uncovers whatever is behind it. That must be an
+            // opaque black window: otherwise the uncovered band keeps the previous
+            // frame's pixels (BaldrSky 16:9 -> 4:3 left the side bands frozen).
+            w.backgroundColor = .black
         }
         applyDisplayMode(reason: "attach")
         // S2 desktop mode: the winios compositor renders the wine virtual
@@ -328,7 +341,8 @@ final class MetalBackedView: UIView {
             Self.cursor = CGPoint(x: CGFloat(px), y: CGFloat(py))   // keep the trackpad cursor in step
             return (px, py)
         }
-        let g = GameSurfaceLayout.map(point: p, guest: guestSize(), aspect: drawableAspect(),
+        let guest = Self.appliedGuest == .zero ? guestSize() : Self.appliedGuest
+        let g = GameSurfaceLayout.map(point: p, guest: guest, aspect: drawableAspect(),
                                       bounds: bounds, mode: effectiveDisplayMode())
         return (Int32(g.x), Int32(g.y))
     }

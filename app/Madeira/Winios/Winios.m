@@ -998,7 +998,18 @@ static void winios_layout_compositor(void) {
 void winios_set_desktop_rect(double x, double y, double w, double h, int set) {
     dispatch_async(dispatch_get_main_queue(), ^{
         CGRect r = CGRectMake(x, y, w, h);
-        if (g_desk_rect_set == (set != 0) && (!set || CGRectEqualToRect(g_desk_rect, r))) return;
+        /* g_px_to_pt is derived from the DESKTOP size, and a game switching
+         * 16:9 -> 4:3 keeps the same letterbox rect while the desktop shrinks.
+         * Skipping the relayout on an unchanged rect left the touch scale stale,
+         * which is the "clickable area is wrong after a resolution change"
+         * report. Compare the desk size too. */
+        int desk_w = 0, desk_h = 0;
+        winios_screen_size(&desk_w, &desk_h);
+        static int last_desk_w = -1, last_desk_h = -1;
+        if (g_desk_rect_set == (set != 0) && (!set || CGRectEqualToRect(g_desk_rect, r)) &&
+            last_desk_w == desk_w && last_desk_h == desk_h) return;
+        last_desk_w = desk_w;
+        last_desk_h = desk_h;
         g_desk_rect = r;
         g_desk_rect_set = set != 0;
         winios_layout_compositor();
