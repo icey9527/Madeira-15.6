@@ -1421,10 +1421,26 @@ struct ContentView: View {
 
     private var lifecycleContent: some View {
         cloudContent
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                // Backgrounding mid-session is reported as "the picture freezes and
+                // the cursor still moves" (2026-10-28): the guest stops presenting
+                // while the app itself is fine. Mark the edge, so the session log
+                // shows exactly where the freeze starts.
+                if library.current != nil {
+                    fputs("[lifecycle] session resigned active (backgrounded)\n", stderr)
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 madeira_startup_log("startup-v2: lifecycle active begin")
                 library.refreshFlag()
                 if library.enabled && library.current == nil { MetalHostView.shared.isHidden = true }
+                else if library.current != nil {
+                    // Re-assert the layout on the way back: the drawable size is a
+                    // property of the layer, and iOS may have dropped it while the
+                    // app was suspended.
+                    fputs("[lifecycle] session became active: re-applying the display\n", stderr)
+                    MetalBackedView.refreshDisplayMode(reason: "active")
+                }
                 madeira_startup_log("startup-v2: lifecycle active complete")
             }
             .onAppear {
