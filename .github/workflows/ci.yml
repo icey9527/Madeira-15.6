@@ -109,14 +109,14 @@ jobs:
             echo "tag=nightly" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "title=Madeira iOS 15.6 移植 Nightly（dev 测试构建）" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-dev-unsigned.ipa" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-dev.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Debug" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
           else
             echo "tag=stable" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             echo "title=Madeira iOS 15.6 移植 正式版" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-stable-unsigned.ipa" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-stable.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           fi
