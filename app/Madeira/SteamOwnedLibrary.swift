@@ -634,7 +634,7 @@ final class SteamOwnedLibrary: ObservableObject {
             // Steam Cloud 的一个文件是两次往返（要下载地址 + 取内容），逐个下载时
             // 延迟占满整个同步时间。取内容按 5 个并发进行，落地仍按顺序：备份与
             // 进度条都以这个顺序为准。
-            let placable: [(SteamCloudEntry, (base: String, parts: [String]))] = wanted.compactMap { entry in
+            let placable: [(SteamCloudEntry, (base: URL, parts: [String]))] = wanted.compactMap { entry -> (SteamCloudEntry, (base: URL, parts: [String]))? in
                 guard let place = context.paths.location(cloudPath: entry.path) else { return nil }
                 return (entry, (place.base, place.parts))
             }
