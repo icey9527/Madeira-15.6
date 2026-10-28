@@ -1463,23 +1463,15 @@ struct ContentView: View {
                 LogStore.shared.log("[ab-test] run \(run.phase == 0 ? "A" : "B") mode=\(run.mode) ended: \(report.prefix(240))")
                 if run.phase == 0 {
                     let wasDirect = run.entry.startsSteamGameDirectly
-                    run.entry.steamStart = wasDirect ? nil : "game"
-                    if !wasDirect, run.entry.steamProgram?.isEmpty != false {
-                        // The direct launch needs a program chosen in Game details;
-                        // without one the run would only produce an error dialog.
-                        LogStore.shared.log("[ab-test] run B skipped: no program chosen")
-                        abTest = nil
-                        return
-                    }
-                    run.phase = 1
-                    let next = run
+                    var next = run
+                    next.entry.steamStart = wasDirect ? nil : "game"
+                    next.phase = 1
                     abTest = next
                     if let old = ABTestStore.load() {
                         ABTestStore.save(ABTestStore.State(appID: old.appID, entryID: old.entryID,
                                                            phase: 1, dockFirst: old.dockFirst))
                     }
-                    LogStore.shared.log("[ab-test] run B mode=\(next.mode) starting")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { launchLibraryEntry(next.entry) }
+                    startABTestRunB(next)
                 } else {
                     abTest = nil
                     ABTestStore.clear()
@@ -1496,16 +1488,12 @@ struct ContentView: View {
                 }
                 var flipped = entry
                 flipped.steamStart = state.dockFirst ? "game" : nil
-                if flipped.startsSteamGameDirectly, flipped.steamProgram?.isEmpty != false {
-                    LogStore.shared.log("[ab-test] run B skipped after restart: no program chosen")
-                    ABTestStore.clear(); return
-                }
                 abTest = ABTestRun(entry: flipped, phase: 1)
                 setenv("MADEIRA_ONE_SESSION_PER_RUN", "0", 1)
                 ABTestStore.save(ABTestStore.State(appID: state.appID, entryID: state.entryID,
                                                    phase: 1, dockFirst: state.dockFirst))
                 LogStore.shared.log("[ab-test] app restarted mid-test: starting run B mode=\(flipped.startsSteamGameDirectly ? "direct" : "Dock")")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { launchLibraryEntry(flipped) }
+                startABTestRunB(ABTestRun(entry: flipped, phase: 1))
             }
     }
 
@@ -2655,6 +2643,41 @@ struct ContentView: View {
     /// Play in the library (Library.swift): checks that a session can start,
     /// applies the entry's launch profile and runs the same full sequence as the
     /// developer interface's buttons.
+    /// Start run B of the A/B diagnosis. A direct run needs the program Steam
+    /// would start; when the entry has none yet, take the client's own launch
+    /// configuration (the same choice Game details › Program offers) instead of
+    /// skipping the run -- TheShell has no program recorded, which is exactly the
+    /// game this test exists for.
+    private func startABTestRunB(_ run: ABTestRun) {
+        Task { @MainActor in
+            var next = run
+            if next.entry.startsSteamGameDirectly, next.entry.steamProgram?.isEmpty != false {
+                guard let appID = next.entry.steamAppID,
+                      let game = MadeiraDock.games(drive: MadeiraDock.drive).first(where: { $0.id == appID })
+                else {
+                    LogStore.shared.log("[ab-test] run B skipped: the game is not in the Dock listing")
+                    abTest = nil; ABTestStore.clear(); return
+                }
+                let folder = MadeiraDock.drive.appendingPathComponent(game.library + "/common/" + game.installDir)
+                let options = await SteamOwnedLibrary.shared.launchOptions(appID: appID)
+                if let choice = options.flatMap({ SteamDirectStart.choose($0, installFolder: folder) }) {
+                    next.entry.steamProgram = choice.program
+                    next.entry.steamProgramArguments = choice.arguments
+                    next.entry.steamProgramFolder = choice.folder
+                    abTest = next
+                    LogStore.shared.log("[ab-test] run B program=\(choice.program)")
+                }
+                if next.entry.steamProgram?.isEmpty != false {
+                    LogStore.shared.log("[ab-test] run B skipped: Steam names no startable program")
+                    abTest = nil; ABTestStore.clear(); return
+                }
+            }
+            LogStore.shared.log("[ab-test] run B mode=\(next.mode) starting")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            launchLibraryEntry(next.entry)
+        }
+    }
+
     private func launchLibraryEntry(_ entry: LibraryEntry) {
         /* Automatic A/B launch diagnosis (MADEIRA_AB_TEST=1): run the game the way
          * the user asked, then the other way, back to back, and log where each run
