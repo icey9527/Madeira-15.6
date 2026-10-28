@@ -706,6 +706,15 @@ jobs:
           python3 build/dxmt-pe/verify-metallib.py app/Madeira/arm64ec-windows/d3d11.dll
           touch app/Madeira/arm64ec-windows/d3d11.dll
 
+      # dockhost.exe used to be a committed binary and nothing rebuilt it, so the
+      # console-window hide added to build/madeira-dock/console-quiet.c never
+      # reached a device and the Dock's console stayed on the guest desktop next
+      # to the game (BaldrSky 2026-10-28: a 1545x434 window over an 800x600
+      # desktop = the strip to the right of the picture).
+      - name: Madeira Dock host（dockhost.exe）
+        if: ${{ !cancelled() && env.APP_ONLY != '1' }}
+        run: bash build/madeira-dock/build.sh > >(tee ci-logs/dockhost.log) 2>&1
+
       - name: app（xcodebuild 编译冒烟）
         id: app
         env:
