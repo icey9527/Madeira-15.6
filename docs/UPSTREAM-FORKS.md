@@ -36,3 +36,5 @@
 ## 结论
 
 **优先上游，其次 iediot 的运行时修复，iDeck 只在 Steam 方向参考。** 每次动手前先跑 `upstream-report.py --search`，避免重复造轮子。
+
+<!-- merge capability check 2026-10-28 -->
