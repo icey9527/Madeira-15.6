@@ -1343,6 +1343,55 @@ diag_files = (
          '    if (n < 3 || (n % 300) == 0)\n'
          '      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }\n'),
     ), ('d9-present] dev Present')),
+    # A command buffer that never retires stops the finish thread, which stops
+    # every Present downstream -- silently. Poll instead of blocking, and name
+    # the frame that is stuck (TheShell: 4 Invalid Resource frames, then Present
+    # stopped at 10 and the picture froze with the app still alive).
+    ('dxmt/dxmt_command_queue.cpp', (
+        ('    if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
+         '      chunk.attached_cmdbuf.waitUntilCompleted();\n'
+         '    }\n',
+         '    if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
+         '      unsigned madeira_wait_ms = 0;\n'
+         '      while (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
+         '        Sleep(10);\n'
+         '        madeira_wait_ms += 10;\n'
+         '        if ((madeira_wait_ms % 2000) == 0) {\n'
+         '          static unsigned madeira_gpu_wait_said;\n'
+         '          if (madeira_gpu_wait_said++ < 20)\n'
+         '            ERR("[gpu-wait] frame=", chunk.frame_, " status=",\n'
+         '                (int)chunk.attached_cmdbuf.status(), " waited_ms=", madeira_wait_ms);\n'
+         '        }\n'
+         '      }\n'
+         '    }\n'),
+    ), ('gpu-wait] frame=')),
+    # Map must not hand out a NULL pointer with S_OK. Dead Cells (FNA, D3D11)
+    # writes through the mapped pointer at its own ring offset and faulted at
+    # 0x10004 -- 0x10000 (the 64 KB Windows allocation granularity) plus the 4-byte
+    # field, i.e. a NULL base plus an offset. A dynamic buffer whose Metal storage
+    # has no CPU mapping (allocation refused, or a storage mode without
+    # [buffer contents]) gives exactly that: pData NULL, pitches filled in, S_OK.
+    ('d3d11/d3d11_context_imm.cpp', (
+        ('        pMappedResource->DepthPitch = buffer_length;\n'
+         '        break;\n'
+         '      }\n'
+         '      }\n'
+         '      return S_OK;\n'
+         '    }\n',
+         '        pMappedResource->DepthPitch = buffer_length;\n'
+         '        break;\n'
+         '      }\n'
+         '      }\n'
+         '      if (!pMappedResource->pData) {\n'
+         '        static unsigned madeira_map_null;\n'
+         '        if (madeira_map_null++ < 20)\n'
+         '          Logger::warn(str::format("[d3d11-map] dynamic buffer has no CPU mapping: sub=",\n'
+         '              Subresource, " len=", buffer_length));\n'
+         '        return E_OUTOFMEMORY;\n'
+         '      }\n'
+         '      return S_OK;\n'
+         '    }\n'),
+    ), ('d3d11-map] dynamic buffer has no CPU mapping')),
     # Which kind each losable resource is. BaldrSky's fullscreen Reset is blocked
     # by exactly one 0-byte and one 32 KB entry, and the size cannot say whether
     # the 0-byte one is the implicit backbuffer/depth-stencil (which native D3D9
