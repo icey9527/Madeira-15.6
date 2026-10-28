@@ -1259,6 +1259,20 @@ struct MadeiraMetalView: UIViewRepresentable {
     func updateUIView(_ uiView: MetalBackedView, context: Context) {}
 }
 
+extension Notification.Name {
+    /// Posted by LibraryModel.finish() once the guest process is gone. The A/B
+    /// launch diagnosis (below) starts its second run from it.
+    static let madeiraSessionEnded = Notification.Name("MadeiraSessionEnded")
+}
+
+/// One run of the automatic A/B launch diagnosis (MADEIRA_AB_TEST=1):
+/// phase 0 is the mode the user asked for, phase 1 the other one.
+struct ABTestRun {
+    var entry: LibraryEntry
+    var phase: Int
+    var mode: String { entry.startsSteamGameDirectly ? "direct" : "Dock" }
+}
+
 struct ContentView: View {
     /// iOS 26 and later blur content under the navigation bar themselves.
     private static var systemScrollEdge: Bool {
@@ -1283,6 +1297,9 @@ struct ContentView: View {
     @ObservedObject private var library = LibraryModel.shared
     /// "Use New Interface" (actionButtons) applies at the next start.
     @State private var showFrontendRestart = false
+    /// The automatic A/B launch diagnosis, when the launch started one
+    /// (MADEIRA_AB_TEST=1). nil in every normal session.
+    @State private var abTest: ABTestRun?
 
     enum JITStatus {
         case unknown
@@ -1413,6 +1430,31 @@ struct ContentView: View {
             // now or, from a cold start, once the library is up.
             .onReceive(ShortcutRouter.shared.$pendingExe) { _ in launchPendingShortcut() }
             .onChange(of: library.enabled) { _ in launchPendingShortcut() }
+            // Second half of the A/B launch diagnosis (see launchLibraryEntry).
+            .onReceive(NotificationCenter.default.publisher(for: .madeiraSessionEnded).receive(on: RunLoop.main)) { note in
+                guard var run = abTest else { return }
+                let report = (note.object as? String) ?? LibraryModel.lastExitReport ?? "(no report)"
+                LogStore.shared.log("[ab-test] run \(run.phase == 0 ? "A" : "B") mode=\(run.mode) ended: \(report.prefix(240))")
+                if run.phase == 0 {
+                    let wasDirect = run.entry.startsSteamGameDirectly
+                    run.entry.steamStart = wasDirect ? nil : "game"
+                    if !wasDirect, run.entry.steamProgram?.isEmpty != false {
+                        // The direct launch needs a program chosen in Game details;
+                        // without one the run would only produce an error dialog.
+                        LogStore.shared.log("[ab-test] run B skipped: no program chosen")
+                        abTest = nil
+                        return
+                    }
+                    run.phase = 1
+                    let next = run
+                    abTest = next
+                    LogStore.shared.log("[ab-test] run B mode=\(next.mode) starting")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { launchLibraryEntry(next.entry) }
+                } else {
+                    abTest = nil
+                    LogStore.shared.log("[ab-test] done")
+                }
+            }
     }
 
     /// The developer interface. Orientation comes from the view's own shape, not
@@ -2562,6 +2604,18 @@ struct ContentView: View {
     /// applies the entry's launch profile and runs the same full sequence as the
     /// developer interface's buttons.
     private func launchLibraryEntry(_ entry: LibraryEntry) {
+        /* Automatic A/B launch diagnosis (MADEIRA_AB_TEST=1): run the game the way
+         * the user asked, then the other way, back to back, and log where each run
+         * ended. Built for TheShell, which renders ~100 frames and then calls a
+         * null vtable slot; running the same binary without the Dock tells us
+         * whether Steam is involved at all. The second run starts on
+         * .madeiraSessionEnded (below). */
+        if MadeiraConfig.flag("MADEIRA_AB_TEST", fallback: false), abTest == nil {
+            abTest = ABTestRun(entry: entry, phase: 0)
+            // Two sessions in one app run is exactly what this test needs.
+            setenv("MADEIRA_ONE_SESSION_PER_RUN", "0", 1)
+            LogStore.shared.log("[ab-test] run A mode=\(abTest?.mode ?? "-") app=\(entry.steamAppID.map { String($0) } ?? "-")")
+        }
         // A Steam game starts through Madeira Dock with its own launch profile (SteamGames.swift),
         // unless its Game details page chose "The game": then its own program starts below, like
         // any library game (SteamDirectStart).
@@ -2585,7 +2639,7 @@ struct ContentView: View {
             library.error = "A session is already running."; return
         }
         // One Wine session per app run (see LibraryModel.sessionsThisRun).
-        if LibraryModel.sessionsThisRun > 0, MadeiraConfig.flag("MADEIRA_ONE_SESSION_PER_RUN") {
+        if abTest == nil, LibraryModel.sessionsThisRun > 0, MadeiraConfig.flag("MADEIRA_ONE_SESSION_PER_RUN") {
             LogStore.shared.log("[session-once] launch held: \(LibraryModel.sessionsThisRun) session(s) already ran in this app run")
             library.restartNotice = LibraryModel.restartMessage; return
         }
@@ -3324,7 +3378,7 @@ struct ContentView: View {
             if inLibrary { library.error = "A session is already running." }
             return
         }
-        if inLibrary, LibraryModel.sessionsThisRun > 0, MadeiraConfig.flag("MADEIRA_ONE_SESSION_PER_RUN") {
+        if abTest == nil, inLibrary, LibraryModel.sessionsThisRun > 0, MadeiraConfig.flag("MADEIRA_ONE_SESSION_PER_RUN") {
             LogStore.shared.log("[session-once] Dock launch held: \(LibraryModel.sessionsThisRun) session(s) already ran in this app run")
             library.restartNotice = LibraryModel.restartMessage
             return

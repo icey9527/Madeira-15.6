@@ -605,6 +605,9 @@ struct LibraryEntry: Codable, Identifiable {
 }
 
 final class LibraryModel: ObservableObject {
+    /// What the session reported when it ended, for the [ab-test] launch diagnosis
+    /// (see ContentView): the A/B summary logs it next to each run's mode.
+    static var lastExitReport: String?
     static let shared = LibraryModel()
     static var documents: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
     static var drive: URL { documents.appendingPathComponent("wine/drive_c", isDirectory: true).resolvingSymlinksInPath() }
@@ -1156,7 +1159,9 @@ final class LibraryModel: ObservableObject {
         }
     }
     private func finish() {
-        if sawProcess, let report = exitReport() { error = report }
+        let report = sawProcess ? exitReport() : nil
+        Self.lastExitReport = report
+        if let report { error = report }
         timer?.invalidate(); timer = nil
         saveCurrentProfile()
         controllerMode = nil
@@ -1176,6 +1181,9 @@ final class LibraryModel: ObservableObject {
         MetalHostView.shared.isHidden = true
         ProMotionIntent.shared.setActive(false)
         fputs("[frontend] returned to library\n", stderr)
+        /* The A/B launch diagnosis (ContentView) starts its second run here: the
+         * guest process is gone, so a second session is safe. */
+        NotificationCenter.default.post(name: .madeiraSessionEnded, object: report)
     }
 
     /// A Dock start's host ended before any game window appeared: end the session
