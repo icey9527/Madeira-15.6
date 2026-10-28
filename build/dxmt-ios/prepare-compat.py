@@ -1291,8 +1291,13 @@ diag_files = (
     # bytes is an implicit backbuffer/depth-stencil or a state block, a real
     # size is a texture or surface. Capped so a long session stays readable.
     ('d3d9/d3d9_device.hpp', (
+        # Which class is holding the resource: the byte count alone cannot tell a
+        # state block from an implicit surface when both report 0 (BaldrSky's
+        # fullscreen Reset is blocked by exactly one 0-byte and one 32 KB entry).
         ('  onLosableResourceCreated(int64_t bytes = 0) {\n'
          '    m_losableResourceCount.fetch_add(1, std::memory_order_relaxed);\n',
+         '  const char *madeira_last_kind = "?";\n'
+         '  void madeiraLosableKind(const char *k) { madeira_last_kind = k; }\n'
          '  onLosableResourceCreated(int64_t bytes = 0) {\n'
          '    m_losableResourceCount.fetch_add(1, std::memory_order_relaxed);\n'
          '    {\n'
@@ -1300,7 +1305,8 @@ diag_files = (
          '      uint32_t now = m_losableResourceCount.load(std::memory_order_relaxed);\n'
          '      if (madeira_los_logs++ < 200)\n'
          '        Logger::warn(str::format("[d9-los]+ bytes=", (long long)bytes,\n'
-         '            " live=", now));\n'
+         '            " live=", now, " kind=", madeira_last_kind));\n'
+         '      madeira_last_kind = "?";\n'
          '    }\n'),
         ('  onLosableResourceDestroyed(int64_t bytes = 0) {\n'
          '    m_losableResourceCount.fetch_sub(1, std::memory_order_relaxed);\n',
@@ -1394,6 +1400,40 @@ diag_files = (
          '      block.owns_mapped = false;\n'
          '    }\n'),
     ), ('d11-ring')),
+    # Which kind each losable resource is. BaldrSky's fullscreen Reset is blocked
+    # by exactly one 0-byte and one 32 KB entry, and the size cannot say whether
+    # the 0-byte one is the implicit backbuffer/depth-stencil (which native D3D9
+    # hands back automatically) or a state block the game forgot to release --
+    # the two need opposite fixes.
+    ('d3d9/d3d9_buffer.cpp', (
+        ('MTLD3D9VertexBuffer::markLosable() {\n  if (!m_isLosable) {\n',
+         'MTLD3D9VertexBuffer::markLosable() {\n  if (!m_isLosable) {\n    m_device->madeiraLosableKind("vb");\n'),
+        ('MTLD3D9IndexBuffer::markLosable() {\n  if (!m_isLosable) {\n',
+         'MTLD3D9IndexBuffer::markLosable() {\n  if (!m_isLosable) {\n    m_device->madeiraLosableKind("ib");\n'),
+    ), ('madeiraLosableKind',)),
+    ('d3d9/d3d9_texture.cpp', (
+        ('MTLD3D9Texture::markLosable() {\n  if (!m_isLosable) {\n',
+         'MTLD3D9Texture::markLosable() {\n  if (!m_isLosable) {\n    m_device->madeiraLosableKind("tex");\n'),
+    ), ('madeiraLosableKind',)),
+    ('d3d9/d3d9_cube_texture.cpp', (
+        ('MTLD3D9CubeTexture::markLosable() {\n  if (!m_isLosable) {\n',
+         'MTLD3D9CubeTexture::markLosable() {\n  if (!m_isLosable) {\n    m_device->madeiraLosableKind("cube");\n'),
+    ), ('madeiraLosableKind',)),
+    ('d3d9/d3d9_volume_texture.cpp', (
+        ('MTLD3D9VolumeTexture::markLosable() {\n  if (!m_isLosable) {\n',
+         'MTLD3D9VolumeTexture::markLosable() {\n  if (!m_isLosable) {\n    m_device->madeiraLosableKind("vol");\n'),
+    ), ('madeiraLosableKind',)),
+    ('d3d9/d3d9_state_block.cpp', (
+        ('MTLD3D9StateBlock::markLosable() {\n  if (!m_isLosable) {\n',
+         'MTLD3D9StateBlock::markLosable() {\n  if (!m_isLosable) {\n    m_device->madeiraLosableKind("state");\n'),
+    ), ('madeiraLosableKind',)),
+    ('d3d9/d3d9_surface.cpp', (
+        ('MTLD3D9Surface::markLosable() {\n  if (!m_isLosable) {\n',
+         'MTLD3D9Surface::markLosable() {\n  if (!m_isLosable) {\n    m_device->madeiraLosableKind("surf");\n'),
+        ('    if (m_isImplicitLosable)\n      m_device->onLosableResourceCreated();\n',
+         '    if (m_isImplicitLosable) {\n      m_device->madeiraLosableKind("implicit");\n'
+         '      m_device->onLosableResourceCreated();\n    }\n'),
+    ), ('madeiraLosableKind',)),
 )
 for relative, pairs, markers in diag_files:
     out = output_root / relative
