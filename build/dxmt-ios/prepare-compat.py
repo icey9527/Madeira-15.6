@@ -1372,13 +1372,15 @@ diag_files = (
     # the frame that is stuck (TheShell: 4 Invalid Resource frames, then Present
     # stopped at 10 and the picture froze with the app still alive).
     ('dxmt/dxmt_command_queue.cpp', (
+        # <thread> for the poll above; the file already includes <chrono>.
+        ('#include <chrono>\n', '#include <chrono>\n#include <thread>\n'),
         ('    if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
          '      chunk.attached_cmdbuf.waitUntilCompleted();\n'
          '    }\n',
          '    if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
          '      unsigned madeira_wait_ms = 0;\n'
          '      while (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
-         '        Sleep(10);\n'
+         '        std::this_thread::sleep_for(std::chrono::milliseconds(10));\n'
          '        madeira_wait_ms += 10;\n'
          '        if ((madeira_wait_ms % 2000) == 0) {\n'
          '          static unsigned madeira_gpu_wait_said;\n'
