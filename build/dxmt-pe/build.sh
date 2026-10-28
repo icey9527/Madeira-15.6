@@ -43,6 +43,26 @@ METAL_TARGET="${DXMT_METAL_TARGET:-air64-apple-ios$MIN}"
 
 python3 "$R/build/dxmt-pe/prepare-meson.py" "$R/dxmt"
 
+# Madeira-15.6: compile the SAME sources the iOS library does.
+#
+# prepare-compat.py patches the D3D11 front end (and the rest of DXMT) into
+# build/dxmt-ios/compat-src, and build.sh there consumes those files one by one.
+# meson cannot, so the patched files are written back over the submodule before
+# configuring. Without this, d3d11.dll shipped upstream code while the unix side
+# shipped ours: the argument-buffer ring allocation probe added to
+# dxmt_command_queue.hpp on 2026-10-28 never appeared in a device log, while the
+# probes in winemetal_unix.c (unix side) did.
+python3 "$R/build/dxmt-ios/prepare-compat.py" "$R/dxmt/src" "$R/build/dxmt-ios/compat-src" \
+    "${IPHONEOS_DEPLOYMENT_TARGET:-15.6}"
+if [ -d "$R/build/dxmt-ios/compat-src" ]; then
+    ( cd "$R/build/dxmt-ios/compat-src" && find . -type f -print0 ) |
+    while IFS= read -r -d '' f; do
+        f="${f#./}"
+        mkdir -p "$R/dxmt/src/$(dirname "$f")"
+        cp "$R/build/dxmt-ios/compat-src/$f" "$R/dxmt/src/$f"
+    done
+fi
+
 if [ ! -f "$W/config.status" ]; then
     mkdir -p "$W"
     (cd "$W" && ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer)
