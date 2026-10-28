@@ -410,6 +410,15 @@ extern int winios_drv_foreground_if_owner(HWND hwnd);
  * window to the front, which its own thread does from its event pump
  * (g_restore_foreground, winios_pProcessEvents). */
 static _Atomic(uintptr_t) g_restore_foreground;
+/* iOS-Madeira: a window larger than the virtual desktop cannot be reached in
+ * full -- the pointer lives in desktop space, so the part of the window past
+ * the desktop is not clickable however it is drawn (desktop-fit scales the
+ * picture into the view, but not the input space). Rather than scale, ask the
+ * guest to grow its virtual monitor to the window: layout, pointer mapping and
+ * hit testing then all agree. */
+extern void winios_drv_grow_desktop(int w, int h);
+static _Atomic int g_grow_w, g_grow_h;
+
 static int winios_restore_born_minimized_enabled(void) {
     static int enabled = -1;
     if (enabled < 0) { const char *e = getenv("MADEIRA_RESTORE_BORN_MINIMIZED"); enabled = !(e && e[0] == '0'); }   /* 0: while a Dock start's census runs, a window first shown minimized stays minimized */
@@ -741,6 +750,11 @@ static double winios_key_min_hold(void) {
 static double g_key_down_at[256], g_btn_down_at[2];   /* under g_input_q.lock */
 
 BOOL winios_pProcessEvents(DWORD mask) {
+    {
+        int want_w = atomic_exchange(&g_grow_w, 0);
+        int want_h = atomic_exchange(&g_grow_h, 0);
+        if (want_w > 0 && want_h > 0) winios_drv_grow_desktop(want_w, want_h);
+    }
     /* The restored born-minimized window's own thread brings it to the front
      * (see g_restore_foreground); other threads leave the request in place. */
     uintptr_t fg = atomic_load_explicit(&g_restore_foreground, memory_order_relaxed);
@@ -1282,6 +1296,14 @@ static BOOL winios_desktop_fit(NSNumber *key, CAMetalLayer *ml, CGRect c) {
     CGRect desk = CGRectMake(0, 0, desk_w, desk_h);
     BOOL outside = desk_w > 0 && desk_h > 0 && c.size.width >= 64 && c.size.height >= 64
         && !CGRectContainsRect(CGRectInset(desk, -8, -8), c);
+    if (outside && winios_desktop_fit_enabled()) {
+        int want_w = (int)(c.origin.x + c.size.width + 0.5);
+        int want_h = (int)(c.origin.y + c.size.height + 0.5);
+        if (want_w > desk_w || want_h > desk_h) {
+            atomic_store(&g_grow_w, want_w);
+            atomic_store(&g_grow_h, want_h);
+        }
+    }
     if (!winios_desktop_fit_enabled() || !outside || !ml.superlayer || !g_compositor_view) {
         if (g_fit_key && [g_fit_key isEqual:key]) g_fit_key = nil;
         return NO;
