@@ -14,7 +14,10 @@ on:
   # d3d9_device.hpp 的 void 割裂就是合并后才暴露的），却每次都多跑一轮，
   # 和合并后的构建互相打断。改动按分支推、合并即构建。
   push:
-    branches: [port/ios15.6]
+    # dev is the test channel: every push there builds and publishes a
+    # pre-release, so day-to-day testing never needs a merge. port/ios15.6
+    # publishes the stable release on merge.
+    branches: [port/ios15.6, dev]
   # A weekly no-change build keeps the action caches alive: GitHub drops cache
   # entries unused for 7 days, and the first build after that rebuilds the iOS
   # LLVM toolchain from scratch (15+ minutes) instead of restoring it.
@@ -91,7 +94,8 @@ jobs:
             exit 0
           fi
           case "$GITHUB_REF" in
-            refs/heads/port/ios15.6) echo "分支正确: $GITHUB_REF" ;;
+            refs/heads/port/ios15.6) echo "分支正确（正式通道）: $GITHUB_REF" ;;
+            refs/heads/dev) echo "分支正确（测试通道）: $GITHUB_REF" ;;
             *) echo "::error::CI 只允许在 port/ios15.6 分支运行（当前 $GITHUB_REF），不要拿原版分支跑构建"; exit 1 ;;
           esac
 
@@ -758,11 +762,26 @@ jobs:
       # nightly 预发布: 照 Verviewer 的模式（删旧 nightly → 建新预发布）。
       # 仅完整流水线（APP_ONLY=0）发布——app-only 构建链接的是空桩原生库，
       # 产物不可运行，发出去会误导人。Phase 4 完成后自动生效。
-      - name: Delete old nightly release
+      # dev -> the nightly pre-release (test channel); port/ios15.6 -> stable.
+      - name: Release channel
+        id: channel
+        if: env.APP_ONLY != '1'
+        run: |
+          if [ "$GITHUB_REF" = "refs/heads/dev" ]; then
+            echo "tag=nightly"  >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15 移植 Nightly（dev 测试构建）" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=stable"   >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15 移植 正式版" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Delete the old release for this channel
         if: env.APP_ONLY != '1'
         uses: cb80/delrel@latest
         with:
-          tag: nightly
+          tag: ${{ steps.channel.outputs.tag }}
           token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
@@ -770,12 +789,12 @@ jobs:
         if: env.APP_ONLY != '1'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly
-          name: Madeira iOS 15 移植 Nightly（自动构建）
+          tag_name: ${{ steps.channel.outputs.tag }}
+          name: ${{ steps.channel.outputs.title }}
           body: |
             ## 📦 下载 / Download
 
-            - 👉 **[Madeira-port-nightly-unsigned.ipa](https://github.com/${{ github.repository }}/releases/download/nightly/Madeira-port-nightly-unsigned.ipa)**
+            - 👉 **[Madeira-port-nightly-unsigned.ipa](https://github.com/${{ github.repository }}/releases/download/${{ steps.channel.outputs.tag }}/Madeira-port-nightly-unsigned.ipa)**
             - 🧾 **[对应源码（浏览）/ Corresponding source (tree)](https://github.com/${{ github.repository }}/tree/${{ github.sha }})**
             - ⬇️ **[对应源码（tar.gz） / Corresponding source (tar.gz)](https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz)**
 
@@ -801,7 +820,7 @@ jobs:
             | 📝 提交 / Commit | [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
 
             ⚠️ 自动构建的夜间预览版，可能不稳定 / Automated nightly preview build.
-          prerelease: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
           draft: false
           files: ipa/Madeira-port-nightly-unsigned.ipa
 
