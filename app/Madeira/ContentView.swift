@@ -1273,6 +1273,32 @@ struct ABTestRun {
     var mode: String { entry.startsSteamGameDirectly ? "direct" : "Dock" }
 }
 
+/// The A/B diagnosis has to survive the thing it diagnoses: a game that takes the
+/// app down with it never reaches finish(), so the pending run is written to disk
+/// and resumed by the next launch (TheShell, 2026-10-28 19:14: the guest and the
+/// app both died; the app came back and never started run B).
+enum ABTestStore {
+    struct State: Codable {
+        var appID: Int
+        var entryID: UUID
+        var phase: Int
+        var dockFirst: Bool
+    }
+    static var url: URL? { MadeiraConfig.documents?.appendingPathComponent("madeira-ab.json") }
+    static func load() -> State? {
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(State.self, from: data)
+    }
+    static func save(_ state: State) {
+        guard let url else { return }
+        try? JSONEncoder().encode(state).write(to: url, options: .atomic)
+    }
+    static func clear() {
+        guard let url else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
 struct ContentView: View {
     /// iOS 26 and later blur content under the navigation bar themselves.
     private static var systemScrollEdge: Bool {
@@ -1448,12 +1474,38 @@ struct ContentView: View {
                     run.phase = 1
                     let next = run
                     abTest = next
+                    if let old = ABTestStore.load() {
+                        ABTestStore.save(ABTestStore.State(appID: old.appID, entryID: old.entryID,
+                                                           phase: 1, dockFirst: old.dockFirst))
+                    }
                     LogStore.shared.log("[ab-test] run B mode=\(next.mode) starting")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { launchLibraryEntry(next.entry) }
                 } else {
                     abTest = nil
+                    ABTestStore.clear()
                     LogStore.shared.log("[ab-test] done")
                 }
+            }
+            // A run A that took the app down with it leaves phase 0 on disk; the
+            // next launch finishes the pair instead of waiting for a session end
+            // that never comes.
+            .onAppear {
+                guard abTest == nil, let state = ABTestStore.load(), state.phase == 0 else { return }
+                guard let entry = library.entries.first(where: { $0.id == state.entryID }) else {
+                    ABTestStore.clear(); return
+                }
+                var flipped = entry
+                flipped.steamStart = state.dockFirst ? "game" : nil
+                if flipped.startsSteamGameDirectly, flipped.steamProgram?.isEmpty != false {
+                    LogStore.shared.log("[ab-test] run B skipped after restart: no program chosen")
+                    ABTestStore.clear(); return
+                }
+                abTest = ABTestRun(entry: flipped, phase: 1)
+                setenv("MADEIRA_ONE_SESSION_PER_RUN", "0", 1)
+                ABTestStore.save(ABTestStore.State(appID: state.appID, entryID: state.entryID,
+                                                   phase: 1, dockFirst: state.dockFirst))
+                LogStore.shared.log("[ab-test] app restarted mid-test: starting run B mode=\(flipped.startsSteamGameDirectly ? "direct" : "Dock")")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { launchLibraryEntry(flipped) }
             }
     }
 
@@ -2614,6 +2666,10 @@ struct ContentView: View {
             abTest = ABTestRun(entry: entry, phase: 0)
             // Two sessions in one app run is exactly what this test needs.
             setenv("MADEIRA_ONE_SESSION_PER_RUN", "0", 1)
+            if let appID = entry.steamAppID {
+                ABTestStore.save(ABTestStore.State(appID: appID, entryID: entry.id, phase: 0,
+                                                   dockFirst: !entry.startsSteamGameDirectly))
+            }
             LogStore.shared.log("[ab-test] run A mode=\(abTest?.mode ?? "-") app=\(entry.steamAppID.map { String($0) } ?? "-")")
         }
         // A Steam game starts through Madeira Dock with its own launch profile (SteamGames.swift),
