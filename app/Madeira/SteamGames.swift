@@ -475,6 +475,14 @@ struct SteamGamesSection: View {
         }
     }
 
+    /// "已更新 12:34" — the same clock the log uses.
+    static func updatedLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hans_CN")
+        f.dateFormat = Calendar.current.isDateInToday(date) ? "已更新 HH:mm" : "已更新 M月d日 HH:mm"
+        return f.string(from: date)
+    }
+
     /// Sort by data from the Steam games' library entries.
     private var recorded: [Int: SteamGamesRules.Recorded] {
         var result: [Int: SteamGamesRules.Recorded] = [:]
@@ -499,7 +507,23 @@ struct SteamGamesSection: View {
                     if part != .notInstalled {
                     LibrarySectionHeader(title: "Steam", count: installed.count,
                                          collapsed: collapsible ? $hideInstalled : nil) {
-                        if steam.refreshing { ProgressView().accessibilityLabel("正在刷新 Steam 游戏库") }
+                        // 下拉也能刷新，但手势只有滚到最顶部才生效，而且刷新完没有
+                        // 任何反馈；这里给一个明确的按钮和「上次更新」时间。
+                        if let updated = steam.libraryUpdated, !steam.refreshing {
+                            Text(SteamGamesSection.updatedLabel(updated))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if steam.refreshing {
+                            ProgressView().accessibilityLabel("正在刷新 Steam 游戏库")
+                        } else {
+                            Button {
+                                Task { await SteamGamesSection.refresh() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("刷新 Steam 游戏库")
+                        }
                     }
                     // Signed out: the account's games need a sign-in; say so here rather
                     // than hiding the section until someone finds Settings › Steam.
@@ -527,8 +551,8 @@ struct SteamGamesSection: View {
                             cell(item, list: list, dense: dense)
                         }
                     } else if signedIn && !steam.refreshing && groups.notInstalled.isEmpty && search.isEmpty {
-                        Text(steam.libraryUpdated == nil ? "Pull down to load your Steam library."
-                             : "No Windows games were found in this Steam library.").foregroundStyle(.secondary)
+                        Text(steam.libraryUpdated == nil ? "下拉或点刷新，载入 Steam 游戏库。"
+                             : "这个 Steam 库里没有找到 Windows 游戏。").foregroundStyle(.secondary)
                     }
                     }
                     if part != .installed && signedIn && !groups.notInstalled.isEmpty {
