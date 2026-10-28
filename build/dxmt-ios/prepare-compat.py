@@ -1326,6 +1326,23 @@ diag_files = (
          '      block.owns_mapped = false;\n'
          '    }\n'),
     ), ('d11-ring')),
+    # The swapchain-level counter never printed for BaldrSky even though the
+    # session renders and its Reset diagnostics do print, so the game's presents
+    # do not reach MTLD9SwapChain::Present through this path. Count at the device
+    # entry points instead -- Present and PresentEx are what the guest calls, and
+    # both forward to the chain only when they get that far.
+    ('d3d9/d3d9_device.cpp', (
+        ('  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_Present);\n',
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_Present);\n'
+         '  { static unsigned madeira_present_dev; unsigned n = madeira_present_dev++;\n'
+         '    if (n < 3 || (n % 300) == 0)\n'
+         '      Logger::warn(str::format("[d9-present] dev Present n=", n)); }\n'),
+        ('  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_PresentEx);\n',
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_PresentEx);\n'
+         '  { static unsigned madeira_presentex_dev; unsigned n = madeira_presentex_dev++;\n'
+         '    if (n < 3 || (n % 300) == 0)\n'
+         '      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }\n'),
+    ), ('d9-present] dev Present')),
     # Which kind each losable resource is. BaldrSky's fullscreen Reset is blocked
     # by exactly one 0-byte and one 32 KB entry, and the size cannot say whether
     # the 0-byte one is the implicit backbuffer/depth-stencil (which native D3D9

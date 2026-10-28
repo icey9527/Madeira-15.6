@@ -1482,7 +1482,14 @@ struct ContentView: View {
             // next launch finishes the pair instead of waiting for a session end
             // that never comes.
             .onAppear {
-                guard abTest == nil, let state = ABTestStore.load(), state.phase == 0 else { return }
+                guard abTest == nil, let state = ABTestStore.load() else { return }
+                if state.phase != 0 {
+                    // Run B started and the app never reached finish(): it went
+                    // down with the game. Record that instead of trying a third run.
+                    LogStore.shared.log("[ab-test] run B ended abruptly (the app restarted with it)")
+                    ABTestStore.clear(); return
+                }
+                LogStore.shared.log("[ab-test] run A ended abruptly (the app restarted with it)")
                 guard let entry = library.entries.first(where: { $0.id == state.entryID }) else {
                     ABTestStore.clear(); return
                 }
