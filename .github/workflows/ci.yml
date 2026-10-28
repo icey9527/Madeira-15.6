@@ -99,6 +99,24 @@ jobs:
             *) echo "::error::CI 只允许在 port/ios15.6 分支运行（当前 $GITHUB_REF），不要拿原版分支跑构建"; exit 1 ;;
           esac
 
+      # dev is the test channel, port/ios15.6 the release channel. Decided once,
+      # right after the guard, so the IPA file name, the artifact and the release
+      # all agree (the package step runs long before the publish step).
+      - name: Release channel
+        id: channel
+        run: |
+          if [ "$GITHUB_REF" = "refs/heads/dev" ]; then
+            echo "tag=nightly" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15.6 移植 Nightly（dev 测试构建）" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-dev-unsigned.ipa" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=stable" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15.6 移植 正式版" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-stable-unsigned.ipa" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Record runner hardware
         run: |
           echo "Runner: ${{ inputs.runner || 'macos-26' }} ($RUNNER_ARCH)"
@@ -744,8 +762,8 @@ jobs:
           PY
             mkdir -p ipa/Payload
             ditto "$APP" ipa/Payload/Madeira.app
-            (cd ipa && zip -qry Madeira-port-nightly-unsigned.ipa Payload)
-            echo "IPA 大小: $(du -h ipa/Madeira-port-nightly-unsigned.ipa | cut -f1)"
+            (cd ipa && zip -qry "${{ steps.channel.outputs.file }}" Payload)
+            echo "IPA 大小: $(du -h "ipa/${{ steps.channel.outputs.file }}" | cut -f1)"
           else
             echo "::error::没有成功链接的 Madeira 主二进制"
             exit 1
@@ -756,27 +774,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Madeira-app-build
-          path: ipa/Madeira-port-nightly-unsigned.ipa
+          path: ipa/${{ steps.channel.outputs.file }}
           if-no-files-found: ignore
 
       # nightly 预发布: 照 Verviewer 的模式（删旧 nightly → 建新预发布）。
       # 仅完整流水线（APP_ONLY=0）发布——app-only 构建链接的是空桩原生库，
       # 产物不可运行，发出去会误导人。Phase 4 完成后自动生效。
-      # dev -> the nightly pre-release (test channel); port/ios15.6 -> stable.
-      - name: Release channel
-        id: channel
-        if: env.APP_ONLY != '1'
-        run: |
-          if [ "$GITHUB_REF" = "refs/heads/dev" ]; then
-            echo "tag=nightly"  >> "$GITHUB_OUTPUT"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=Madeira iOS 15 移植 Nightly（dev 测试构建）" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=stable"   >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "title=Madeira iOS 15 移植 正式版" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Delete the old release for this channel
         if: env.APP_ONLY != '1'
         uses: cb80/delrel@latest
@@ -794,7 +797,7 @@ jobs:
           body: |
             ## 📦 下载 / Download
 
-            - 👉 **[Madeira-port-nightly-unsigned.ipa](https://github.com/${{ github.repository }}/releases/download/${{ steps.channel.outputs.tag }}/Madeira-port-nightly-unsigned.ipa)**
+            - 👉 **[${{ steps.channel.outputs.file }}](https://github.com/${{ github.repository }}/releases/download/${{ steps.channel.outputs.tag }}/${{ steps.channel.outputs.file }})**
             - 🧾 **[对应源码（浏览）/ Corresponding source (tree)](https://github.com/${{ github.repository }}/tree/${{ github.sha }})**
             - ⬇️ **[对应源码（tar.gz） / Corresponding source (tar.gz)](https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz)**
 
@@ -822,7 +825,7 @@ jobs:
             ⚠️ 自动构建的夜间预览版，可能不稳定 / Automated nightly preview build.
           prerelease: ${{ steps.channel.outputs.prerelease }}
           draft: false
-          files: ipa/Madeira-port-nightly-unsigned.ipa
+          files: ipa/${{ steps.channel.outputs.file }}
 
       - name: Collect native compiler diagnostics
         if: always()
