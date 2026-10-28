@@ -652,8 +652,15 @@ else:
 # The count and the last target/caller are kept in a small array so the next
 # report can say whether this fires once or in a loop, and who supplied it.
 p = 'wine/dlls/ntdll/signal_arm64ec.c'
-s = io.open(p, encoding='utf-8').read()
-if 'madeira_ec_floor_log' in s:
+try:
+    s = io.open(p, encoding='utf-8').read()
+except FileNotFoundError:
+    # app-only（PR 预检）只克隆 FEX，wine 不在；完整流水线里它已在，照常打补丁。
+    s = None
+    print('[patch] skipped: arm64x_check_call iOS floor guard (wine not checked out)')
+if s is None:
+    pass
+elif 'madeira_ec_floor_log' in s:
     print('[patch] already applied: arm64x_check_call iOS floor guard')
 else:
     # 1) the storage

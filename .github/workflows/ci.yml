@@ -11,6 +11,11 @@ name: port-ci
 on:
   push:
     branches: [port/ios15.6]
+  # 每个发往移植分支的 PR 先在 app-only 快车道上编一遍 Swift/ObjC。
+  # 之前只在合并后构建，PR 里编译不过要等合进 port/ios15.6 才发现
+  # （#29/#32 就是这样把 SteamOwnedLibrary 的类型笔误带进来的）。
+  pull_request:
+    branches: [port/ios15.6]
   # A weekly no-change build keeps the action caches alive: GitHub drops cache
   # entries unused for 7 days, and the first build after that rebuilds the iOS
   # LLVM toolchain from scratch (15+ minutes) instead of restoring it.
@@ -39,7 +44,8 @@ env:
   # xcodebuild 只验证 Swift/ObjC 编译（仅预期未定义符号链接失败允许通过）。
   # Phase 4（原生栈降级）时把 APP_ONLY 改回 '0' 跑完整流水线，
   # 届时 nightly 预发布步骤会自动开始产出可安装的 IPA。
-  APP_ONLY: '0'
+  # PR 预检走 app-only 快车道（原生库用空桩，只验证 app 层能编过）。
+  APP_ONLY: ${{ github.event_name == 'pull_request' && '1' || '0' }}
   IPHONEOS_DEPLOYMENT_TARGET: '15.6'
 
 jobs:
@@ -83,6 +89,14 @@ jobs:
           # default branch, so accept it here and verify the checkout instead.
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "定时缓存保温构建: $(git rev-parse --short HEAD) $(git branch --show-current)"
+            exit 0
+          fi
+          # A pull request builds its merge commit; what matters is the target.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            case "${{ github.base_ref }}" in
+              port/ios15.6) echo "PR 预检（app-only）: ${GITHUB_HEAD_REF:-$GITHUB_REF}" ;;
+              *) echo "::error::CI 只接受发往 port/ios15.6 的 PR（当前 ${{ github.base_ref }}）"; exit 1 ;;
+            esac
             exit 0
           fi
           case "$GITHUB_REF" in
