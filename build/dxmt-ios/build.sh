@@ -107,9 +107,6 @@ FAILED_FILES=""
 compile_objc() {
     local src=$1 name=$2
     local relative="${src#"$DXMT_SRC/"}" original_directory="$(dirname "$src")" origin=""
-    if [ -f "$BUILD_DIR/compat-src/$relative" ]; then
-        src="$BUILD_DIR/compat-src/$relative"; origin=" [compat]"
-    fi
     # MADEIRA_ONLY=<name>: recompile one object only.
     if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then return 0; fi
     printf "  %-40s " "$name"
@@ -124,10 +121,7 @@ compile_objc() {
 compile_cxx() {
     local src=$1 name=$2 extra="${3:-}"
     local relative="${src#"$DXMT_SRC/"}"
-    if [ -f "$BUILD_DIR/compat-src/$relative" ]; then
-        extra="$extra -I$(dirname "$src") -I$REPO_ROOT/FEX/External/fmt/include -DFMT_HEADER_ONLY=1"
-        src="$BUILD_DIR/compat-src/$relative"
-    fi
+    extra="$extra -I$(dirname "$src") -I$REPO_ROOT/FEX/External/fmt/include -DFMT_HEADER_ONLY=1"
     # MADEIRA_ONLY=<name>: recompile one object only.
     if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then return 0; fi
     printf "  %-40s " "$name"
@@ -143,10 +137,7 @@ compile_cxx() {
 compile_madeira_cxx() {
     local src=$1 name=$2 extra="${3:-}" origin=""
     local relative="${src#"$DXMT_SRC/"}"
-    if [ -f "$BUILD_DIR/compat-src/$relative" ]; then
-        extra="$extra -I$(dirname "$src")"
-        src="$BUILD_DIR/compat-src/$relative"; origin=" [compat]"
-    fi
+    extra="$extra -I$(dirname "$src")"
     printf "  %-40s " "$name"
     if xcrun -sdk iphoneos clang++ $COMMON_FLAGS $MADEIRA_CXX_FLAGS $MADEIRA_WARNINGS \
         $MADEIRA_INCLUDES $INCLUDES_DIRECTX $INCLUDES_SHADERS $MADEIRA_DEFS $extra \
@@ -238,6 +229,26 @@ else
 fi
 
 python3 "$BUILD_DIR/prepare-compat.py" "$DXMT_SRC" "$BUILD_DIR/compat-src" "${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
+
+# One tree, one copy of every file.
+#
+# This build used to compile a patched .cpp straight out of compat-src while its
+# quoted includes fell back to the pristine tree through -I. That is fine until a
+# HEADER is patched: dxmt_context.cpp then saw dxmt_ring_bump_allocator.hpp twice
+# (compat copy through its own directory, source copy through -I$DXMT_SRC/dxmt)
+# and every symbol in it was "redefinition". Merging into one throwaway tree
+# makes include resolution uniform, and keeps the source tree pristine so a
+# rerun regenerates compat-src from the same input.
+OVERLAY="$BUILD_DIR/dxmt-src"
+rm -rf "$OVERLAY"
+mkdir -p "$OVERLAY"
+cp -R "$DXMT_SRC/." "$OVERLAY/"
+if [ -d "$BUILD_DIR/compat-src" ]; then
+    cp -R "$BUILD_DIR/compat-src/." "$OVERLAY/"
+fi
+DXMT_SRC="$OVERLAY"
+echo "  merged tree: $(find "$OVERLAY" -type f | wc -l | tr -d ' ') files ($(du -sh "$OVERLAY" | cut -f1))"
+
 echo "=== winemetal unix (Objective-C) ==="
 compile_objc "$DXMT_SRC/winemetal/unix/winemetal_unix.c" winemetal_unix
 compile_objc "$DXMT_SRC/winemetal/unix/cache.c"          cache
