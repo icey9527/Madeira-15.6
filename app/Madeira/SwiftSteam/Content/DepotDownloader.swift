@@ -857,7 +857,10 @@ final class DepotDownloader {
     /// allowed_app_ids restriction.
     nonisolated static func serverEligibility(_ server: [String: Any], appID: UInt32) -> ServerEligibility {
         if let https = (server["https_support"] as? String)?.lowercased(), https != "mandatory", https != "optional" {
-            return .noHTTPS
+            // 中国大陆的 CDN 只提供 HTTP，Valve 因此把它们标成 unavailable。
+            // 丢掉它们只剩一台海外回源（实测约 2 MB/s），所以放行。
+            let name = (server["vhost"] as? String) ?? (server["host"] as? String) ?? ""
+            if !isPlainHTTPContentHost(name) { return .noHTTPS }
         }
         if (server["use_as_proxy"] as? Bool) == true || (server["use_as_proxy"] as? NSNumber)?.boolValue == true {
             return .other
@@ -898,7 +901,7 @@ final class DepotDownloader {
                 case .noHTTPS: skippedHTTP += 1; continue
                 case .other: skippedOther += 1; continue
                 }
-                let entry = "https://\(host)"
+                let entry = (Self.isPlainHTTPContentHost(host) ? "http://" : "https://") + host
                 if !hosts.contains(entry) { hosts.append(entry) }
             }
             SteamLog.event("[steam-cdn] offered=\(servers.count) usable=\(hosts.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther)")
@@ -916,7 +919,17 @@ final class DepotDownloader {
         guard host.contains("."), !host.contains(" "), !host.contains("/"), !host.contains("*"),
               !host.contains("lancache"), !host.contains(":") else { return false }
         return host.hasSuffix(".steamcontent.com") || host.hasSuffix(".akamaized.net") ||
-            host.hasSuffix(".steampipe.steamcontent.com") || host.hasSuffix(".steamstatic.com")
+            host.hasSuffix(".steampipe.steamcontent.com") || host.hasSuffix(".steamstatic.com") ||
+            isPlainHTTPContentHost(host)
+    }
+
+    /// Valve 在中国大陆只提供 HTTP 的 CDN。它们的 `https_support` 是
+    /// "unavailable"，但 HTTP 可达且延迟低；对这些域名用 http:// 取数据，
+    /// Info.plist 里为它们开了 ATS 例外。
+    nonisolated static func isPlainHTTPContentHost(_ host: String) -> Bool {
+        let name = host.lowercased()
+        return name.hasSuffix("eccdnx.com") || name.hasSuffix("clngaa.com") ||
+            name.hasSuffix("pphimalayanrt.com")
     }
 
     /// Unified-service GetCDNAuthToken → "?auth=…" query fragment for this
