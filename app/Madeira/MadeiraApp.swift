@@ -8,6 +8,11 @@ struct MadeiraApp: App {
         // default Resolution comes from it, are also made on other threads.
         _ = ResolutionChoices.screen
         madeira_startup_log("startup-v2: SwiftUI App init complete")
+        // 封面与商店图来自 Steam 的 CDN（cdn.cloudflare.steamstatic.com），网络那一层已经是
+        // CDN 了；慢的是本地：iOS 15 的 AsyncImage 不走应用层缓存，滚出屏幕再滚回来
+        // 会重新下载并重新解码。先给共享会话一个够大的 URL 缓存，免掉重复下载。
+        URLCache.shared = URLCache(memoryCapacity: 32 << 20, diskCapacity: 256 << 20,
+                                   diskPath: "madeira-steam-art")
         // Bring-up diagnostic (see MetalSelfTest): runs only while the marker
         // file exists, off the main thread so launch stays fast.
         DispatchQueue.global(qos: .utility).async { MetalSelfTest.runIfRequested() }
