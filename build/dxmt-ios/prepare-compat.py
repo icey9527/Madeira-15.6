@@ -1344,6 +1344,36 @@ diag_files = (
          '            " live=", now));\n'
          '    }\n'),
     ), ('d9-los')),
+    # Where the second fullscreen switch stops. The app-side layout provably runs
+    # again on every mode change (host frame, desktop rect, px_to_pt all log), and
+    # the only thing DXMT updates on the next Present is the layer's drawable size
+    # -- so "frozen" means either no Present at all or a Present rejected by the
+    # device state. These say which: a gate rejection, a Reset stuck draining the
+    # GPU, or a Reset that finished.
+    ('d3d9/d3d9_swapchain.cpp', (
+        ('  if (HRESULT state = m_device->presentStateGate(); state != D3D_OK)\n'
+         '    return state;\n',
+         '  if (HRESULT state = m_device->presentStateGate(); state != D3D_OK) {\n'
+         '    static unsigned madeira_present_gate;\n'
+         '    if (madeira_present_gate++ < 8 || (madeira_present_gate % 256) == 0)\n'
+         '      Logger::warn(str::format("[d9-present] rejected state=",\n'
+         '          (uint32_t)state, " n=", madeira_present_gate));\n'
+         '    return state;\n'
+         '  }\n'),
+    ), ('d9-present')),
+    ('d3d9/d3d9_device.cpp', (
+        ('    commitCurrentChunkTimed();\n'
+         '    m_dxmtQueue->WaitCPUFence(seq);\n'
+         '  }\n',
+         '    Logger::warn("[d9-reset] gpu drain begin");\n'
+         '    commitCurrentChunkTimed();\n'
+         '    m_dxmtQueue->WaitCPUFence(seq);\n'
+         '    Logger::warn("[d9-reset] gpu drain done");\n'
+         '  }\n'),
+        ('  m_deviceState.store(DeviceState::Ok, std::memory_order_relaxed);\n',
+         '  m_deviceState.store(DeviceState::Ok, std::memory_order_relaxed);\n'
+         '  Logger::warn("[d9-reset] done");\n'),
+    ), ('d9-reset] gpu drain begin')),
     # Madeira-15.6: the D3D11 front end binds its argument buffer at index 30
     # (kArgumentBufferBindIndex) with a NULL MTLBuffer before every draw --
     # TheShell 13:22: all 80 sampled binds at idx 16/29/30 were buf=0x0, while
