@@ -11,7 +11,9 @@ struct MadeiraApp: App {
         // 封面与商店图来自 Steam 的 CDN（cdn.cloudflare.steamstatic.com），网络那一层已经是
         // CDN 了；慢的是本地：iOS 15 的 AsyncImage 不走应用层缓存，滚出屏幕再滚回来
         // 会重新下载并重新解码。先给共享会话一个够大的 URL 缓存，免掉重复下载。
-        URLCache.shared = URLCache(memoryCapacity: 32 << 20, diskCapacity: 256 << 20,
+        // 64 MB 磁盘：一张 library_600x900 约 40–60 KB，够放上千张，也远小于设备上
+        // 动辄上百 MB 的存档；URLCache 落在 Caches 目录，系统空间紧张时会自己清掉。
+        URLCache.shared = URLCache(memoryCapacity: 16 << 20, diskCapacity: 64 << 20,
                                    diskPath: "madeira-steam-art")
         // Bring-up diagnostic (see MetalSelfTest): runs only while the marker
         // file exists, off the main thread so launch stays fast.
