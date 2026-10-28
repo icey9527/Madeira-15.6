@@ -298,7 +298,7 @@ if source.count(setpso_old) != 1:
 source = source.replace(setpso_old, setpso_new)
 for setter in ('setVertexBuffer', 'setFragmentBuffer'):
     old = '      [encoder %s:(id<MTLBuffer>)body->buffer offset:body->offset atIndex:body->index];\n' % setter
-    new = ('      if (madeira_d11_probe()) { static unsigned madeira_d11_bufs; if (madeira_d11_bufs++ < 40) fprintf(stderr, "[d11-buf] pid=%d idx=%u off=%u%c", (int)getpid(), (unsigned)body->index, (unsigned)body->offset, 10); } if (body->index >= 16) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
+    new = ('      if (madeira_d11_probe()) { static unsigned madeira_d11_bufs; if (madeira_d11_bufs++ < 40) fprintf(stderr, "[d11-buf] pid=%d idx=%u off=%u buf=%p%c", (int)getpid(), (unsigned)body->index, (unsigned)body->offset, (void *)body->buffer, 10); } if (body->index >= 16) { madeira_d11_ab = (void *)body->buffer; madeira_d11_ab_off = body->offset; }\n'
            + old)
     if source.count(old) != 1:
         raise SystemExit('DXMT winemetal_unix.c: %s site changed' % setter)
