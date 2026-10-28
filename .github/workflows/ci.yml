@@ -566,6 +566,39 @@ jobs:
         if: ${{ !cancelled() && env.APP_ONLY != '1' && steps.native.outcome == 'success' && steps.llvm.outcome == 'success' && steps.dxmt-cache.outputs.cache-hit != 'true' }}
         run: bash build/dxmt-ios/build.sh > >(tee ci-logs/dxmt.log) 2>&1
 
+      # d3d11.dll / dxgi.dll / winemetal.dll / d3d10core.dll used to be binaries
+      # committed by hand, so every D3D11 front-end change (src/d3d11, src/dxmt
+      # — all of it lives inside d3d11.dll) stopped at the repository while the
+      # D3D9 half, linked into libdxmt_combined.a, shipped. Build them here from
+      # the same compat sources, so both halves of a run come from one tree.
+      - name: Restore DXMT PE DLLs
+        id: dxmt-pe-cache
+        if: ${{ !cancelled() && env.APP_ONLY != '1' && steps.native.outcome == 'success' && steps.llvm.outcome == 'success' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            app/Madeira/aarch64-windows/d3d11.dll
+            app/Madeira/aarch64-windows/dxgi.dll
+            app/Madeira/aarch64-windows/winemetal.dll
+            app/Madeira/aarch64-windows/d3d10core.dll
+          key: dxmt-pe15.6-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.dxmtsha.outputs.sha }}-${{ hashFiles('build/dxmt-ios/**', 'dxmt/build-aarch64-win.txt', 'dxmt/build-osx.txt') }}
+
+      - name: DXMT PE（d3d11 / dxgi / winemetal / d3d10core）
+        id: dxmt-pe
+        if: ${{ !cancelled() && env.APP_ONLY != '1' && steps.native.outcome == 'success' && steps.llvm.outcome == 'success' && steps.dxmt-pe-cache.outputs.cache-hit != 'true' }}
+        run: bash build/dxmt-ios/build-pe.sh > >(tee ci-logs/dxmt-pe.log) 2>&1
+
+      - name: Save DXMT PE DLLs
+        if: ${{ steps.dxmt-pe.outcome == 'success' && steps.dxmt-pe-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            app/Madeira/aarch64-windows/d3d11.dll
+            app/Madeira/aarch64-windows/dxgi.dll
+            app/Madeira/aarch64-windows/winemetal.dll
+            app/Madeira/aarch64-windows/d3d10core.dll
+          key: ${{ steps.dxmt-pe-cache.outputs.cache-primary-key }}
+
       - name: Save completed DXMT before App
         if: ${{ !cancelled() && steps.dxmt.outcome == 'success' && steps.dxmt-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4

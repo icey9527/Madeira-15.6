@@ -1,0 +1,86 @@
+# dxmt-pe — build the aarch64-windows side of DXMT in isolation.
+#
+# d3d11.dll / dxgi.dll / winemetal.dll / d3d10core.dll were hand-built binaries
+# committed to app/Madeira/aarch64-windows, so anything changed under
+# dxmt/src/d3d11 or dxmt/src/dxmt (all of it lives inside d3d11.dll) never
+# reached a device. port-ci now builds them (build/dxmt-ios/build-pe.sh); this
+# workflow exists to iterate on that build without paying for the full
+# pipeline, and to hand back the DLLs as an artifact.
+#
+# Manual only: it does not gate anything until the port-ci step has proven it.
+name: dxmt-pe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'build/dxmt-ios/build-pe.sh'
+      - 'build/dxmt-ios/prepare-compat.py'
+      - '.github/workflows/dxmt-pe.yml'
+
+concurrency:
+  group: dxmt-pe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pe:
+    name: DXMT PE (aarch64-windows)
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Submodules（dxmt + 嵌套 + wine 头文件）
+        run: |
+          git submodule update --init --depth 1 --jobs 8 dxmt wine
+          git -C dxmt submodule update --init --depth 1 --jobs 8
+
+      - name: llvm-mingw
+        id: mingw
+        uses: actions/cache/restore@v4
+        with:
+          path: toolchains/llvm-mingw-20260421-ucrt-macos-universal
+          key: dxmt-pe-mingw-${{ runner.arch }}
+
+      - name: 下载 llvm-mingw
+        if: steps.mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p toolchains
+          curl -fL https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/llvm-mingw-20260421-ucrt-macos-universal.tar.xz \
+            | tar -xJ -C toolchains/
+
+      - name: 保存 llvm-mingw
+        if: steps.mingw.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: toolchains/llvm-mingw-20260421-ucrt-macos-universal
+          key: dxmt-pe-mingw-${{ runner.arch }}
+
+      - name: Homebrew（meson / ninja / bison / flex）
+        run: command -v meson || brew install meson ninja bison flex
+
+      - name: wine/build-macos 头文件
+        run: |
+          mkdir -p wine/build-macos
+          cd wine/build-macos
+          ../configure --enable-win64 --disable-tests --without-x
+          make -j8 include/all
+
+      - name: 构建 PE
+        run: bash build/dxmt-ios/build-pe.sh 2>&1 | tee dxmt-pe.log
+
+      - name: 产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxmt-pe-dlls
+          path: |
+            app/Madeira/aarch64-windows/d3d11.dll
+            app/Madeira/aarch64-windows/dxgi.dll
+            app/Madeira/aarch64-windows/winemetal.dll
+            app/Madeira/aarch64-windows/d3d10core.dll
+            dxmt-pe.log
+          if-no-files-found: warn
