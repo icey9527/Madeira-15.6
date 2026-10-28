@@ -4264,6 +4264,31 @@ static int ios_virtual_mode_set_enabled(void)
  * never BADPARAM for our own device name. A NULL devmode, and a request
  * that names no size, restore the session default, which is this port's
  * equivalent of the registry mode. */
+/* iOS-Madeira: grow the virtual monitor to at least w x h. The app calls this
+ * (through the wine-thread drain) when a game's window is larger than the
+ * desktop: the window is what the player is looking at, so the desktop has to
+ * follow it rather than the other way round. Fit would otherwise scale the
+ * window into the view while the pointer still lives in desktop space, which
+ * leaves the part outside the desktop unreachable. */
+static LONG ios_virtual_change_display_settings( UNICODE_STRING *devname, const DEVMODEW *devmode,
+                                                 DWORD flags );
+
+void ios_virtual_grow_display( int w, int h )
+{
+    DEVMODEW dm = { .dmSize = sizeof(dm) };
+    LONG ret;
+    int cw = 0, ch = 0;
+
+    if (w <= 0 || h <= 0) return;
+    ios_screen_size( &cw, &ch );
+    if (cw >= w && ch >= h) return;
+    dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+    dm.dmPelsWidth = (DWORD)w;
+    dm.dmPelsHeight = (DWORD)h;
+    ret = ios_virtual_change_display_settings( NULL, &dm, 0 );
+    dprintf( STDERR_FILENO, "[display-grow] asked for %dx%d (was %dx%d) -> %ld%c", w, h, cw, ch, ret, 10 );
+}
+
 static LONG ios_virtual_change_display_settings( UNICODE_STRING *devname, const DEVMODEW *devmode,
                                                  DWORD flags )
 {

@@ -389,6 +389,15 @@ int winios_drv_post_restore( HWND hwnd )
 /* A taskbar click also brings the window to the front. Only the window's own
  * thread does that, from its event pump (not inside SetWindowPos). Returns 0
  * on another thread, 1 when the window is now foreground, -1 on failure. */
+/* iOS-Madeira: grow the virtual monitor to at least w x h. Called on a wine
+ * thread by the app's event drain when a game window is larger than the
+ * desktop (see ios_virtual_grow_display). */
+extern void ios_virtual_grow_display( int w, int h );
+void winios_drv_grow_desktop( int w, int h )
+{
+    ios_virtual_grow_display( w, h );
+}
+
 int winios_drv_foreground_if_owner( HWND hwnd )
 {
     if (!hwnd || get_window_thread( hwnd, NULL ) != GetCurrentThreadId()) return 0;
