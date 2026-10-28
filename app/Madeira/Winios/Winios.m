@@ -419,6 +419,18 @@ static _Atomic(uintptr_t) g_restore_foreground;
  * hit testing then all agree. */
 extern void winios_drv_grow_desktop(int w, int h);
 static _Atomic int g_grow_w, g_grow_h;
+/* "picture freezes, sound goes on": present stops while the app still pumps
+ * messages. Stamp every present so the pump can report how long it has been,
+ * once per stall -- that tells a stuck render thread (no presents) from a
+ * stuck compositor (presents that never reach the layer). */
+static _Atomic uint64_t g_present_ms;
+extern void winios_screen_size(int *w, int *h);   /* also declared below; used by the stall report */
+static uint64_t winios_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
 
 static int winios_restore_born_minimized_enabled(void) {
     static int enabled = -1;
@@ -756,6 +768,23 @@ BOOL winios_pProcessEvents(DWORD mask) {
         int want_w = atomic_exchange(&g_grow_w, 0);
         int want_h = atomic_exchange(&g_grow_h, 0);
         if (want_w > 0 && want_h > 0) winios_drv_grow_desktop(want_w, want_h);
+    }
+    {
+        static int armed = 1;
+        uint64_t now = winios_now_ms();
+        uint64_t last = atomic_load_explicit(&g_present_ms, memory_order_relaxed);
+        if (last && now - last > 3000) {
+            if (armed) {
+                int desk_w = 0, desk_h = 0;
+                winios_screen_size(&desk_w, &desk_h);
+                fprintf(stderr, "[present-stall] no present for %llu ms (desk=%dx%d)%c",
+                        (unsigned long long)(now - last), desk_w, desk_h, 10);
+                fflush(stderr);
+                armed = 0;
+            }
+        } else if (now - last <= 3000) {
+            armed = 1;
+        }
     }
     /* The restored born-minimized window's own thread brings it to the front
      * (see g_restore_foreground); other threads leave the request in place. */
@@ -1802,6 +1831,7 @@ int winios_surface_present(HWND hwnd, int dx, int dy, int dw, int dh,
                 hwnd, mycnt, dx, dy, dw, dh, sw, sh, bits, sig);
         fflush(stderr);
     }
+    atomic_store_explicit(&g_present_ms, winios_now_ms(), memory_order_relaxed);
     dispatch_async(dispatch_get_main_queue(), ^{
         winios_ensure_compositor();
         /* ml1028: this block is dispatch_block_t (void). The snapshot copy has

@@ -207,6 +207,11 @@ static struct monitor virtual_monitor =
  */
 static int ios_screen_cur_w, ios_screen_cur_h;
 static int ios_screen_def_w, ios_screen_def_h;
+/* Set while the app asks the desktop to grow to fit a game's window. That size
+ * is a computed union, never one of the offered modes, so the list check below
+ * must not reject it -- it did, and the window stayed larger than the desktop,
+ * which put its right and bottom edges out of the pointer's reach. */
+static BOOL ios_grow_request;
 
 static void ios_screen_size( int *w, int *h )
 {
@@ -4285,7 +4290,9 @@ void ios_virtual_grow_display( int w, int h )
     dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
     dm.dmPelsWidth = (DWORD)w;
     dm.dmPelsHeight = (DWORD)h;
+    ios_grow_request = TRUE;
     ret = ios_virtual_change_display_settings( NULL, &dm, 0 );
+    ios_grow_request = FALSE;
     dprintf( STDERR_FILENO, "[display-grow] asked for %dx%d (was %dx%d) -> %ld%c", w, h, cw, ch, ret, 10 );
 }
 
@@ -4334,6 +4341,7 @@ static LONG ios_virtual_change_display_settings( UNICODE_STRING *devname, const 
                 found = (mw == want_w && mh == want_h);
         }
 
+        if (!found && ios_grow_request) found = TRUE, why = "the app's desktop grow";
         if (!found) ret = DISP_CHANGE_BADMODE, why = "mode is not in the virtual mode list";
         else
         {
