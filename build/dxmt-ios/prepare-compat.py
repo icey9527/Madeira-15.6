@@ -1338,6 +1338,62 @@ diag_files = (
          '      }\n'
          '    }\n'),
     ), ('d11-argbuf')),
+    # Madeira-15.6: the D3D11 argument-buffer ring is a 4 MB CPU-visible block
+    # handed to Metal as a no-copy mapping. On device that mapping is refused
+    # ([d11-newbuf] NIL len=4194304 cpu=1), so the ring hands out a block with
+    # no buffer, and every draw binds index 30 = null ([d11-argbuf] NULL
+    # size=104): the whole session submits invalid command buffers and shows
+    # nothing. Metal cannot refuse storage it allocates itself, so fall back to
+    # a Metal-owned buffer and use its mapping as the CPU view. The block has to
+    # remember that the mapping is not ours to free.
+    ('dxmt/dxmt_ring_bump_allocator.hpp', (
+        ('#include <cassert>\n', '#include <cassert>\n#include <cstdio>\n'),
+        ('      buffer = nullptr;\n'
+         '      if (mapped_address) {\n'
+         '        free(mapped_address);\n'
+         '        mapped_address = nullptr;\n'
+         '      }\n',
+         '      buffer = nullptr;\n'
+         '      if (mapped_address) {\n'
+         '        /* Madeira-15.6: a fallback block maps Metal-owned storage, so only\n'
+         '         * our own malloc may go back. */\n'
+         '        if (owns_mapped)\n'
+         '          free(mapped_address);\n'
+         '        mapped_address = nullptr;\n'
+         '      }\n'),
+        ('      census_owner = move.census_owner;\n'
+         '      move.census_bytes = 0;\n'
+         '      move.mapped_address = nullptr;\n',
+         '      census_owner = move.census_owner;\n'
+         '      owns_mapped = move.owns_mapped;\n'
+         '      move.census_bytes = 0;\n'
+         '      move.mapped_address = nullptr;\n'),
+        ('    uint64_t census_bytes = 0;                             /* ml677 */\n'
+         '    MemOwner census_owner = MEMOWN_STAGING_RING;           /* ml1243 */\n',
+         '    uint64_t census_bytes = 0;                             /* ml677 */\n'
+         '    MemOwner census_owner = MEMOWN_STAGING_RING;           /* ml1243 */\n'
+         '    bool owns_mapped = true;                               /* Madeira-15.6 */\n'),
+        ('    block.buffer = device_.newBuffer(info);\n'
+         '    block.gpu_address = info.gpu_address;\n',
+         '    block.buffer = device_.newBuffer(info);\n'
+         '    block.gpu_address = info.gpu_address;\n'
+         '    if (!block.buffer && block.mapped_address) {\n'
+         '      /* Madeira-15.6: the no-copy mapping was refused. Let Metal own the\n'
+         '       * storage and take ITS mapping as the CPU view, so the ring still\n'
+         '       * writes where the GPU reads. */\n'
+         '      fprintf(stderr, "[d11-ring] no-copy refused (%llu bytes); using a '
+         'Metal-owned buffer%c",\n'
+         '              (unsigned long long)block_size, 10);\n'
+         '      free(block.mapped_address);\n'
+         '      WMTBufferInfo again{};\n'
+         '      again.options = buffer_info_;\n'
+         '      again.length = block_size;\n'
+         '      block.buffer = device_.newBuffer(again);\n'
+         '      block.mapped_address = again.memory.ptr;\n'
+         '      block.gpu_address = again.gpu_address;\n'
+         '      block.owns_mapped = false;\n'
+         '    }\n'),
+    ), ('d11-ring')),
 )
 for relative, pairs, markers in diag_files:
     out = output_root / relative
