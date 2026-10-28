@@ -395,9 +395,10 @@ final class DepotDownloader {
 
         let remaining = prepared.remainingUncompressed
         if remaining > 0 {
-            let values = try? installURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            let available = UInt64(max(0, values?.volumeAvailableCapacityForImportantUsage ?? Int64.max))
-            if available < remaining { throw SteamError.insufficientDiskSpace(needed: remaining, available: available) }
+            // 拿不到可用空间时不拦（外置盘/新文件系统常常报 0）；能拿到才比。
+            if let free = installURL.freeSpace, case let available = UInt64(free), available < remaining {
+                throw SteamError.insufficientDiskSpace(needed: remaining, available: available)
+            }
         }
 
         // 3. Chunks.
@@ -1051,5 +1052,21 @@ final class JournalWriter {
         var keys = Set<UInt64>()
         for line in text.split(separator: "\n") { if let key = UInt64(line, radix: 16) { keys.insert(key) } }
         return keys
+    }
+}
+
+extension URL {
+    /// Free bytes on the volume holding this path, or nil when unknown.
+    /// "Important usage" is 0 or missing on external drives and other
+    /// user-space file systems, so the plain figure and statfs follow.
+    public var freeSpace: Int64? {
+        var url = resolvingSymlinksInPath()
+        while !FileManager.default.fileExists(atPath: url.path), url.pathComponents.count > 1 { url.deleteLastPathComponent() }
+        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
+        if let plain = values?.volumeAvailableCapacity, plain > 0 { return Int64(plain) }
+        var info = statfs()
+        if statfs(url.path, &info) == 0, info.f_bavail > 0 { return Int64(info.f_bavail) * Int64(info.f_bsize) }
+        return nil
     }
 }
