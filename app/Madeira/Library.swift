@@ -648,6 +648,11 @@ final class LibraryModel: ObservableObject {
     /// Read by the starting screen for its elapsed-time line.
     var launchStartedAt: Date { launchStarted }
     @Published var launchSlow = false
+    /// 90 s after the press with no frame on screen: the game is running but
+    /// never presents (a missing device, a hung init). Saying so beats leaving
+    /// "Still starting…" up for ever -- Sunrider and amehazu sat here on
+    /// 2026-10-29.
+    @Published var launchStalled = false
     @Published var launchLogs = false
     private var launchDismissLogged = false
     var menuButtonRect = CGRect.zero
@@ -1003,7 +1008,7 @@ final class LibraryModel: ObservableObject {
         quitRequested = false
         LibraryController.shared.configure(enabled: enabled, ownsInput: false)
         Self.sessionsThisRun += 1
-        launchPresent = madeira_get_present_count(); launchStarted = Date(); launchSlow = false; launchLogs = entry.liveLogs
+        launchPresent = madeira_get_present_count(); launchStarted = Date(); launchSlow = false; launchStalled = false; launchLogs = entry.liveLogs
         launchSurface = winios_surface_present_count()
         MetalBackedView.presentCountAtLaunch = launchPresent; laidOutAfterFirstPresent = false
         // A disappearing SwiftUI HUD does not always deliver onDisappear on
@@ -1057,6 +1062,11 @@ final class LibraryModel: ObservableObject {
             } else if winios_surface_present_count() > launchSurface {
                 showGameView(reason: "surface")
             } else if Date().timeIntervalSince(launchStarted) > 30 { launchSlow = true }
+            if !launchStalled, Date().timeIntervalSince(launchStarted) > 90 {
+                launchStalled = true
+                fputs("[launch-stall] no frame 90 s after the press\n", stderr)
+                LogStore.shared.log("[launch-stall] no frame 90 s after the press (presents=\(madeira_get_present_count() - launchPresent), surface=\(winios_surface_present_count() - launchSurface))", level: .error)
+            }
         }
         if wine_process_is_running() != 0 {
             sawProcess = true
@@ -3993,7 +4003,7 @@ struct LibraryHUD: View {
                 } else {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         VStack(spacing: 8) {
-                            Text(model.launchSlow ? "Still starting…" : "Starting your game…").foregroundStyle(.white.opacity(0.7))
+                            Text(model.launchStalled ? "游戏已启动，但 90 秒内没有出画面（渲染没起来）。打开启动日志查看原因。" : (model.launchSlow ? "Still starting…" : "Starting your game…")).foregroundStyle(.white.opacity(0.7))
                             Text("\(Int(context.date.timeIntervalSince(model.launchStartedAt))) 秒")
                                 .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.4))
                         }
