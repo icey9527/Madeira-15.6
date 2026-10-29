@@ -912,7 +912,7 @@ final class DepotDownloader {
             // config/config.vdf (this machine: 206), and that is what decides
             // which CDN nodes the directory hands out -- 2026-10-29, region 168
             // (Qingdao) returned Tokyo nodes and 700 KB/s.
-            let cell = Int(MadeiraConfig.get("steam-cell") ?? "")
+            let cell: UInt32 = UInt32(MadeiraConfig.get("steam-cell") ?? "")
                 ?? SteamServerChoice.current.cellID ?? session.cellID
             // The unattended WebAPI call is routed by the caller's IP alone:
             // every cell id we asked for (168 Qingdao, 47 Shanghai) came back as
