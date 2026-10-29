@@ -7806,6 +7806,19 @@ static int ios_mach_deliver_guest_exception_inner( thread_t thread, arm_thread_s
                                      (unsigned long long)mc.__ss.__fp, (unsigned long long)mc.__ss.__lr,
                                      (unsigned long long)mc.__ss.__sp, (unsigned long long)mc.__ss.__pc,
                                      (unsigned long long)__builtin_return_address(0) );
+                            /* Which thread is this? The TEB's stack bounds say
+                             * whether the faulting sp even belongs to it: Dead
+                             * Cells faults at 0x10004 with sp BELOW its own
+                             * StackBase, i.e. on a stack the TEB does not know. */
+                            {
+                                uint64_t teb = (uint64_t)(uintptr_t)NtCurrentTeb();
+                                uint64_t sb = *(volatile uint64_t *)(uintptr_t)(teb + 0x8);
+                                uint64_t sl = *(volatile uint64_t *)(uintptr_t)(teb + 0x10);
+                                dprintf( 2, "[small-addr] teb=%llx stackBase=%llx stackLimit=%llx sp_in_stack=%d\n",
+                                         (unsigned long long)teb, (unsigned long long)sb,
+                                         (unsigned long long)sl,
+                                         (mc.__ss.__sp > sl && mc.__ss.__sp <= sb) ? 1 : 0 );
+                            }
                         }
                         TEB *t2 = NtCurrentTeb();
                         CHPE_V2_CPU_AREA_INFO *ca2 = t2 ? t2->ChpeV2CpuAreaInfo : NULL;
