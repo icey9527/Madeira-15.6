@@ -610,6 +610,34 @@ static void madeira_install_cjk_font(NSString *prefix)
     }
 }
 
+/* Steam's video component (video64.dll) imports the FFmpeg runtime by these
+ * module names; the client packages this app pins do not carry them and the
+ * client's own updater stalls before it would fetch them, so games that load
+ * video64 die at startup ("import_dll Library libavcodec-62.dll ... not found",
+ * NOeSIS01 / amehazu / Sunrider, 2026-10-29). They are built from FFmpeg by
+ * build/ffmpeg-pe/build.sh (LGPL) and shipped in the bundle's steam-libs/.
+ *
+ * Copied only when missing: if a later Steam client update ever brings its own
+ * copies, those stay. A partial copy is safe -- Windows resolves each import
+ * separately. */
+static void madeira_install_steam_libs(NSString *prefix)
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *dir = [prefix stringByAppendingPathComponent:@"drive_c/Program Files (x86)/Steam"];
+    if (![fm fileExistsAtPath:dir]) return;   /* Steam components not prepared yet */
+    NSArray<NSURL *> *urls = [[NSBundle mainBundle] URLsForResourcesWithExtension:@"dll" subdirectory:@"steam-libs"];
+    if (!urls.count) { LOG("no steam-libs in the bundle"); return; }
+    int copied = 0, kept = 0;
+    for (NSURL *url in urls) {
+        NSString *dst = [dir stringByAppendingPathComponent:url.lastPathComponent];
+        if ([fm fileExistsAtPath:dst]) { kept++; continue; }
+        NSError *error = nil;
+        if ([fm copyItemAtPath:url.path toPath:dst error:&error]) copied++;
+        else LOG("steam-lib copy FAILED: %{public}s", url.lastPathComponent.UTF8String);
+    }
+    LOG("steam-libs: %d copied, %d already present", copied, kept);
+}
+
 void madeira_seed_prefix_if_needed(const char *prefix_path) {
     @autoreleasepool {
         if (!prefix_path) return;
@@ -649,6 +677,7 @@ void madeira_seed_prefix_if_needed(const char *prefix_path) {
         madeira_ensure_locallow( prefix );
         madeira_force_gbk_codepage( prefix );
         madeira_install_cjk_font( prefix );
+        madeira_install_steam_libs( prefix );
     }
 }
 

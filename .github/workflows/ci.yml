@@ -706,6 +706,50 @@ jobs:
           python3 build/dxmt-pe/verify-metallib.py app/Madeira/arm64ec-windows/d3d11.dll
           touch app/Madeira/arm64ec-windows/d3d11.dll
 
+      # Steam's video64.dll imports libavcodec-62 / libavformat-62 / libavfilter-11
+      # / libavutil-60 / libswresample-6 / libswscale-9, which the pinned Valve
+      # client packages do not carry. Built here from FFmpeg 8.0.x (the major
+      # version that produces those sonames) and shipped in the bundle's
+      # steam-libs/, copied into the prefix on first launch.
+      - name: Restore the FFmpeg tarball
+        id: ffmpeg-pe-src
+        if: ${{ !cancelled() && env.APP_ONLY != '1' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: build/ffmpeg-pe/cache/src
+          key: ffmpeg-pe-src-8.0.1
+
+      - name: Restore FFmpeg PE DLLs
+        id: ffmpeg-pe-cache
+        if: ${{ !cancelled() && env.APP_ONLY != '1' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: app/Madeira/steam-libs
+          key: ffmpeg-pe-${{ runner.arch }}-${{ hashFiles('build/ffmpeg-pe/build.sh') }}
+
+      - name: FFmpeg PE（Steam video64 的 libav* 依赖）
+        if: ${{ !cancelled() && env.APP_ONLY != '1' && steps.ffmpeg-pe-cache.outputs.cache-hit != 'true' }}
+        env:
+          # TODO: pin the sha256 from this run's log into build/ffmpeg-pe/build.sh
+          # and drop this. Until then the script prints it and proceeds only
+          # because this flag says so.
+          FFMPEG_PE_UNPINNED: '1'
+        run: bash build/ffmpeg-pe/build.sh > >(tee ci-logs/ffmpeg-pe.log) 2>&1
+
+      - name: Save the FFmpeg tarball
+        if: ${{ steps.ffmpeg-pe-cache.outcome == 'success' && steps.ffmpeg-pe-src.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: build/ffmpeg-pe/cache/src
+          key: ${{ steps.ffmpeg-pe-src.outputs.cache-primary-key }}
+
+      - name: Save FFmpeg PE DLLs
+        if: ${{ steps.ffmpeg-pe-cache.outcome == 'success' && steps.ffmpeg-pe-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: app/Madeira/steam-libs
+          key: ${{ steps.ffmpeg-pe-cache.outputs.cache-primary-key }}
+
       # dockhost.exe used to be a committed binary and nothing rebuilt it, so the
       # console-window hide added to build/madeira-dock/console-quiet.c never
       # reached a device and the Dock's console stayed on the guest desktop next
