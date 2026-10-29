@@ -610,8 +610,8 @@ jobs:
           path: |
             wine/build-i386
             dxmt/build-pe-i386
-          key: wine-i386-build-v2-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-${{ hashFiles('build/wine-i386/build.sh', 'tools/ci/verify-wow64.py') }}
-          restore-keys: wine-i386-build-v2-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-
+          key: wine-i386-build-v3-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ hashFiles('build/wine-i386/build.sh', 'tools/ci/verify-wow64.py') }}
+          restore-keys: wine-i386-build-v3-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-
 
       - name: Build 32-bit Windows runtime (Wine i386 + DXMT i386)
         id: wow64
