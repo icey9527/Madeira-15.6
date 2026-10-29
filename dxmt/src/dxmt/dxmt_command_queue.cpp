@@ -25,9 +25,9 @@
  *
  * Keyed on _WIN32, not DXMT_IOS: meson defines DXMT_IOS for every Windows host
  * system, so it cannot tell the PE module from the unix library. */
-extern "C" __attribute__((weak)) int madeira_get_app_active(void) {
-  static int cached = 1;
-  static std::chrono::steady_clock::time_point last;
+extern "C" int madeira_get_app_active(void) {
+  static thread_local int cached = 1;
+  static thread_local std::chrono::steady_clock::time_point last;
   auto now = std::chrono::steady_clock::now();
   if (last != std::chrono::steady_clock::time_point{} &&
       std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() < 200)
@@ -39,9 +39,8 @@ extern "C" __attribute__((weak)) int madeira_get_app_active(void) {
   return cached;
 }
 #else
-/* The unix build: winemetal_unix.c owns the real flag and this weak definition
- * is only here so the arm64ec PE build links (it compiles this file too). */
-extern "C" __attribute__((weak)) int madeira_get_app_active(void) { return 1; }
+// 原生库直接读取 winemetal 的真实状态，不用恒为前台的弱定义兜底。
+extern "C" int madeira_get_app_active(void);
 #endif
 
 #define ASYNC_ENCODING 1
@@ -171,14 +170,23 @@ CommandQueue::CommitChunkInternal(CommandChunk &chunk, uint64_t seq) {
   }
   }
 
-  if (!madeira_get_app_active()) {
-    static unsigned madeira_bg_dropped;
-    if (madeira_bg_dropped++ < 8 || (madeira_bg_dropped % 256) == 0)
-      WARN("[bg-commit] dropped frame=", chunk.frame_, " n=", madeira_bg_dropped);
-    ready_for_commit.fetch_add(1, std::memory_order_release);
-    dxmt::atomic_notify_one(ready_for_commit);
-    return;
+  // chunk 已持有查询、共享事件及帧延迟 fence，不能只跳过 encode 后发布。
+  // 那会交给完成线程一个空 cmdbuf（status=0），它永远等不到完成。
+  // 后台暂停消费，保留整个 chunk；前台恢复后仍按原顺序提交。
+  bool paused = false;
+  while (!madeira_get_app_active()) {
+    if (stopped.load(std::memory_order_acquire))
+      return;
+    if (!paused) {
+      WARN("[bg-commit] paused frame=", chunk.frame_, " seq=", seq);
+      paused = true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
+  if (stopped.load(std::memory_order_acquire))
+    return;
+  if (paused)
+    WARN("[bg-commit] resumed frame=", chunk.frame_, " seq=", seq);
   auto cmdbuf = commandQueue.commandBuffer();
   chunk.attached_cmdbuf = cmdbuf;
   if (chunk.resource_initializer_event_id) {
@@ -221,9 +229,13 @@ CommandQueue::WaitForFinishThread() {
     if (stopped.load())
       break;
     auto &chunk = chunks[internal_seq % kCommandChunkCount];
-    if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
+    const bool missing_cmdbuf = !chunk.attached_cmdbuf;
+    if (missing_cmdbuf)
+      ERR("[gpu-wait] missing command buffer frame=", chunk.frame_, " seq=", internal_seq);
+    if (!missing_cmdbuf && chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
       unsigned madeira_wait_ms = 0;
-      while (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
+      while (!stopped.load(std::memory_order_acquire) &&
+             chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         madeira_wait_ms += 10;
         if ((madeira_wait_ms % 2000) == 0) {
@@ -234,18 +246,22 @@ CommandQueue::WaitForFinishThread() {
         }
       }
     }
-    const bool device_error = chunk.attached_cmdbuf.status() == WMTCommandBufferStatusError;
+    if (stopped.load(std::memory_order_acquire))
+      break;
+    const bool device_error = missing_cmdbuf || chunk.attached_cmdbuf.status() == WMTCommandBufferStatusError;
     if (device_error) {
-      ERR("Device error at frame ", chunk.frame_, ": ", chunk.attached_cmdbuf.error().description().getUTF8String());
+      if (!missing_cmdbuf)
+        ERR("Device error at frame ", chunk.frame_, ": ", chunk.attached_cmdbuf.error().description().getUTF8String());
       MarkDeviceError();
     }
-    if (auto logs = chunk.attached_cmdbuf.logs()) {
-      for (auto &log : logs.elements()) {
-        ERR("Frame ", chunk.frame_, ": ", log.description().getUTF8String());
+    if (!missing_cmdbuf) {
+      if (auto logs = chunk.attached_cmdbuf.logs()) {
+        for (auto &log : logs.elements()) {
+          ERR("Frame ", chunk.frame_, ": ", log.description().getUTF8String());
+        }
       }
+      AccountGpuTime(chunk.attached_cmdbuf.handle, chunk.frame_);   /* ml1254 */
     }
-
-    AccountGpuTime(chunk.attached_cmdbuf.handle, chunk.frame_);   /* ml1254 */
 
     if (chunk.signal_frame_latency_fence_ != ~0ull)
       frame_latency_fence_.signal(chunk.signal_frame_latency_fence_);

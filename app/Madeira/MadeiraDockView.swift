@@ -184,7 +184,7 @@ struct MadeiraDockView: View {
                         }
                     }
                 } header: { Text("下载线路") } footer: {
-                    Text("留空表示自动：下载前探测可用主机，并把真正能用的那台记住，以后的下载直接走它。下载一直「等待」时可以在这里填一台固定线路，例如 https://steampipe.akamaized.net。")
+                    Text("留空表示自动：从当前下载地区返回的节点中选择可用线路。保存线路后会直接使用该节点，不再自动测速或改写；节点不可用时可点「恢复自动」。")
                 }
                 Section {
                     if dock.games.isEmpty {

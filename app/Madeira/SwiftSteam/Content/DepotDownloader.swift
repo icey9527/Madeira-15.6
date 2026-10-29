@@ -340,7 +340,6 @@ final class DepotDownloader {
 
         // 1. Keys, manifests and per-host authorization for every depot.
         let health = ContentHostHealth()
-        let pool = Array(hosts.prefix(hostPoolSize))
         var plans: [DepotPlan] = []
         var licenseSkipped: [UInt32] = []
         // The logged-on account, for the install record. Read while the session
@@ -365,8 +364,10 @@ final class DepotDownloader {
             }
             if session.steamID != 0 { accountID = session.steamID }
             let contentAppID = !app.freeToDownload ? (depot.fromApp ?? app.appID) : app.appID
-            let manifest = try await fetchManifest(depotID: depot.depotID, appID: contentAppID,
-                                                   manifestGID: gid, key: key, hosts: hosts)
+            let (manifest, manifestHost) = try await fetchManifest(depotID: depot.depotID, appID: contentAppID,
+                                                                  manifestGID: gid, key: key, hosts: hosts)
+            // 成功取到清单的节点也必须用于分块，不能被 prefix 的固定名额漏掉。
+            let pool = Array(([manifestHost] + hosts.filter { $0 != manifestHost }).prefix(hostPoolSize))
             var auth: [String: String] = [:]
             for host in pool {
                 auth[host] = await cdnAuthFragment(depotID: depot.depotID, appID: contentAppID, host: host)
@@ -631,20 +632,26 @@ final class DepotDownloader {
     private nonisolated static func fetchChunk(_ chunk: DepotManifest.ChunkEntry, plan: DepotPlan,
                                                path: String, attempts: Int, seed: Int) async throws {
         var lastError: Error = SteamError.chunkDownloadFailed("No content server responded.")
+        var tried: Set<String> = []
         for attempt in 0..<max(1, attempts) {
             try Task.checkCancellation()
             // Healthy servers first, starting from a per-chunk offset.
             let order = plan.health.order(plan.hosts, seed: seed)
-            let host = order[attempt % order.count]
+            // 降级会改变排序，不能再用 attempt 作下标，否则可能再次选中刚失败的节点。
+            if tried.count == order.count { tried.removeAll() }
+            let host = order.first { !tried.contains($0) } ?? order[0]
+            tried.insert(host)
             let url = "\(host)/depot/\(plan.depotID)/chunk/\(chunk.shaHex)\(plan.auth[host] ?? "")"
             do {
+                let requestStarted = Date()
                 let encrypted = try await download(url)
+                let requestSeconds = Date().timeIntervalSince(requestStarted)
                 let data = try ContentDecryptor.processChunk(encryptedData: encrypted, depotKey: plan.key,
                                                              expectedCRC: chunk.crc,
                                                              expectedSize: Int(chunk.uncompressedSize))
                 guard data.count == Int(chunk.uncompressedSize) else { throw SteamError.checksumMismatch }
                 try write(data, to: path, offset: chunk.offset)
-                plan.health.recordSuccess(host)
+                plan.health.recordSuccess(host, bytes: encrypted.count, seconds: requestSeconds)
                 return
             } catch is CancellationError {
                 throw CancellationError()
@@ -692,24 +699,21 @@ final class DepotDownloader {
     // MARK: - Manifest
 
     private func fetchManifest(depotID: UInt32, appID: UInt32, manifestGID: UInt64,
-                               key: Data, hosts: [String]) async throws -> DepotManifest {
+                               key: Data, hosts: [String]) async throws -> (DepotManifest, String) {
         let requestCode = try await manifestRequestCode(depotID: depotID, appID: appID, manifestGID: manifestGID)
         var lastError: Error = SteamError.manifestFetchFailed("No content server returned the manifest.")
-        for host in hosts.prefix(12) {
+        var candidates = Array(hosts.prefix(12))
+        if Self.pinnedContentHost() == nil, !candidates.contains("https://steampipe.akamaized.net") {
+            candidates.append("https://steampipe.akamaized.net")
+        }
+        for host in candidates {
             try Task.checkCancellation()
             let auth = await cdnAuthFragment(depotID: depotID, appID: appID, host: host)
             let code = requestCode == 0 ? "" : "/\(requestCode)"
             do {
-                let started = Date()
                 let raw = try await Self.download("\(host)/depot/\(depotID)/manifest/\(manifestGID)/5\(code)\(auth)")
-                SteamLog.trace("manifest from \(host)")
-                // Only pin a host that answered briskly. A host that crawled
-                // in after 25 s still works, but pinning it would make every
-                // future install crawl too (2026-10-29: the first pinned line
-                // was the slowest one that happened to answer first).
-                if Date().timeIntervalSince(started) < 8 { Self.rememberContentHost(host) }
                 let cache = depotCache
-                return try await Task.detached(priority: .userInitiated) {
+                let manifest = try await Task.detached(priority: .userInitiated) {
                     let (manifest, payload) = try Self.parseManifestKeepingPayload(raw, depotID: depotID, manifestGID: manifestGID, key: key)
                     // Valve's client reads a depot's manifest from steamapps/depotcache
                     // when it prepares a per-user custom executable. Keep it for such depots.
@@ -721,11 +725,13 @@ final class DepotDownloader {
                     }
                     return manifest
                 }.value
+                SteamLog.event("[steam-cdn] manifest depot=\(depotID) host=\(host) files=\(manifest.files.count)")
+                return (manifest, host)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 lastError = error
-                SteamLog.trace("manifest from a content server failed: \(error.localizedDescription)")
+                SteamLog.event("[steam-cdn] manifest failed depot=\(depotID) host=\(host) reason=\(Self.failureReason(error))")
             }
         }
         throw lastError
@@ -803,7 +809,7 @@ final class DepotDownloader {
     /// twice is free. 2026-10-29: a single 15 s call against a CM socket that
     /// was reconnecting failed the whole install with `reason=timeout` before
     /// a single CDN host had even been listed.
-    private func cmRetryOnce<T>(_ name: String, _ body: () async throws -> T) async throws -> T {
+    private func cmRetryOnce<T>(_ operation: String, _ body: () async throws -> T) async throws -> T {
         do {
             return try await body()
         } catch {
@@ -811,7 +817,7 @@ final class DepotDownloader {
             if let steam = error as? SteamError, case .connectionTimeout = steam { timedOut = true }
             if let url = error as? URLError, url.code == .timedOut { timedOut = true }
             guard timedOut else { throw error }
-            SteamLog.event("[steam-depot] \(name) timed out, retrying once")
+            SteamLog.event("[steam-depot] \(operation) timed out, retrying once")
             return try await body()
         }
     }
@@ -904,8 +910,12 @@ final class DepotDownloader {
     }
 
     private func contentServers(appID: UInt32) async throws -> [String] {
+        // 手动线路直接用于清单和分块；不再先等待整轮目录请求和测速。
+        if let pinned = Self.pinnedContentHost() {
+            SteamLog.event("[steam-cdn] manual host=\(pinned)")
+            return [pinned]
+        }
         var hosts: [String] = []
-        var reachableCount = 0
         do {
             // steam-cell overrides the picker and the logon cell with a raw cell
             // id. Windows' own client stores its choice as CurrentCellID in
@@ -914,19 +924,11 @@ final class DepotDownloader {
             // (Qingdao) returned Tokyo nodes and 700 KB/s.
             let cell: UInt32 = UInt32(MadeiraConfig.get("steam-cell") ?? "")
                 ?? SteamServerChoice.current.cellID ?? session.cellID
-            // The unattended WebAPI call is routed by the caller's IP alone:
-            // every cell id we asked for (168 Qingdao, 47 Shanghai) came back as
-            // Tokyo nodes (cacheN-tyo3), while the Windows client on the same
-            // line, logged in with an access token and CellID 206, pulls at
-            // 12 MB/s. So send the account's access token with the request --
-            // without it the cell parameter has nothing to bind to.
+            // 公开目录不需要账号 token；下载授权仍由 CM 签发 depot key 和请求码。
+            // 返回节点还受网络出口等因素影响，不能仅凭地名判断 cell 被忽略。
             var components = URLComponents(string: "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/")!
-            var items = [URLQueryItem(name: "cell_id", value: String(cell)),
-                         URLQueryItem(name: "max_servers", value: "20")]
-            let token = SteamTokenStore().loadTokens()?.accessToken ?? ""
-            let authed = !token.isEmpty
-            if authed { items.append(URLQueryItem(name: "access_token", value: token)) }
-            components.queryItems = items
+            components.queryItems = [URLQueryItem(name: "cell_id", value: String(cell)),
+                                     URLQueryItem(name: "max_servers", value: "20")]
             guard let url = components.url else {
                 throw SteamError.chunkDownloadFailed("Bad content directory URL")
             }
@@ -955,36 +957,20 @@ final class DepotDownloader {
                 let entry = (Self.isPlainHTTPContentHost(host) ? "http://" : "https://") + host
                 if !hosts.contains(entry) { hosts.append(entry) }
             }
+            let usableCount = hosts.count
             let reachable = await Self.liveContentHosts(hosts)
-            if !reachable.isEmpty {
-                // China mainland: the directory hands out *.steamcontent.com
-                // first, and those do not answer here at all (2026-10-29: 22
-                // offered, six tried, every manifest fetch timed out at 30 s and
-                // the install ended with url -1001). steampipe.akamaized.net
-                // answers from this network, but it is appended last and only the
-                // first six hosts were ever tried, so it was never reached.
-                reachableCount = reachable.count
-                let live = hosts.filter { reachable.contains($0) }
-                hosts = live + hosts.filter { !reachable.contains($0) }
-            }
-            SteamLog.event("[steam-cdn] cell=\(cell) authed=\(authed ? 1 : 0) offered=\(servers.count) usable=\(hosts.count) reachable=\(reachable.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther) first=\(hosts.first ?? "-")")
+            // 只有探测成功的节点进入轮转；失败节点不会再占用分块下载的连接。
+            // 全失败时保留目录结果：部分 CDN 不接受根路径 HEAD，不能据此判死。
+            if !reachable.isEmpty { hosts = hosts.filter { reachable.contains($0) } }
+            SteamLog.event("[steam-cdn] cell=\(cell) offered=\(servers.count) usable=\(usableCount) reachable=\(reachable.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther) first=\(hosts.first ?? "-")")
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             SteamLog.trace("content directory failed: \(error.localizedDescription)")
         }
-        let fallback = "https://steampipe.akamaized.net"
-        if !hosts.contains(fallback) {
-            // Nothing answered the probe: put this one first, because the
-            // manifest loop only walks a prefix of the list and a network that
-            // blocks every *.steamcontent.com host still reaches this one.
-            if reachableCount == 0 { hosts.insert(fallback, at: 0) } else { hosts.append(fallback) }
-        }
-        if let pinned = Self.pinnedContentHost() {
-            hosts.removeAll { $0 == pinned }
-            hosts.insert(pinned, at: 0)
-        }
-        return hosts
+        // 目录已经有节点时，不把海外备用混入正常分块轮转。
+        // 清单请求全部失败时会单独尝试备用，并将成功节点加入分块池。
+        return hosts.isEmpty ? ["https://steampipe.akamaized.net"] : hosts
     }
 
     /// Hosts that answer at all, probed in parallel with a short timeout.
@@ -1004,18 +990,11 @@ final class DepotDownloader {
                     request.httpMethod = "HEAD"
                     request.timeoutInterval = 4
                     do {
-                        _ = try await Self.http.data(for: request)
-                        return (host, true)
+                        let (_, response) = try await Self.http.data(for: request)
+                        return (host, response is HTTPURLResponse)
                     } catch {
-                        guard let error = error as? URLError else { return (host, true) }
-                        switch error.code {
-                        case .timedOut, .cannotFindHost, .cannotConnectToHost,
-                             .networkConnectionLost, .secureConnectionFailed,
-                             .dnsLookupFailed, .notConnectedToInternet:
-                            return (host, false)
-                        default:
-                            return (host, true)
-                        }
+                        // ATS/TLS/DNS 或取消等错误都不等于收到了 HTTP 响应。
+                        return (host, false)
                     }
                 }
             }
@@ -1025,24 +1004,22 @@ final class DepotDownloader {
         }
     }
 
-    /// The content server that actually worked last time, remembered in
-    /// madeira.cfg as `steam-cdn`.
-    ///
-    /// Probing 22 hosts and timing out on the blocked ones is what made every
-    /// download look like it had hung (2026-10-29: six hosts, 30 s each, then
-    /// url -1001). Once a host has answered, later installs go straight to it.
-    /// Set the key by hand to choose one, clear it to go back to probing.
+    /// 手动线路只接受 Valve CDN 的源地址，避免把认证片段发往任意主机。
+    /// 自动选择不再写 steam-cdn：清单响应快并不代表分块吞吐高。
     nonisolated static func pinnedContentHost() -> String? {
-        guard let value = MadeiraConfig.get("steam-cdn")?.trimmingCharacters(in: .whitespaces),
-              value.hasPrefix("http"), URL(string: value) != nil else { return nil }
-        return value
+        guard let value = MadeiraConfig.get("steam-cdn") else { return nil }
+        return validatedContentHost(value)
     }
 
-    nonisolated static func rememberContentHost(_ host: String) {
-        guard pinnedContentHost() != host else { return }
-        if MadeiraConfig.set("steam-cdn", host) {
-            SteamLog.event("[steam-cdn] pinned \(host) for future downloads")
-        }
+    nonisolated static func validatedContentHost(_ value: String) -> String? {
+        guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(),
+              usableContentHost(host), url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil,
+              url.path.isEmpty || url.path == "/",
+              (scheme == "https" && (url.port == nil || url.port == 443)) ||
+              (scheme == "http" && isPlainHTTPContentHost(host) && (url.port == nil || url.port == 80)) else { return nil }
+        return "\(scheme)://\(host)"
     }
 
     nonisolated static func usableContentHost(_ host: String) -> Bool {
@@ -1058,8 +1035,9 @@ final class DepotDownloader {
     /// Info.plist 里为它们开了 ATS 例外。
     nonisolated static func isPlainHTTPContentHost(_ host: String) -> Bool {
         let name = host.lowercased()
-        return name.hasSuffix("eccdnx.com") || name.hasSuffix("clngaa.com") ||
-            name.hasSuffix("pphimalayanrt.com")
+        return ["eccdnx.com", "clngaa.com", "pphimalayanrt.com"].contains {
+            name == $0 || name.hasSuffix("." + $0)
+        }
     }
 
     /// Unified-service GetCDNAuthToken → "?auth=…" query fragment for this
@@ -1107,6 +1085,12 @@ final class ContentHostHealth: @unchecked Sendable {
     private let lock = NSLock()
     private var failures: [String: Int] = [:]
     private var reported = 0
+    private struct Sample {
+        var bytes = 0
+        var requests = 0
+        var seconds: TimeInterval = 0
+    }
+    private var samples: [String: Sample] = [:]
 
     func order(_ hosts: [String], seed: Int) -> [String] {
         guard !hosts.isEmpty else { return hosts }
@@ -1129,10 +1113,24 @@ final class ContentHostHealth: @unchecked Sendable {
         }
     }
 
-    func recordSuccess(_ host: String) {
+    func recordSuccess(_ host: String, bytes: Int = 0, seconds: TimeInterval = 0) {
         lock.lock()
         if let count = failures[host], count > 0 { failures[host] = count - 1 }
+        var sample = samples[host] ?? Sample()
+        sample.bytes += bytes
+        sample.requests += 1
+        sample.seconds += seconds
+        let report = sample.requests == 1 || sample.requests % 64 == 0
+        samples[host] = sample
         lock.unlock()
+        if report {
+            // 请求累计耗时包含并发重叠，只作单连接诊断，不能当整个下载的速率。
+            let rate = sample.seconds > 0 ? Int(Double(sample.bytes) / sample.seconds) : 0
+            let requests = sample.requests, transferred = sample.bytes
+            DispatchQueue.main.async {
+                SteamLog.event("[steam-cdn] transfer host=\(host) requests=\(requests) bytes=\(transferred) per-request-bps=\(rate)")
+            }
+        }
     }
 }
 

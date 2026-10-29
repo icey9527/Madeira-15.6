@@ -11,8 +11,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
-#include <thread>
 #include "log/log.hpp"
 
 #include "d3d9_census.hpp"
@@ -231,11 +229,12 @@ MTLD3D9Texture::MTLD3D9Texture(
     level->setSharedLockState(&m_shared_lock_state);
 }
 
-void
+bool
 MTLD3D9Texture::ensureMirror() {
   // Idempotent: first call allocates, subsequent calls early-out.
+  // true = backing present or none needed; false = allocation failed.
   if (m_mirrorBacking != nullptr)
-    return;
+    return true;
   // Pools that never need a mirror. DEFAULT-pool textures live entirely
   // on the GPU; the legacy buffer-backed path aliases
   // level 0 onto a wsi::aligned_malloc'd buffer that IS the mirror. The
@@ -246,19 +245,19 @@ MTLD3D9Texture::ensureMirror() {
   // FOURCCs are MAPPABLE in wined3d's tables), same as the ctor-side
   // needs_mirror rule.
   if (m_pool == D3DPOOL_DEFAULT && !(m_usage & D3DUSAGE_DYNAMIC) && !Is3DcFormat(m_format))
-    return;
+    return true;
   // Buffer-backed: level 0 already aliases the
   // wsi-malloc'd page owned by m_dxmtTexture's allocation, so the
   // mirror would be a redundant second copy. The presence of an
   // allocation-side buffer is the universal "buffer-backed" predicate
   // now that the legacy ctor is gone.
   if (m_dxmtTexture && m_dxmtTexture->current() && m_dxmtTexture->current()->buffer() != nullptr)
-    return;
+    return true;
   if (m_mirrorOffsets.empty())
-    return;
+    return true;
   const size_t total_bytes = m_mirrorOffsets.back();
   if (total_bytes == 0)
-    return;
+    return true;
 
   // Try the device-level buffer-backing pool first. On hit we skip
   // the newBuffer XPC + first-touch memset cliff (a freshly-destroyed
@@ -271,22 +270,11 @@ MTLD3D9Texture::ensureMirror() {
     const size_t page = guest_page_size();
     const size_t mirror_alloc = (total_bytes + page - 1) & ~(page - 1);
     m_mirrorBacking = guest_alloc(mirror_alloc, page);
-    if (!m_mirrorBacking) {
-      /* The arena only grows when a *shim* call returns and finds the
-       * starvation flag guest_alloc just set, and this texture is being created
-       * inside exactly such a call -- so a failed allocation cannot fix itself
-       * from here. Yield instead: the render thread keeps calling the shim, the
-       * next return grows the arena, and the retry lands. Worth the 200 ms:
-       * Baldr Sky 2026-10-29 lost four mirrors (352 KB - 5.6 MB) this way and
-       * the white text background it draws additively never appeared. */
-      for (int attempt = 0; attempt < 40 && !m_mirrorBacking; attempt++) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        m_mirrorBacking = guest_alloc(mirror_alloc, page);
-      }
-    }
+    // 饥饿标记由本次同步 unix 调用返回后消费，再由 shim 扩容并重试。
+    // 在持有设备锁时 sleep 等不到这条路径，只会延迟同一次失败。
     if (!m_mirrorBacking) {
       Logger::warn(str::format("[d9-mirror] guest_alloc failed bytes=", mirror_alloc));
-      return;
+      return false;
     }
     std::memset(m_mirrorBacking, 0, mirror_alloc);
 
@@ -305,7 +293,7 @@ MTLD3D9Texture::ensureMirror() {
           " bytes=", mirror_alloc));
       guest_free(m_mirrorBacking);
       m_mirrorBacking = nullptr;
-      return;
+      return false;
     }
   }
 
@@ -318,6 +306,7 @@ MTLD3D9Texture::ensureMirror() {
     uint32_t pitch = D3DFormatLockPitch(m_format, level_w);
     m_levels[i]->patchMirror(level_ptr, pitch);
   }
+  return true;
 }
 
 // An app that reads a MANAGED texture back more than this many times keeps its
@@ -497,22 +486,25 @@ MTLD3D9Texture::materializeLevelForLock(uint32_t level) {
   m_mirror_stale_mask &= ~(1u << level);
 }
 
-void
+bool
 MTLD3D9Texture::restoreMirrorForSource() {
   // UpdateTexture reads mirrorBase() directly; re-materialize every evicted
   // level before it does. ensureMirror re-allocates the backing if needed.
+  // false = the re-allocation failed; a readback failure stays best-effort.
   if (m_mirror_stale_mask == 0)
-    return;
-  ensureMirror();
+    return true;
+  if (!ensureMirror())
+    return false;
   std::vector<MTLD3D9Surface *> pending;
   for (size_t i = 0; i < m_levels.size() && i < 32; ++i) {
     if (m_mirror_stale_mask & (1u << i))
       pending.push_back(m_levels[i].ptr());
   }
   if (!m_device->readbackSurfaceMirrors(pending.data(), pending.size()))
-    return;
+    return true;
   m_mirror_stale_mask = 0;
   ++m_mirror_download_count;
+  return true;
 }
 
 void

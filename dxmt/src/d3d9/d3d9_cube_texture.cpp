@@ -144,16 +144,17 @@ MTLD3D9CubeTexture::~MTLD3D9CubeTexture() {
     m_device->onLosableResourceDestroyed(m_losableBytes);
 }
 
-void
+bool
 MTLD3D9CubeTexture::ensureMirror() {
   // Idempotent: first call allocates, subsequent calls early-out.
+  // true = backing present or none needed; false = allocation failed.
   if (m_mirrorBacking != nullptr || !m_needs_mirror)
-    return;
+    return true;
   if (m_mirrorOffsets.empty())
-    return;
+    return true;
   const size_t total_bytes = m_mirrorOffsets.back();
   if (total_bytes == 0)
-    return;
+    return true;
 
   // Device backing pool first, then aligned_malloc + a Shared Metal
   // registration for the pool contract; MTLD3D9Texture::ensureMirror
@@ -165,7 +166,7 @@ MTLD3D9CubeTexture::ensureMirror() {
     const size_t mirror_alloc = (total_bytes + page - 1) & ~(page - 1);
     m_mirrorBacking = guest_alloc(mirror_alloc, page);
     if (!m_mirrorBacking)
-      return;
+      return false;
     std::memset(m_mirrorBacking, 0, mirror_alloc);
 
     WMTBufferInfo binfo{};
@@ -176,7 +177,7 @@ MTLD3D9CubeTexture::ensureMirror() {
     if (m_mirrorBuffer == nullptr) {
       guest_free(m_mirrorBacking);
       m_mirrorBacking = nullptr;
-      return;
+      return false;
     }
   }
 
@@ -187,6 +188,7 @@ MTLD3D9CubeTexture::ensureMirror() {
     UINT level_dim = std::max<UINT>(1u, m_edge_length >> (i % m_level_count));
     m_levels[i]->patchMirror(level_ptr, D3DFormatLockPitch(m_format, level_dim));
   }
+  return true;
 }
 
 // Same read-back threshold as MTLD3D9Texture: an app that reads a
@@ -272,22 +274,25 @@ MTLD3D9CubeTexture::materializeLevelForLock(uint32_t subresource) {
   m_staleSubres.reset(subresource);
 }
 
-void
+bool
 MTLD3D9CubeTexture::restoreMirrorForSource() {
   // UpdateTexture reads mirrorBase() directly; re-materialize every
-  // evicted face before it does.
+  // evicted face before it does. false = the re-allocation failed; a
+  // readback failure stays best-effort.
   if (m_staleSubres.none())
-    return;
-  ensureMirror();
+    return true;
+  if (!ensureMirror())
+    return false;
   std::vector<MTLD3D9Surface *> pending;
   for (size_t i = 0; i < m_levels.size() && i < m_staleSubres.size(); ++i) {
     if (m_staleSubres.test(i))
       pending.push_back(m_levels[i].ptr());
   }
   if (!m_device->readbackSurfaceMirrors(pending.data(), pending.size()))
-    return;
+    return true;
   m_staleSubres.reset();
   ++m_mirror_download_count;
+  return true;
 }
 
 void

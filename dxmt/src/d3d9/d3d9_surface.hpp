@@ -30,7 +30,13 @@ class MTLD3D9Texture;
 // level through the subresource index fixed at creation (mip for 2D,
 // face-major for cubes).
 struct D9LazyMirrorHost {
-  virtual void ensureMirror() = 0;
+  // Materialises the lazy sysmem mirror. Returns true when a mirror is
+  // available OR none is needed for this resource (buffer-backed, GPU-only
+  // pool, empty subresources); returns false only when an allocation failed.
+  // A false return is the caller's cue to fail the current D3D9 call with
+  // D3DERR_OUTOFVIDEOMEMORY, which lets the shim grow the guest arena and
+  // replay the call once (WOW64_DESIGN.md 8.2(c)).
+  virtual bool ensureMirror() = 0;
   virtual void materializeLevelForLock(uint32_t subresource) = 0;
   virtual void noteLevelUploaded(uint32_t subresource) = 0;
   // A NO_DIRTY_UPDATE Unlock of a MANAGED sub-resource records no dirty region,
@@ -292,7 +298,8 @@ public:
   // Materialise the lazy sysmem mirror a texture-level surface defers
   // until first Lock (the same dispatch LockRect performs); a no-op
   // for surfaces that already carry a backing or have none to defer.
-  void ensureHostMirror();
+  // true = mirror present or not needed; false = allocation failure.
+  bool ensureHostMirror();
 
 private:
   // Lifetime: device held by surface; first public AddRef->device AddRef, last Release->device Release.

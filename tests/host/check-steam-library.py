@@ -120,8 +120,8 @@ for path in ['SteamOwnedLibrary.swift', 'SteamGames.swift', 'SteamInstall.swift'
     for word in ['SteamTokenStore', 'SecItem', 'kSecClass', 'saveTokens', 'clearTokens', 'loadTokens', 'UserDefaults', 'refreshToken']:
         if path == 'SwiftSteam/Core/SteamSession.swift' and word == 'refreshToken':
             continue  # it logs on with the token SteamSignIn hands out
-        if path == 'SteamGames.swift' and word == 'UserDefaults':
-            continue
+        if path in ('SteamGames.swift', 'SwiftSteam/Content/DepotDownloader.swift') and word == 'UserDefaults':
+            continue  # SteamServerChoice 只保存下载地区，不保存认证凭据
         require(word not in text, f'{path}: no {word} (sign-in tokens stay in SteamSignIn)')
 require('SteamSignIn.credentialsForDock()' in sources['SwiftSteam/Core/SteamSession.swift'],
         "the connection logs on with SteamSignIn's stored sign-in")
@@ -913,6 +913,13 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
             DepotDownloader.serverEligibility(["allowed_app_ids": [5]], appID: 1) == .other &&
             DepotDownloader.serverEligibility(["allowed_app_ids": [1], "https_support": "mandatory"], appID: 1) == .usable &&
             DepotDownloader.serverEligibility([:], appID: 1) == .usable, "content server eligibility")
+    require(DepotDownloader.validatedContentHost(" https://cache1.steamcontent.com/ ") == "https://cache1.steamcontent.com" &&
+            DepotDownloader.validatedContentHost("http://dl.steam.clngaa.com") == "http://dl.steam.clngaa.com", "manual content routes accept Valve origins")
+    for value in ["https://evil.example", "http://cache1.steamcontent.com", "https://u:p@cache1.steamcontent.com",
+                  "https://cache1.steamcontent.com/path", "https://cache1.steamcontent.com?auth=secret",
+                  "https://cache1.steamcontent.com:8080", "http://notclngaa.com"] {
+        require(DepotDownloader.validatedContentHost(value) == nil, "manual content routes reject credentials, foreign domains and URL suffixes")
+    }
     let health = ContentHostHealth()
     for _ in 0..<3 { health.recordFailure("https://bad", reason: "x") }
     require(health.order(["https://bad", "https://good"], seed: 0).first == "https://good", "a server that keeps failing moves to the back of the rotation")
@@ -1041,10 +1048,9 @@ dock_body = (dock[dock.index('enum MadeiraDock {'):dock.index('    @MainActor pr
 # URLSession lives in FoundationNetworking on Linux; the production file imports Foundation only.
 downloader_host = downloader.replace('import Foundation\n', 'import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n#endif\n', 1)
 # The free-space query is Darwin's (volumeAvailableCapacityForImportantUsage); the host has none, so the check is skipped there.
-space = ('let values = try? installURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])\n'
-         '            let available = UInt64(max(0, values?.volumeAvailableCapacityForImportantUsage ?? Int64.max))')
+space = 'if let free = installURL.freeSpace, case let available = UInt64(free), available < remaining {'
 assert space in downloader_host
-downloader_host = downloader_host.replace(space, 'let available = UInt64.max')
+downloader_host = downloader_host.replace(space, 'if case let available = UInt64.max, available < remaining {')
 fetcher_source = sources['SwiftSteam/Library/SteamLibraryFetcher.swift']
 
 work = Path(tempfile.mkdtemp(prefix='madeira-steam-library-'))

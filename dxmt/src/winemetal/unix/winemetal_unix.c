@@ -3825,7 +3825,7 @@ _MetalLayer_nextDrawable(void *obj) {
     was_paused = 0;
     dprintf(STDERR_FILENO, "[present-resume] first frame after background: drawable=%s%c",
             params->ret ? "ok" : "NIL", 10);
-  } else if (params->ret == 0) {
+  } else if (params->ret == 0 && atomic_load_explicit(&madeira_app_active, memory_order_relaxed)) {
     if (nil_while_active++ < 8 || (nil_while_active % 256) == 0)
       dprintf(STDERR_FILENO, "[present-resume] no drawable while active (n=%lu)%c",
               nil_while_active, 10);

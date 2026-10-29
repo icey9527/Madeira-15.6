@@ -107,7 +107,9 @@ public:
   // surface's m_cpu_ptr + pitch, subsequent calls early-
   // out. Cuts boot-time VA pressure and wine_unix_call rate for apps
   // that batch-create textures up front.
-  void ensureMirror() override;
+  // true = backing present or not needed; false = guest_alloc/newBuffer
+  // failed. See D9LazyMirrorHost::ensureMirror.
+  bool ensureMirror() override;
 
   // MANAGED mirror eviction, the wined3d evict_sysmem shape. A
   // D3DPOOL_MANAGED texture's host mirror (the wsi::aligned_malloc backing in
@@ -124,7 +126,10 @@ public:
   void noteLevelUploaded(uint32_t level) override;
   void materializeLevelForLock(uint32_t level) override;
   void noteLevelDeferredWrite(uint32_t level) override;
-  void restoreMirrorForSource();
+  // Returns false only when a stale mirror needed re-materialising and the
+  // allocation failed (out of arena); a readback failure keeps the existing
+  // best-effort behaviour and still returns true.
+  bool restoreMirrorForSource();
 
   // Deferred MANAGED upload (see MTLD3D9CommonTexture). A 2D MANAGED texture is
   // fully dirty at create (m_needs_upload_mask = every level); a plain Unlock

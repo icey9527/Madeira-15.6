@@ -4143,8 +4143,16 @@ MTLD3D9Device::UpdateSurface(
   // mirror until first Lock, and UpdateSurface can be that first touch, so
   // materialise it first. Same lifetime shape as UpdateTexture (DXVK
   // AllocStagingBuffer).
-  src->ensureHostMirror();
+  if (!src->ensureHostMirror())
+    return D3DERR_OUTOFVIDEOMEMORY;
   if (void *src_host = src->cpuPtr()) {
+    // A DYNAMIC DEFAULT destination's mirror is materialised BEFORE any
+    // upload is queued. A failure must abort the call while nothing has been
+    // staged, otherwise the shim's grow-and-retry replay would enqueue the
+    // same upload a second time. The later mirror copy only reads cpuPtr().
+    const bool dynamic_dst = (dd.Usage & D3DUSAGE_DYNAMIC) != 0;
+    if (dynamic_dst && !dst->ensureHostMirror())
+      return D3DERR_OUTOFVIDEOMEMORY;
     const bool compressed = IsCompressedFormat(sd.Format);
     uint64_t row_off, col_off;
     if (compressed) {
@@ -4171,8 +4179,7 @@ MTLD3D9Device::UpdateSurface(
     // Lock and needs nothing here. The dst rows stride the dst pitch and the
     // src rows the src pitch (a format-equal pair with matching per-column
     // bytes but a possibly different aligned/tight row stride).
-    if (dd.Usage & D3DUSAGE_DYNAMIC) {
-      dst->ensureHostMirror();
+    if (dynamic_dst) {
       if (uint8_t *dst_host = static_cast<uint8_t *>(dst->cpuPtr())) {
         const uint32_t dst_pitch = dst->pitch();
         uint64_t dst_row_off, dst_col_off;
@@ -4297,7 +4304,8 @@ MTLD3D9Device::UpdateTexture(IDirect3DBaseTexture9 *pSourceTexture, IDirect3DBas
       // as a mismatched loose copy into one is not a real workload.
       if (!src->isDirty())
         return D3D_OK;
-      src->restoreMirrorForSource();
+      if (!src->restoreMirrorForSource())
+        return D3DERR_OUTOFVIDEOMEMORY;
       const uint8_t *loose_src = static_cast<const uint8_t *>(src->mirrorBase());
       if (!loose_src)
         return D3D_OK;
@@ -4343,7 +4351,8 @@ MTLD3D9Device::UpdateTexture(IDirect3DBaseTexture9 *pSourceTexture, IDirect3DBas
     }
     // A MANAGED source whose mirror was evicted after upload is
     // re-materialized from the Metal texture first.
-    src->restoreMirrorForSource();
+    if (!src->restoreMirrorForSource())
+      return D3DERR_OUTOFVIDEOMEMORY;
     // Source from the CPU mirror base, not the Metal mirror buffer: the
     // copy below stages through the upload ring from mirrorBase(), and a
     // user-memory source aliases the app pointer with no mirror buffer. A
@@ -4369,7 +4378,8 @@ MTLD3D9Device::UpdateTexture(IDirect3DBaseTexture9 *pSourceTexture, IDirect3DBas
     // not be visible to a later Lock. Mirror the copied bytes into the dst's
     // sysmem copy as well. ensureMirror is a no-op for pools without a mirror
     // (a plain DEFAULT dst has none and is served by readback instead).
-    dst->ensureMirror();
+    if (!dst->ensureMirror())
+      return D3DERR_OUTOFVIDEOMEMORY;
     uint8_t *dst_mirror = static_cast<uint8_t *>(dst->mirrorBase());
     for (UINT dst_level = 0; dst_level < levels_to_copy; ++dst_level) {
       const UINT src_level = src_level_offset + dst_level;
@@ -4696,7 +4706,8 @@ MTLD3D9Device::UpdateTexture(IDirect3DBaseTexture9 *pSourceTexture, IDirect3DBas
         any_dirty |= src->isDirty(f);
       if (!any_dirty)
         return D3D_OK;
-      src->restoreMirrorForSource();
+      if (!src->restoreMirrorForSource())
+        return D3DERR_OUTOFVIDEOMEMORY;
       const uint8_t *loose_src = src->mirrorBase();
       if (!loose_src)
         return D3D_OK;
@@ -4739,7 +4750,8 @@ MTLD3D9Device::UpdateTexture(IDirect3DBaseTexture9 *pSourceTexture, IDirect3DBas
     }
     // Re-materialize an evicted MANAGED mirror before sourcing it (the
     // 2D branch does the same through restoreMirrorForSource).
-    src->restoreMirrorForSource();
+    if (!src->restoreMirrorForSource())
+      return D3DERR_OUTOFVIDEOMEMORY;
     const uint8_t *src_base = src->mirrorBase();
     // A never-modified SYSTEMMEM source has no mirror base yet (populated lazily
     // on first Lock); that is native's no-op success, not an error.
@@ -4752,7 +4764,8 @@ MTLD3D9Device::UpdateTexture(IDirect3DBaseTexture9 *pSourceTexture, IDirect3DBas
     // skips the GPU readback, so the upload must also land in the mirror (same
     // as the 2D branch). ensureMirror is a no-op for pools without a mirror; the
     // const_cast writes the backing the const accessor reads back.
-    dst->ensureMirror();
+    if (!dst->ensureMirror())
+      return D3DERR_OUTOFVIDEOMEMORY;
     uint8_t *dst_mirror = const_cast<uint8_t *>(dst->mirrorBase());
     const bool compressed = IsCompressedFormat(src->d3dFormat());
     const UINT levels_to_copy = std::min(src_levels - src_level_offset, dst_levels);
@@ -4981,7 +4994,8 @@ MTLD3D9Device::GetRenderTargetData(IDirect3DSurface9 *pRenderTarget, IDirect3DSu
   // materialise it here the way GetFrontBufferData does before its pointer
   // check. The standalone offscreen-plain target above has an eager mirror, a
   // no-op here.
-  dst->ensureHostMirror();
+  if (!dst->ensureHostMirror())
+    return D3DERR_OUTOFVIDEOMEMORY;
   uint8_t *dst_base = static_cast<uint8_t *>(dst->cpuPtr());
   if (!dst_base)
     return D3DERR_INVALIDCALL;
@@ -5103,7 +5117,8 @@ MTLD3D9Device::frontBufferReadback(MTLD3D9SwapChain *chain, IDirect3DSurface9 *p
     return D3DERR_INVALIDCALL;
   // A texture-level destination allocates its host mirror lazily; the
   // same materialisation LockRect performs before its pointer check.
-  dst->ensureHostMirror();
+  if (!dst->ensureHostMirror())
+    return D3DERR_OUTOFVIDEOMEMORY;
   if (front->metalTexture().handle == 0 || dst->cpuPtr() == nullptr)
     return D3DERR_INVALIDCALL;
 

@@ -112,10 +112,10 @@ public:
   // the device pool; materializeLevelForLock re-downloads an evicted
   // face's bytes before a read-Lock; restoreMirrorForSource does the
   // same before UpdateTexture reads the mirror.
-  void ensureMirror() override;
+  bool ensureMirror() override;
   void noteLevelUploaded(uint32_t subresource) override;
   void materializeLevelForLock(uint32_t subresource) override;
-  void restoreMirrorForSource();
+  bool restoreMirrorForSource();
   void dropMirror();
 
   // Mirror accessors used by UpdateTexture to source from a

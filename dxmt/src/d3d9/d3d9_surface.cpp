@@ -207,10 +207,11 @@ MTLD3D9Surface::markImplicitLosable() {
   m_isImplicitLosable = true;
 }
 
-void
+bool
 MTLD3D9Surface::ensureHostMirror() {
   if (!m_cpu_ptr && m_lazyMirrorParent)
-    m_lazyMirrorParent->ensureMirror();
+    return m_lazyMirrorParent->ensureMirror();
+  return true;
 }
 
 void
@@ -471,8 +472,10 @@ MTLD3D9Surface::LockRect(D3DLOCKED_RECT *pLockedRect, const RECT *pRect, DWORD F
   // (and all sibling level) surfaces' cpu_ptr/pitch
   // before the null check below. Idempotent; every Lock after the
   // first early-outs inside ensureMirror.
-  if (!m_cpu_ptr && m_lazyMirrorParent)
-    m_lazyMirrorParent->ensureMirror();
+  if (!m_cpu_ptr && m_lazyMirrorParent) {
+    if (!m_lazyMirrorParent->ensureMirror())
+      return D3DERR_OUTOFVIDEOMEMORY;
+  }
   if (!m_cpu_ptr)
     return D3DERR_INVALIDCALL;
   if (m_locked)
