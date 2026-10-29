@@ -884,7 +884,13 @@ final class DepotDownloader {
         var hosts: [String] = []
         var reachableCount = 0
         do {
-            let cell = SteamServerChoice.current.cellID ?? session.cellID
+            // steam-cell overrides the picker and the logon cell with a raw cell
+            // id. Windows' own client stores its choice as CurrentCellID in
+            // config/config.vdf (this machine: 206), and that is what decides
+            // which CDN nodes the directory hands out -- 2026-10-29, region 168
+            // (Qingdao) returned Tokyo nodes and 700 KB/s.
+            let cell = Int(MadeiraConfig.get("steam-cell") ?? "")
+                ?? SteamServerChoice.current.cellID ?? session.cellID
             guard let url = URL(string: "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/?cell_id=\(cell)&max_servers=20") else {
                 throw SteamError.chunkDownloadFailed("Bad content directory URL")
             }
@@ -925,7 +931,7 @@ final class DepotDownloader {
                 let live = hosts.filter { reachable.contains($0) }
                 hosts = live + hosts.filter { !reachable.contains($0) }
             }
-            SteamLog.event("[steam-cdn] offered=\(servers.count) usable=\(hosts.count) reachable=\(reachable.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther) first=\(hosts.first ?? "-")")
+            SteamLog.event("[steam-cdn] cell=\(cell) offered=\(servers.count) usable=\(hosts.count) reachable=\(reachable.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther) first=\(hosts.first ?? "-")")
         } catch is CancellationError {
             throw CancellationError()
         } catch {
