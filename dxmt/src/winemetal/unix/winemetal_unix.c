@@ -3799,8 +3799,42 @@ int madeira_get_app_active(void)
   return atomic_load_explicit(&madeira_app_active, memory_order_relaxed);
 }
 
+static NTSTATUS _MetalLayer_nextDrawable_inner(void *obj);
+
+/* Madeira-15.6: what happens across a background round-trip.
+ *
+ * While the app is not active this returns nil so no drawable is touched.
+ * The question that keeps coming back is whether a *fresh* drawable ever
+ * arrives after the return: TheShell (D3D11) and Baldr Sky (D3D9) both freeze
+ * with the last frame on screen and the audio looping after pulling down the
+ * notification shade (2026-10-29), which is exactly a resign/become-active
+ * pair. If the layer never hands a drawable out again, every frame is dropped
+ * and the game stops inside Present -- so count both cases here instead of
+ * inferring them from a missing FRAME_STATS line. */
 static NTSTATUS
 _MetalLayer_nextDrawable(void *obj) {
+  struct unixcall_generic_obj_obj_ret *params = obj;
+  static int was_paused;
+  static unsigned long nil_while_active;
+  if (!atomic_load_explicit(&madeira_app_active, memory_order_relaxed) && !was_paused) {
+    was_paused = 1;
+    nil_while_active = 0;
+  }
+  NTSTATUS status = _MetalLayer_nextDrawable_inner(obj);
+  if (was_paused && atomic_load_explicit(&madeira_app_active, memory_order_relaxed)) {
+    was_paused = 0;
+    dprintf(STDERR_FILENO, "[present-resume] first frame after background: drawable=%s%c",
+            params->ret ? "ok" : "NIL", 10);
+  } else if (params->ret == 0) {
+    if (nil_while_active++ < 8 || (nil_while_active % 256) == 0)
+      dprintf(STDERR_FILENO, "[present-resume] no drawable while active (n=%lu)%c",
+              nil_while_active, 10);
+  }
+  return status;
+}
+
+static NTSTATUS
+_MetalLayer_nextDrawable_inner(void *obj) {
   struct unixcall_generic_obj_obj_ret *params = obj;
   if (!atomic_load_explicit(&madeira_app_active, memory_order_relaxed)) {
     params->ret = 0;   /* backgrounded: skip this frame, touch no drawable */

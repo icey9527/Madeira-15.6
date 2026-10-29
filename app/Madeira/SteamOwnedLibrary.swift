@@ -566,6 +566,7 @@ final class SteamOwnedLibrary: ObservableObject {
     func checkCloud(_ appID: Int) async -> SteamCloudPlan? {
         guard Self.cloudEnabled, signedIn, !cloudBlocked else { return nil }
         var state = cloud[appID] ?? SteamCloudState()
+        let previousPhase = state.phase
         state.phase = .checking
         cloud[appID] = state
         do {
@@ -594,6 +595,17 @@ final class SteamOwnedLibrary: ObservableObject {
             if let elsewhere = result.1 { SteamLog.event("[steam-cloud] app=\(appID) saves-found-elsewhere=\(elsewhere == "(not found)" ? 0 : 1)") }
             return plan
         } catch {
+            // A cancelled sync is not a failure. Leaving the game's page,
+            // backgrounding, starting a session or the app going away cancels
+            // the task, and the sheet showed the raw
+            // "Swift.CancellationError error 1." in orange (2026-10-29). Put the
+            // previous phase back and stay quiet.
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                state.phase = previousPhase
+                cloud[appID] = state
+                SteamLog.trace("[steam-cloud] app=\(appID) cancelled")
+                return nil
+            }
             state.phase = .failed(SteamSignIn.message(error)); cloud[appID] = state
             SteamLog.event("[steam-cloud] app=\(appID) failed reason=\(Self.reason(error))")
             return nil
