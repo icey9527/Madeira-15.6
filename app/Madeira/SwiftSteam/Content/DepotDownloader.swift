@@ -700,9 +700,14 @@ final class DepotDownloader {
             let auth = await cdnAuthFragment(depotID: depotID, appID: appID, host: host)
             let code = requestCode == 0 ? "" : "/\(requestCode)"
             do {
+                let started = Date()
                 let raw = try await Self.download("\(host)/depot/\(depotID)/manifest/\(manifestGID)/5\(code)\(auth)")
                 SteamLog.trace("manifest from \(host)")
-                Self.rememberContentHost(host)
+                // Only pin a host that answered briskly. A host that crawled
+                // in after 25 s still works, but pinning it would make every
+                // future install crawl too (2026-10-29: the first pinned line
+                // was the slowest one that happened to answer first).
+                if Date().timeIntervalSince(started) < 8 { Self.rememberContentHost(host) }
                 let cache = depotCache
                 return try await Task.detached(priority: .userInitiated) {
                     let (manifest, payload) = try Self.parseManifestKeepingPayload(raw, depotID: depotID, manifestGID: manifestGID, key: key)
