@@ -430,7 +430,7 @@ echo "Staged: $APP_COPY ($(wc -c < "$APP_COPY" | tr -d ' ') bytes)"
 # is a false pass, not a working fix.
 for d3d9_obj in d3d9_device d3d9_surface d3d9_texture; do
     if ! LC_ALL=C grep -aq 'd9-locked-flush' "$OBJ_DIR/$d3d9_obj.o"; then
-        echo "::error::$d3d9_obj.o has no locked-texture flush -- compile_madeira_cxx did not consume compat-src/d3d9/$d3d9_obj.cpp"
+        echo "::error::$d3d9_obj.o has no locked-texture flush -- dxmt/src/d3d9/$d3d9_obj.cpp lost the flush patch (see prepare-compat.py for why it exists)"
         exit 1
     fi
 done
@@ -443,7 +443,7 @@ echo "D3D9 locked-texture flush: present in d3d9_device/surface/texture objects"
 # its receipt in the compiled object; without it the archive is not shippable.
 if ! LC_ALL=C grep -aq 'initWithObjects:count:' "$APP_COPY"; then
     echo "::error::libdxmt_combined.a has no MTLCopyAllDevices fallback -- either prepare-compat.py's winemetal rewrite is not in the objects, or its guard folded the fallback away (see the comment in prepare-compat.py about the NULL test)"
-    echo "  compat winemetal_unix.c MTLCreateSystemDefaultDevice hits: $(grep -c MTLCreateSystemDefaultDevice "$BUILD_DIR/compat-src/winemetal/unix/winemetal_unix.c" 2>/dev/null || true)"
+    echo "  compat winemetal_unix.c MTLCreateSystemDefaultDevice hits: $(grep -c MTLCreateSystemDefaultDevice "$DXMT_SRC/winemetal/unix/winemetal_unix.c" 2>/dev/null || true)"
     echo "  winemetal_unix.o $(wc -c < "$OBJ_DIR/winemetal_unix.o" 2>/dev/null || echo MISSING) bytes, initWithObjects:count: hits: $(LC_ALL=C grep -ac 'initWithObjects:count:' "$OBJ_DIR/winemetal_unix.o" 2>/dev/null || true)"
     exit 1
 fi
