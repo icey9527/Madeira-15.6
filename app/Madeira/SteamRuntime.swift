@@ -26,6 +26,17 @@ enum SteamRuntimeFiles {
                 sha256: "345f6e4bdc19b27ae53bf752c21e2d894e0e899d94823222fb426e890d1226b5"),
         Package(file: "steam_win32.zip.3e96965d109fc2d4cc14206b2fc4ec960a746ed3", bytes: 2_307_664,
                 sha256: "1369615c795b60de822876b4dc4042186cf58d0dc8f63ea1371167f667e16925"),
+        // The 64-bit codecs package: the FFmpeg runtime Steam's x64 video64.dll
+        // imports (libavcodec-62, libavformat-62, libavfilter-11, libavutil-60,
+        // libswresample-6, libswscale-9, plus aom/dav1d/libavif/libpng/pyrowave).
+        // It lives in the WIN64 client manifest (steam_client_win64), not the
+        // win32 one this app read first -- that one's bins_codecs_win32 holds
+        // 32-bit DLLs, and a 64-bit video64 loading those fails with c000007b
+        // (INVALID_IMAGE_FORMAT). Games died on "import_dll Library
+        // libavcodec-62.dll ... not found" without any codecs, and on c000007b
+        // with the 32-bit set (NOeSIS01, amehazu, Sunrider, 2026-10-29).
+        Package(file: "bins_codecs_win64.zip.ad3f4b232ba00296ed683021adf1b761a629b74a", bytes: 13_241_033,
+                sha256: "160c767800a310521a9926771c85a07ab4d71bd4b621d2d11c4dbbf63449447f"),
     ]
     static let clientSHA256 = "71b391fe9f3e2006cbc81a5c75eef3eb4186012deabfdb2c8b7e8d4850ecf640"
     static let relativeRoot = "Program Files (x86)/Steam"

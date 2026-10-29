@@ -180,6 +180,3 @@ __pycache__/
 
 # Local investigation scratch (do not commit)
 .ci-tmp/
-
-# FFmpeg PE DLLs for Steam video64 (build/ffmpeg-pe/build.sh output)
-app/Madeira/steam-libs/*.dll
