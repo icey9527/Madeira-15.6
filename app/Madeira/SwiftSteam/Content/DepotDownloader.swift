@@ -797,6 +797,25 @@ final class DepotDownloader {
         return out
     }
 
+    /// Retry one setup round-trip after a timeout.
+    ///
+    /// Depot key and manifest request code have no side effects, so asking
+    /// twice is free. 2026-10-29: a single 15 s call against a CM socket that
+    /// was reconnecting failed the whole install with `reason=timeout` before
+    /// a single CDN host had even been listed.
+    private func cmRetryOnce<T>(_ name: String, _ body: () async throws -> T) async throws -> T {
+        do {
+            return try await body()
+        } catch {
+            var timedOut = false
+            if let steam = error as? SteamError, case .connectionTimeout = steam { timedOut = true }
+            if let url = error as? URLError, url.code == .timedOut { timedOut = true }
+            guard timedOut else { throw error }
+            SteamLog.event("[steam-depot] \(name) timed out, retrying once")
+            return try await body()
+        }
+    }
+
     // MARK: - Depot Key
 
     private func depotKey(depotID: UInt32, appID: UInt32) async throws -> Data {
@@ -807,12 +826,14 @@ final class DepotDownloader {
         request.depotID = depotID
         request.appID = appID
 
-        let response = try await session.sendAndWait(
-            eMsg: .clientGetDepotDecryptionKey,
-            body: request.serialize(),
-            responseEMsg: .clientGetDepotDecryptionKeyResponse,
-            timeout: 15
-        )
+        let response = try await cmRetryOnce("depot-key") {
+            try await session.sendAndWait(
+                eMsg: .clientGetDepotDecryptionKey,
+                body: request.serialize(),
+                responseEMsg: .clientGetDepotDecryptionKeyResponse,
+                timeout: 25
+            )
+        }
 
         let keyResponse = try CMsgClientGetDepotDecryptionKeyResponse.deserialize(from: response.body)
         // Steam only issues keys for depots this account owns.
@@ -835,11 +856,13 @@ final class DepotDownloader {
         encoder.writeUInt32(fieldNumber: 2, value: depotID)
         encoder.writeUInt64(fieldNumber: 3, value: manifestGID)
 
-        let responseData = try await session.callServiceMethod(
-            method: .getManifestRequestCode,
-            body: encoder.data,
-            timeout: 15
-        )
+        let responseData = try await cmRetryOnce("manifest-code") {
+            try await session.callServiceMethod(
+                method: .getManifestRequestCode,
+                body: encoder.data,
+                timeout: 25
+            )
+        }
 
         var decoder = ProtobufDecoder(responseData)
         while let tag = try decoder.readTag() {
