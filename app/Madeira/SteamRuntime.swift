@@ -47,10 +47,33 @@ enum SteamRuntimeFiles {
     /// check is the per-file one during prepare.
     static let sentinelNames = ["steam.exe", "steamclient64.dll", "video64.dll",
                                 "libavcodec-62.dll", "aom.dll"]
+    /// Machine type of a PE file, or nil when it is not one.
+    static func peMachine(_ url: URL) -> UInt16? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: 0x40), head.count == 0x40,
+              head[0] == 0x4D, head[1] == 0x5A else { return nil }
+        let offset = head.withUnsafeBytes { $0.load(fromByteOffset: 0x3C, as: UInt32.self) }
+        guard (try? handle.seek(toOffset: UInt64(offset))) != nil,
+              let signature = try? handle.read(upToCount: 6), signature.count == 6,
+              signature[0] == 0x50, signature[1] == 0x45,
+              signature[2] == 0, signature[3] == 0 else { return nil }
+        return signature.withUnsafeBytes { $0.load(fromByteOffset: 4, as: UInt16.self) }
+    }
+
     static func missingComponents(prefix: URL) -> [String] {
         let steam = prefix.appendingPathComponent("drive_c/" + relativeRoot)
-        return sentinelNames.filter {
-            !FileManager.default.fileExists(atPath: steam.appendingPathComponent($0).path)
+        return sentinelNames.filter { name in
+            let url = steam.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else { return true }
+            // A sentinel that is there but is the wrong architecture is just as
+            // broken as a missing one: the 32-bit libavcodec-62.dll that the
+            // win32 codecs package installed on 2026-10-29 made every x64
+            // video64 call fail with c000007b, and presence alone kept the Dock
+            // from offering the 64-bit package. steam.exe and steamclient64.dll
+            // are 32-bit by design, so only the codecs are checked.
+            guard name.hasPrefix("libav") || name == "aom.dll" else { return false }
+            return peMachine(url) == 0x014C
         }
     }
     static let windowsRoot = "C:\\Program Files (x86)\\Steam"
