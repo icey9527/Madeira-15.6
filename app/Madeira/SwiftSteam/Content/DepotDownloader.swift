@@ -695,12 +695,13 @@ final class DepotDownloader {
                                key: Data, hosts: [String]) async throws -> DepotManifest {
         let requestCode = try await manifestRequestCode(depotID: depotID, appID: appID, manifestGID: manifestGID)
         var lastError: Error = SteamError.manifestFetchFailed("No content server returned the manifest.")
-        for host in hosts.prefix(6) {
+        for host in hosts.prefix(12) {
             try Task.checkCancellation()
             let auth = await cdnAuthFragment(depotID: depotID, appID: appID, host: host)
             let code = requestCode == 0 ? "" : "/\(requestCode)"
             do {
                 let raw = try await Self.download("\(host)/depot/\(depotID)/manifest/\(manifestGID)/5\(code)\(auth)")
+                SteamLog.trace("manifest from \(host)")
                 let cache = depotCache
                 return try await Task.detached(priority: .userInitiated) {
                     let (manifest, payload) = try Self.parseManifestKeepingPayload(raw, depotID: depotID, manifestGID: manifestGID, key: key)
@@ -875,6 +876,7 @@ final class DepotDownloader {
 
     private func contentServers(appID: UInt32) async throws -> [String] {
         var hosts: [String] = []
+        var reachableCount = 0
         do {
             let cell = SteamServerChoice.current.cellID ?? session.cellID
             guard let url = URL(string: "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/?cell_id=\(cell)&max_servers=20") else {
@@ -905,19 +907,73 @@ final class DepotDownloader {
                 let entry = (Self.isPlainHTTPContentHost(host) ? "http://" : "https://") + host
                 if !hosts.contains(entry) { hosts.append(entry) }
             }
-            SteamLog.event("[steam-cdn] offered=\(servers.count) usable=\(hosts.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther)")
+            let reachable = await Self.liveContentHosts(hosts)
+            if !reachable.isEmpty {
+                // China mainland: the directory hands out *.steamcontent.com
+                // first, and those do not answer here at all (2026-10-29: 22
+                // offered, six tried, every manifest fetch timed out at 30 s and
+                // the install ended with url -1001). steampipe.akamaized.net
+                // answers from this network, but it is appended last and only the
+                // first six hosts were ever tried, so it was never reached.
+                reachableCount = reachable.count
+                let live = hosts.filter { reachable.contains($0) }
+                hosts = live + hosts.filter { !reachable.contains($0) }
+            }
+            SteamLog.event("[steam-cdn] offered=\(servers.count) usable=\(hosts.count) reachable=\(reachable.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther) first=\(hosts.first ?? "-")")
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             SteamLog.trace("content directory failed: \(error.localizedDescription)")
         }
         let fallback = "https://steampipe.akamaized.net"
-        if !hosts.contains(fallback) { hosts.append(fallback) }
+        if !hosts.contains(fallback) {
+            // Nothing answered the probe: put this one first, because the
+            // manifest loop only walks a prefix of the list and a network that
+            // blocks every *.steamcontent.com host still reaches this one.
+            if reachableCount == 0 { hosts.insert(fallback, at: 0) } else { hosts.append(fallback) }
+        }
         return hosts
     }
 
-    nonisolated static func usableContentHost(_ host: String) -> Bool {
-        guard host.contains("."), !host.contains(" "), !host.contains("/"), !host.contains("*"),
+    /// Hosts that answer at all, probed in parallel with a short timeout.
+    ///
+    /// A dead CDN costs its full manifest timeout before the next host is
+    /// tried, so six unreachable hosts mean minutes of nothing. Any HTTP answer
+    /// counts as alive -- 404 from a host that does not carry this depot is
+    /// still a host worth asking; only timeouts, DNS failures and refused
+    /// connections are dead.
+    nonisolated static func liveContentHosts(_ hosts: [String]) async -> Set<String> {
+        guard !hosts.isEmpty else { return [] }
+        return await withTaskGroup(of: (String, Bool).self) { group in
+            for host in hosts {
+                group.addTask {
+                    guard let url = URL(string: host + "/") else { return (host, false) }
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "HEAD"
+                    request.timeoutInterval = 4
+                    do {
+                        _ = try await Self.http.data(for: request)
+                        return (host, true)
+                    } catch {
+                        guard let error = error as? URLError else { return (host, true) }
+                        switch error.code {
+                        case .timedOut, .cannotFindHost, .cannotConnectToHost,
+                             .networkConnectionLost, .secureConnectionFailed,
+                             .dnsLookupFailed, .notConnectedToInternet:
+                            return (host, false)
+                        default:
+                            return (host, true)
+                        }
+                    }
+                }
+            }
+            var alive: Set<String> = []
+            for await (host, ok) in group where ok { alive.insert(host) }
+            return alive
+        }
+    }
+
+    nonisolated static func usableContentHost(_ host: String) -> Bool {        guard host.contains("."), !host.contains(" "), !host.contains("/"), !host.contains("*"),
               !host.contains("lancache"), !host.contains(":") else { return false }
         return host.hasSuffix(".steamcontent.com") || host.hasSuffix(".akamaized.net") ||
             host.hasSuffix(".steampipe.steamcontent.com") || host.hasSuffix(".steamstatic.com") ||
