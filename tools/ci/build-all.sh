@@ -264,7 +264,8 @@ stage_native() {
 
   if [ "$APP_ONLY" != 1 ]; then
     step "子模块 SHA 校验（gitlink 必须与实际检出一致）"
-    for sub in FEX wine dxmt; do
+    # dxmt 2026-10-29 起是仓库内目录（vendored），没有 gitlink 可校验。
+    for sub in FEX wine; do
       expected="$(git ls-tree HEAD "$sub" | awk '{print $3}')"
       actual="$(git -C "$sub" rev-parse HEAD)"
       printf '  %-14s expected=%s actual=%s\n' "$sub" "${expected:-MISSING}" "$actual"
