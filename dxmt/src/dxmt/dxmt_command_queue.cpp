@@ -3,16 +3,46 @@
 #include "dxmt_statistics.hpp"
 #include "util_env.hpp"
 #include "util_win32_compat.h"
-/* The arm64ec PE build compiles this file too and has no
- * winemetal_unix.c. A weak DEFINITION keeps that link happy (an EC
- * undefined function becomes a .refptr that cannot stay unresolved);
- * the unix build's strong one in winemetal_unix.c wins. */
-extern "C" __attribute__((weak)) int madeira_get_app_active(void) { return 1; }
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
 #include <cstdio>
+#if defined(_WIN32)
+#include <sys/stat.h>   /* _stat64: the background marker below */
+#endif
+
+#if defined(_WIN32)
+/* The arm64ec PE build cannot see winemetal's unix-side atomic, so the app
+ * publishes the state as a file at the prefix root -- one byte means the app is
+ * active, an empty file means it is backgrounded -- and this side stats it.
+ * 200 ms is a cache, not a poll: without it this would be 60 file lookups a
+ * second, and _stat64 costs one syscall and opens nothing.
+ *
+ * Why it matters: iOS refuses GPU submissions from a backgrounded app (Code=7,
+ * kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted) and the
+ * error path that followed killed TheShell with c0000023 on 2026-10-29.
+ *
+ * Keyed on _WIN32, not DXMT_IOS: meson defines DXMT_IOS for every Windows host
+ * system, so it cannot tell the PE module from the unix library. */
+extern "C" __attribute__((weak)) int madeira_get_app_active(void) {
+  static int cached = 1;
+  static std::chrono::steady_clock::time_point last;
+  auto now = std::chrono::steady_clock::now();
+  if (last != std::chrono::steady_clock::time_point{} &&
+      std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() < 200)
+    return cached;
+  last = now;
+  struct _stat64 info;
+  if (_stat64("C:\\madeira-active", &info) == 0)
+    cached = info.st_size ? 1 : 0;
+  return cached;
+}
+#else
+/* The unix build: winemetal_unix.c owns the real flag and this weak definition
+ * is only here so the arm64ec PE build links (it compiles this file too). */
+extern "C" __attribute__((weak)) int madeira_get_app_active(void) { return 1; }
+#endif
 
 #define ASYNC_ENCODING 1
 

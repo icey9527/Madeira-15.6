@@ -1419,6 +1419,22 @@ struct ContentView: View {
             } message: { Text(library.cloudNotice?.message ?? "") }
     }
 
+    /// Cross-module hand-off for the 64-bit DXMT queue.
+    ///
+    /// `madeira_set_app_active` flips winemetal's atomic, which the unix build
+    /// reads directly. The arm64ec PE build compiles the same command queue but
+    /// cannot see that atomic (separate module, separate state), and it is the
+    /// one TheShell uses. So the same edge also lands in a file at the prefix
+    /// root: one byte means active, an empty file means backgrounded. The PE
+    /// side stats it with a 200 ms cache and drops GPU work while it is empty --
+    /// iOS refuses background submissions (Code=7) and the error path that
+    /// followed killed TheShell with c0000023 on 2026-10-29.
+    private func publishActiveState(_ active: Bool) {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let marker = documents.appendingPathComponent("wine/drive_c/madeira-active")
+        try? (active ? Data([0x31]) : Data()).write(to: marker, options: .atomic)
+    }
+
     private var lifecycleContent: some View {
         cloudContent
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
@@ -1431,12 +1447,14 @@ struct ContentView: View {
                 // into them failed every command buffer (TheShell 2026-10-29:
                 // 45 Invalid Resource errors while backgrounded, frozen after).
                 madeira_set_app_active(0)
+                publishActiveState(false)
                 if library.current != nil {
                     fputs("[lifecycle] session resigned active (backgrounded)\n", stderr)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 madeira_set_app_active(1)
+                publishActiveState(true)
                 madeira_startup_log("startup-v2: lifecycle active begin")
                 library.refreshFlag()
                 if library.enabled && library.current == nil { MetalHostView.shared.isHidden = true }
@@ -1469,6 +1487,7 @@ struct ContentView: View {
                 madeira_startup_log("startup-v2: load diagnostics started")
                 // Madeira Dock: an unconsumed sign-in transfer from an earlier run goes.
                 if wine_process_is_running() == 0 { MadeiraDock.cleanup() }
+                publishActiveState(true)   /* a stale empty marker from the last run would start us "backgrounded" */
                 madeira_startup_log("startup-v2: lifecycle startup complete")
             }
             .onReceive(NotificationCenter.default.publisher(for: SteamSignIn.didChange)) { _ in
