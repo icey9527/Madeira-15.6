@@ -760,6 +760,14 @@ final class LibraryModel: ObservableObject {
         let folder = game.library + "/common/" + game.installDir
         if var entry = entries.first(where: { $0.steamAppID == game.id }) {
             entry.relativePath = folder
+            // A game is created with the name its install record carries, and the
+            // list later shows the localized name PICS hands out -- so the card
+            // read 雨霏霏人非人 while the launch screen still said
+            // 雨にして人を外れ (2026-10-29). Rename only while the entry still
+            // carries the manifest's own name, so a title set by hand survives.
+            if let title, !title.isEmpty, title != entry.title, entry.title == game.name {
+                entry.title = title
+            }
             return entry
         }
         var entry = LibraryEntry(title: title ?? game.name, relativePath: folder, bits: 0)
