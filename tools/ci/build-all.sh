@@ -1065,6 +1065,12 @@ summary_fail() {
     done
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}" 2>/dev/null || true
   echo "======== 失败: stage $STAGE （ci-logs/$STAGE.log 末 80 行如下） ========"
+  # The tail below is build-system noise; the compiler diagnostics sit far above
+  # it. Print them first so a Swift/C failure is readable in the job log without
+  # downloading the whole run archive (2026-10-29: a DepotDownloader.swift
+  # compile error took three 25-minute rounds to reach me).
+  grep -a -m 40 -E "error:|error :|FAILED:|undefined symbol" "$LOGDIR/$STAGE.log" 2>/dev/null | head -80 || true
+  echo "-------- 末尾 --------"
   tail -n 80 "$LOGDIR/$STAGE.log" 2>/dev/null || true
 }
 
