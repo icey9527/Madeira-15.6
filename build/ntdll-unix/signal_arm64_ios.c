@@ -7775,6 +7775,45 @@ static int ios_mach_deliver_guest_exception_inner( thread_t thread, arm_thread_s
                              (fault_addr >= cbase && fault_addr < cbase + csize) ? 1 : 0 );
                 dprintf( 2, " regs=%d rev=ml613\n", have_regs );
 
+                /* iOS-Madeira: a fault at a small address (Dead Cells writes four
+                 * bytes at 0x10000+4) means a pointer that should be wide was
+                 * used narrow. Dump all 16 guest GPRs and the top of the guest
+                 * stack: a value whose low 32 bits equal the fault page (a
+                 * "twin", e.g. 0x12ab000000010000) names truncation, while no
+                 * twin means the number itself was computed -- or read from a
+                 * field -- as a small integer. Capped so a loop cannot flood the
+                 * log. */
+                if (have_regs && fault_addr < 0x100000)
+                {
+                    static unsigned madeira_small_n;
+                    if (madeira_small_n++ < 8)
+                    {
+                        TEB *t2 = NtCurrentTeb();
+                        CHPE_V2_CPU_AREA_INFO *ca2 = t2 ? t2->ChpeV2CpuAreaInfo : NULL;
+                        void *fx2 = ca2 ? *(void **)((char *)ca2 + 0x30) : NULL;
+                        if (fx2)
+                        {
+                            const uint64_t *gr2 = &((const uint64_t *)fx2)[0x20 / 8];
+                            int gi;
+                            dprintf( 2, "[small-addr] gprs:" );
+                            for (gi = 0; gi < 16; gi++)
+                                dprintf( 2, " %llx", (unsigned long long)gr2[gi] );
+                            dprintf( 2, "\n[small-addr] stack:" );
+                            for (gi = 0; gi < 32; gi++)
+                            {
+                                uint64_t v = 0;
+                                mach_vm_size_t got = 0;
+                                if (mach_vm_read_overwrite( mach_task_self(), gr2[4] + (uint64_t)gi * 8,
+                                                            sizeof(v), (mach_vm_address_t)&v, &got ) != KERN_SUCCESS
+                                    || got != sizeof(v))
+                                    break;
+                                dprintf( 2, " %llx", (unsigned long long)v );
+                            }
+                            dprintf( 2, "\n" );
+                        }
+                    }
+                }
+
                 /* iOS-Madeira ml619 [tree-caller]: NAME THE CORRUPTED CONTAINER.
                  *
                  * ml616/ml618 both died inside libc++'s recursive tree deleter for
