@@ -242,8 +242,8 @@ stage_native() {
     tic; git submodule update --init --depth 1 --jobs "$NPROC" -- FEX; toc "native:fex-clone"
   else
     # 主仓库子模块: pinned SHA 均为各分支 HEAD（2026-10-11 核实），--depth 1 可用。
-    tic; git submodule update --init --depth 1 --jobs "$NPROC" -- FEX wine dxmt; toc "native:submodule-clone"
-    tic; git -C dxmt submodule update --init --depth 1 --jobs "$NPROC"; toc "native:dxmt-submodule-clone"
+    # dxmt 现在是仓库内的普通目录（2026-10-29 从子模块改 vendored），只剩 FEX/wine 两个子模块。
+    tic; git submodule update --init --depth 1 --jobs "$NPROC" -- FEX wine; toc "native:submodule-clone"
     for header in d3d9.h d3d11.h d3dcommon.h dxgi.h; do
       [ -s "dxmt/include/native/directx/$header" ] || die "DXMT 子模块缺失头文件: $header"
     done

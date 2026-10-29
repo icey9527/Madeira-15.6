@@ -48,7 +48,7 @@ mkdir -p "$OBJ_DIR"
 [ -s "$LLVM_BUILD/lib/libLLVMPasses.a" ] || { echo "Build iOS LLVM first: bash build/llvm-ios/build.sh"; exit 1; }
 [ -s "$LLVM_BUILD/include/llvm/Config/llvm-config.h" ] || { echo "LLVM generated headers missing"; exit 1; }
 for header in d3d9.h d3d11.h dxgi.h; do
-    [ -s "$DXMT_ROOT/include/native/directx/$header" ] || { echo "Missing DXMT submodule header: $header; run git -C dxmt submodule update --init"; exit 1; }
+    [ -s "$DXMT_ROOT/include/native/directx/$header" ] || { echo "Missing DXMT header: $header (dxmt/ is vendored in-tree)"; exit 1; }
 done
 if [ ! -s "$REPO_ROOT/FEX/External/fmt/include/fmt/format.h" ]; then
     echo "Missing pinned fmt headers from FEX/External/fmt"
