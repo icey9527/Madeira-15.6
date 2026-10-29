@@ -914,7 +914,20 @@ final class DepotDownloader {
             // (Qingdao) returned Tokyo nodes and 700 KB/s.
             let cell = Int(MadeiraConfig.get("steam-cell") ?? "")
                 ?? SteamServerChoice.current.cellID ?? session.cellID
-            guard let url = URL(string: "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/?cell_id=\(cell)&max_servers=20") else {
+            // The unattended WebAPI call is routed by the caller's IP alone:
+            // every cell id we asked for (168 Qingdao, 47 Shanghai) came back as
+            // Tokyo nodes (cacheN-tyo3), while the Windows client on the same
+            // line, logged in with an access token and CellID 206, pulls at
+            // 12 MB/s. So send the account's access token with the request --
+            // without it the cell parameter has nothing to bind to.
+            var components = URLComponents(string: "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/")!
+            var items = [URLQueryItem(name: "cell_id", value: String(cell)),
+                         URLQueryItem(name: "max_servers", value: "20")]
+            let token = SteamTokenStore().loadTokens()?.accessToken ?? ""
+            let authed = !token.isEmpty
+            if authed { items.append(URLQueryItem(name: "access_token", value: token)) }
+            components.queryItems = items
+            guard let url = components.url else {
                 throw SteamError.chunkDownloadFailed("Bad content directory URL")
             }
             let (data, response) = try await Self.http.data(from: url)
@@ -954,7 +967,7 @@ final class DepotDownloader {
                 let live = hosts.filter { reachable.contains($0) }
                 hosts = live + hosts.filter { !reachable.contains($0) }
             }
-            SteamLog.event("[steam-cdn] cell=\(cell) offered=\(servers.count) usable=\(hosts.count) reachable=\(reachable.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther) first=\(hosts.first ?? "-")")
+            SteamLog.event("[steam-cdn] cell=\(cell) authed=\(authed ? 1 : 0) offered=\(servers.count) usable=\(hosts.count) reachable=\(reachable.count) skipped-no-https=\(skippedHTTP) skipped-other=\(skippedOther) first=\(hosts.first ?? "-")")
         } catch is CancellationError {
             throw CancellationError()
         } catch {
