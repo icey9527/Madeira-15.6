@@ -1362,7 +1362,7 @@ diag_files = (
          'int madeira_get_app_active(void)\n'
          '{\n'
          '  return atomic_load_explicit(&madeira_app_active, memory_order_relaxed);\n'
-         '}\n',
+         '}\n'
          '\n'
          'static NTSTATUS\n'
          '_MetalLayer_nextDrawable(void *obj) {\n'
