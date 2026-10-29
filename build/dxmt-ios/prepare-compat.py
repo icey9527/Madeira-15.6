@@ -1354,11 +1354,15 @@ diag_files = (
         ('static NTSTATUS\n_MetalLayer_nextDrawable(void *obj) {\n'
          '  struct unixcall_generic_obj_obj_ret *params = obj;\n',
          '/* Madeira-15.6: set from the app (madeira_set_app_active). */\n'
-         'static _Atomic int madeira_app_active = 1;\n'
+         '_Atomic int madeira_app_active = 1;\n'
          'void madeira_set_app_active(int active)\n'
          '{\n'
          '  atomic_store_explicit(&madeira_app_active, active ? 1 : 0, memory_order_relaxed);\n'
          '}\n'
+         'int madeira_get_app_active(void)\n'
+         '{\n'
+         '  return atomic_load_explicit(&madeira_app_active, memory_order_relaxed);\n'
+         '}\n',
          '\n'
          'static NTSTATUS\n'
          '_MetalLayer_nextDrawable(void *obj) {\n'
@@ -1400,6 +1404,29 @@ diag_files = (
          '            continue; // link failed: skip\n'
          '          }\n'),
     ), ('d9-skip]')),
+    # Render-state trace for BaldrSky's missing white text box.  Chapter 1 opens
+    # with a text window on an opaque white quad; here the scene behind it shows
+    # through while the text itself still renders.  No clear is issued for that
+    # white ([d9-clear] shows one black clear and 63 colour=0 ones), [d9-skip]
+    # never fires, so the loss is in the box's own draw: a render state that
+    # makes a quad write nothing is the prime suspect (COLORWRITEENABLE 0, a
+    # blend that keeps the destination, clipping off with a zero-area scissor).
+    # Only the states that can do that are logged, only on change, first 600.
+    ('d3d9/d3d9_device.cpp', (
+        ('MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {\n',
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);\n'
+         'MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {\n'
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);\n'
+         '  if (State == D3DRS_ALPHATESTENABLE || State == D3DRS_ALPHABLENDENABLE ||\n'
+         '      State == D3DRS_SRCBLEND || State == D3DRS_DESTBLEND ||\n'
+         '      State == D3DRS_BLENDOP || State == D3DRS_COLORWRITEENABLE ||\n'
+         '      State == D3DRS_ZWRITEENABLE || State == D3DRS_CLIPPING) {\n'
+         '    static unsigned madeira_rs_logged;\n'
+         '    if (madeira_rs_logged++ < 600)\n'
+         '      Logger::warn(str::format("[d9-rs] n=", madeira_rs_logged,\n'
+         '          " state=", (uint32_t)State, " value=", Value));\n'
+         '  }\n'),
+    ), ('d9-rs]')),
     # Which clears the game actually asks for, and with what colour. BaldrSky's
     # title is a white screen with black text on a PC; here the previous scene
     # shows through. The mismatched-size drop was NOT it ([d9-clear] never fired),
@@ -1531,6 +1558,31 @@ diag_files = (
          '    if (m_isImplicitLosable) {\n      m_device->madeiraLosableKind("implicit");\n'
          '      m_device->onLosableResourceCreated();\n    }\n'),
     ), ('madeiraLosableKind',)),
+    # TheShell froze on every background round-trip on 2026-10-29: the frame loop
+    # kept encoding and committing while iOS refuses background GPU work, 20
+    # commits failed with kIOGPUCommandBufferCallbackErrorBackgroundExecution
+    # NotPermitted (Code=7), and that error path then hit a BRK which killed the
+    # process with c0000023. The last frame stayed on screen and input kept
+    # working, so it read as "coming back from background froze it". Dropping the
+    # chunk costs nothing visible -- the drawable is gone anyway -- and keeps iOS
+    # out of it. The finish thread then sees the previous, already-completed
+    # buffer and advances without waiting.
+    ('dxmt/dxmt_command_queue.cpp', (
+        ('#include "util_win32_compat.h"\n',
+         '#include "util_win32_compat.h"\n'
+         'extern "C" int madeira_get_app_active(void);\n'),
+        ('  auto cmdbuf = commandQueue.commandBuffer();\n',
+         '  if (!madeira_get_app_active()) {\n'
+         '    static unsigned madeira_bg_dropped;\n'
+         '    if (madeira_bg_dropped++ < 8 || (madeira_bg_dropped % 256) == 0)\n'
+         '      WARN("[bg-commit] dropped frame=", chunk.frame_, " n=", madeira_bg_dropped);\n'
+         '    ready_for_commit.fetch_add(1, std::memory_order_release);\n'
+         '    dxmt::atomic_notify_one(ready_for_commit);\n'
+         '    return;\n'
+         '  }\n'
+         '  auto cmdbuf = commandQueue.commandBuffer();\n'
+),
+    ), ('bg-commit] dropped')),
 )
 for relative, pairs, markers in diag_files:
     out = output_root / relative
