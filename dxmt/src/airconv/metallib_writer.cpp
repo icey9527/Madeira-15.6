@@ -1,4 +1,9 @@
 #include "metallib_writer.hpp"
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <unistd.h>
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/Constants.h"
 
@@ -17,7 +22,37 @@ struct InputAttribute {
   // TODO: extend patch/control point here
 };
 
+/* see prepare-compat.py: env-gated dump of the module AGX is about to get */
+static void MadeiraDumpAirconvModule(const llvm::Module &module) {
+  const char *dir = std::getenv("DXMT_AIRCONV_DUMP");
+  if (!dir || !dir[0])
+    return;
+  static std::atomic<uint64_t> counter{0};
+  uint64_t n = counter.fetch_add(1, std::memory_order_relaxed);
+  char stem[64];
+  std::snprintf(stem, sizeof(stem), "airconv_%d_%llu", (int)getpid(),
+                (unsigned long long)n);
+  std::string base = std::string(dir) + "/" + stem;
+  std::string text;
+  raw_string_ostream stream(text);
+  module.print(stream, nullptr);
+  stream.flush();
+  if (FILE *fp = std::fopen((base + ".ll").c_str(), "wb")) {
+    std::fwrite(text.data(), 1, text.size(), fp);
+    std::fclose(fp);
+  }
+  std::string index;
+  for (const llvm::Function &function : module)
+    index += function.getName().str() + "\n";
+  if (FILE *fp = std::fopen((std::string(dir) + "/index.txt").c_str(), "ab")) {
+    std::string line = std::string(stem) + " " + std::to_string(text.size()) + " bytes\n" + index;
+    std::fwrite(line.data(), 1, line.size(), fp);
+    std::fclose(fp);
+  }
+}
+
 void MetallibWriter::Write(const llvm::Module &module, raw_ostream &OS) {
+  MadeiraDumpAirconvModule(module);
 
   SmallVector<char, 0> bitcode;
   SmallVector<char, 0> public_metadata;
@@ -62,9 +97,9 @@ void MetallibWriter::Write(const llvm::Module &module, raw_ostream &OS) {
         });
         function_def_stream << value(MTLB_VERS_TAG{
           .airVersionMajor = 2,
-          .airVersionMinor = 6,
-          .languageVersionMajor = 3,
-          .languageVersionMinor = 1,
+          .airVersionMinor = 4,
+          .languageVersionMajor = 2,
+          .languageVersionMinor = 4,
         });
         while (fn->getNumOperands() > 3 && isa<MDTuple>(fn->getOperand(3).get())
         ) {
@@ -181,9 +216,9 @@ void MetallibWriter::Write(const llvm::Module &module, raw_ostream &OS) {
         });
         function_def_stream << value(MTLB_VERS_TAG{
           .airVersionMajor = 2,
-          .airVersionMinor = 6,
-          .languageVersionMajor = 3,
-          .languageVersionMinor = 1,
+          .airVersionMinor = 4,
+          .languageVersionMajor = 2,
+          .languageVersionMinor = 4,
         });
         function_def_stream << "ENDT";
         public_metadata_stream << value(4);
@@ -215,9 +250,9 @@ void MetallibWriter::Write(const llvm::Module &module, raw_ostream &OS) {
         });
         function_def_stream << value(MTLB_VERS_TAG{
           .airVersionMajor = 2,
-          .airVersionMinor = 6,
-          .languageVersionMajor = 3,
-          .languageVersionMinor = 1,
+          .airVersionMinor = 4,
+          .languageVersionMajor = 2,
+          .languageVersionMinor = 4,
         });
         function_def_stream << "ENDT";
 
@@ -309,9 +344,9 @@ void MetallibWriter::Write(const llvm::Module &module, raw_ostream &OS) {
         });
         function_def_stream << value(MTLB_VERS_TAG{
           .airVersionMajor = 2,
-          .airVersionMinor = 6,
-          .languageVersionMajor = 3,
-          .languageVersionMinor = 1,
+          .airVersionMinor = 4,
+          .languageVersionMajor = 2,
+          .languageVersionMinor = 4,
         });
         function_def_stream << "ENDT";
 
@@ -350,9 +385,9 @@ void MetallibWriter::Write(const llvm::Module &module, raw_ostream &OS) {
         });
         function_def_stream << value(MTLB_VERS_TAG{
           .airVersionMajor = 2,
-          .airVersionMinor = 6,
-          .languageVersionMajor = 3,
-          .languageVersionMinor = 1,
+          .airVersionMinor = 4,
+          .languageVersionMajor = 2,
+          .languageVersionMinor = 4,
         });
         function_def_stream << "ENDT";
 
@@ -391,12 +426,12 @@ void MetallibWriter::Write(const llvm::Module &module, raw_ostream &OS) {
   header.BitcodeSize = bitcode.size();
 
   header.Type = FileType::MTLBType_Executable; // executable
-  header.Platform = Platform::MTLBPlatform_macOS;
+  header.Platform = Platform::MTLBPlatform_iOS;
   header.VersionMajor = 2;
-  header.VersionMinor = 7;
-  header.OS = OS::MTLBOS_macOS;
-  header.OSVersionMajor = 14;
-  header.OSVersionMinor = 4;
+  header.VersionMinor = 6;
+  header.OS = OS::MTLBOS_iOS;
+  header.OSVersionMajor = 15;
+  header.OSVersionMinor = 0;
 
   // write to stream
   OS << value(header);

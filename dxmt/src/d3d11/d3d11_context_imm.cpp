@@ -181,6 +181,13 @@ public:
         break;
       }
       }
+      if (!pMappedResource->pData) {
+        static unsigned madeira_map_null;
+        if (madeira_map_null++ < 20)
+          Logger::warn(str::format("[d3d11-map] dynamic buffer has no CPU mapping: sub=",
+              Subresource, " len=", buffer_length));
+        return E_OUTOFMEMORY;
+      }
       return S_OK;
     }
     if (auto dynamic = GetDynamicTexture(pResource, Subresource, &row_pitch, &depth_pitch)) {

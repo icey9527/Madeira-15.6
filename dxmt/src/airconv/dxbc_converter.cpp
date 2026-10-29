@@ -1,4 +1,5 @@
 #include "dxbc_converter.hpp"
+#include "ios15_probe.hpp"
 #include "DXBCParser/BlobContainer.h"
 #include "DXBCParser/ShaderBinary.h"
 #include "airconv_error.hpp"
@@ -175,8 +176,9 @@ void setup_binding_table(
         // ignore index in SM 5.0
         return get_item_in_argbuf_binding_table(binding_table_index, index);
       },
-      [=, index = sampler.arg_metadata_index](pvalue) {
-        // ignore index in SM 5.0
+      [=, index = sampler.arg_metadata_index](pvalue) -> IRValue {
+        if (dxmt::airconv_probe::drop_metadata())
+          return make_irvalue([=](context ctx) -> pvalue { return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.builder.getContext()), 1ull << 32); });
         return get_item_in_argbuf_binding_table(binding_table_index, index);
       }
     };
@@ -199,8 +201,9 @@ void setup_binding_table(
           // ignore index in SM 5.0
           return get_item_in_argbuf_binding_table(binding_table_index, index);
         },
-        [=, index = srv.arg_metadata_index](pvalue) {
-          // ignore index in SM 5.0
+        [=, index = srv.arg_metadata_index](pvalue) -> IRValue {
+          if (dxmt::airconv_probe::drop_metadata())
+            return make_irvalue([=](context ctx) -> pvalue { return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.builder.getContext()), 1ull << 32); });
           return get_item_in_argbuf_binding_table(binding_table_index, index);
         },
         false
@@ -384,20 +387,20 @@ void setup_metal_version(llvm::Module &module, SM50_SHADER_METAL_VERSION metal_v
   switch (metal_verison) {
   case SM50_SHADER_METAL_320: {
     airVersion->addOperand(
-        MDTuple::get(context, {createUnsignedInteger(2), createUnsignedInteger(7), createUnsignedInteger(0)})
+        MDTuple::get(context, {createUnsignedInteger(2), createUnsignedInteger(4), createUnsignedInteger(0)})
     );
     airLangVersion->addOperand(MDTuple::get(
-        context, {createString("Metal"), createUnsignedInteger(3), createUnsignedInteger(2), createUnsignedInteger(0)}
+        context, {createString("Metal"), createUnsignedInteger(2), createUnsignedInteger(4), createUnsignedInteger(0)}
     ));
-    module.setTargetTriple("air64-apple-macosx15.0.0");
+    module.setTargetTriple("air64-apple-ios15.0.0");
     break;
   }
   default: {
     airVersion->addOperand(
-        MDTuple::get(context, {createUnsignedInteger(2), createUnsignedInteger(6), createUnsignedInteger(0)})
+        MDTuple::get(context, {createUnsignedInteger(2), createUnsignedInteger(4), createUnsignedInteger(0)})
     );
     airLangVersion->addOperand(MDTuple::get(
-        context, {createString("Metal"), createUnsignedInteger(3), createUnsignedInteger(1), createUnsignedInteger(0)}
+        context, {createString("Metal"), createUnsignedInteger(2), createUnsignedInteger(4), createUnsignedInteger(0)}
     ));
     break;
   }
@@ -1143,9 +1146,13 @@ static int parse_shader(
       binding_table.DefineSampler("s" + std::to_string(range_id), attr_index);
     sampler.arg_cube_index =
       binding_table.DefineSampler("cube_s" + std::to_string(range_id), attr_index + 1);
-    sampler.arg_metadata_index = binding_table.DefineInteger64(
-      "meta_s" + std::to_string(range_id), attr_index + 2
-    );
+    /* Defined even when the member is dropped: the reader below captures
+     * it by value, and an uninitialised index would be UB. */
+    sampler.arg_metadata_index = 0;
+    if (!dxmt::airconv_probe::drop_metadata())
+      sampler.arg_metadata_index = binding_table.DefineInteger64(
+        "meta_s" + std::to_string(range_id), attr_index + 2
+      );
     sm50_shader->args_reflection.push_back({
       .Type = SM50BindingType::Sampler,
       .SM50BindingSlot = range_id,
@@ -1155,7 +1162,9 @@ static int parse_shader(
     binding_sampler_mask |= (1 << range_id);
   }
   for (auto &[range_id, srv] : shader_info->srvMap) {
-    auto attr_index = GetArgumentIndex(SM50BindingType::SRV, range_id);
+    auto attr_index = dxmt::airconv_probe::index_from_zero()
+                        ? range_id * 3
+                        : GetArgumentIndex(SM50BindingType::SRV, range_id);
     if (srv.resource_type != ResourceType::NonApplicable) {
       // TODO: abstract SM 5.0 binding
       auto access = srv.sampled ? MemoryAccess::sample : MemoryAccess::read;
@@ -1173,9 +1182,11 @@ static int parse_shader(
         MemoryAccess::read, msl_uint, attr_index
       );
     }
-    srv.arg_metadata_index = binding_table.DefineInteger64(
-      "meta_t" + std::to_string(range_id), attr_index + 1
-    );
+    srv.arg_metadata_index = 0;  /* see the sampler above */
+    if (!dxmt::airconv_probe::drop_metadata())
+      srv.arg_metadata_index = binding_table.DefineInteger64(
+        "meta_t" + std::to_string(range_id), attr_index + 1
+      );
     MTL_SM50_SHADER_ARGUMENT_FLAG flags = (MTL_SM50_SHADER_ARGUMENT_FLAG)0;
     if (srv.resource_type == ResourceType::NonApplicable) {
       flags |= MTL_SM50_SHADER_ARGUMENT_ELEMENT_WIDTH |
@@ -1216,7 +1227,9 @@ static int parse_shader(
     auto access =
       uav.written ? (uav.read ? MemoryAccess::read_write : MemoryAccess::write)
                   : MemoryAccess::read;
-    auto attr_index = GetArgumentIndex(SM50BindingType::UAV, range_id);
+    auto attr_index = dxmt::airconv_probe::index_from_zero()
+                        ? range_id * 3 + 64
+                        : GetArgumentIndex(SM50BindingType::UAV, range_id);
     if (uav.resource_type != ResourceType::NonApplicable) {
       auto texture_kind = to_air_resource_type(uav.resource_type);
       auto scaler_type = to_air_scaler_type(uav.scaler_type);

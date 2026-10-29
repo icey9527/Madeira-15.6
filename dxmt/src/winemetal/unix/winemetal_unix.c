@@ -1,5 +1,5 @@
 #include <stdatomic.h>
-#include "../../../../build/madeira_cfg.h"   /* ml1095: one config file */
+#include "madeira_cfg.h"   /* ml1095: one config file (dxmt is vendored in-tree) */
 #include <sys/mman.h>
 #include <mach/vm_statistics.h>
 #include <errno.h>
@@ -23,6 +23,59 @@ static inline CGDirectDisplayID CGMainDisplayID(void) { return 1; }
 #endif
 #import <CoreFoundation/CFRunLoop.h>
 #import <Metal/Metal.h>
+#import <objc/message.h>
+/* iOS 15: gpuResourceID is Metal 3 (iOS 16).  Madeira-15.6: ask the resource if
+ * it answers anyway, else read the handle back from a one-off argument encoding.
+ * MADEIRA_AB_HANDLE=0: encode 0 as before.  Logs [ios15-ab] for the first ones. */
+static inline uint64_t madeira_gpu_resource_id(id resource) {
+  if (@available(iOS 16.0, macOS 13.0, *))
+    return resource ? (uint64_t)[resource gpuResourceID]._impl : 0;
+  if (!resource) return 0;
+  static int enabled = -1;
+  static unsigned said;
+  if (enabled < 0) {
+    const char *e = getenv("MADEIRA_AB_HANDLE");  /* 0: encode 0 below iOS 16 (textured D3D11 draws fault) */
+    enabled = !(e && e[0] == '0' && !e[1]);
+  }
+  if (!enabled) return 0;
+  uint64_t direct = 0, encoded = 0;
+  int responds = [resource respondsToSelector:@selector(gpuResourceID)];
+  int sampler = [resource conformsToProtocol:@protocol(MTLSamplerState)];
+  if (responds) direct = ((uint64_t (*)(id, SEL))objc_msgSend)(resource, @selector(gpuResourceID));
+  if (!direct) {
+    @autoreleasepool {
+      id<MTLDevice> device = [resource device];
+      MTLArgumentDescriptor *arg = [MTLArgumentDescriptor argumentDescriptor];
+      arg.index = 0;
+      arg.access = MTLArgumentAccessReadOnly;
+      if (sampler) {
+        arg.dataType = MTLDataTypeSampler;
+      } else {
+        arg.dataType = MTLDataTypeTexture;
+        arg.textureType = [(id<MTLTexture>)resource textureType];
+      }
+      id<MTLArgumentEncoder> enc = device ? [device newArgumentEncoderWithArguments:@[arg]] : nil;
+      if (enc) {
+        NSUInteger length = enc.encodedLength < 8 ? 8 : enc.encodedLength;
+        id<MTLBuffer> buf = [device newBufferWithLength:length options:MTLResourceStorageModeShared];
+        if (buf) {
+          [enc setArgumentBuffer:buf offset:0];
+          if (sampler) [enc setSamplerState:(id<MTLSamplerState>)resource atIndex:0];
+          else [enc setTexture:(id<MTLTexture>)resource atIndex:0];
+          __builtin_memcpy(&encoded, [buf contents], 8);
+          [buf release];
+        }
+        [enc release];
+      }
+    }
+  }
+  uint64_t handle = direct ? direct : encoded;
+  if (__atomic_fetch_add(&said, 1, __ATOMIC_RELAXED) < 12)
+    fprintf(stderr, "[ios15-ab] %s responds=%d direct=0x%llx encoded=0x%llx -> 0x%llx (MADEIRA_AB_HANDLE=0 disables)\n",
+            sampler ? "sampler" : "texture", responds, (unsigned long long)direct,
+            (unsigned long long)encoded, (unsigned long long)handle);
+  return handle;
+}
 #import <MetalFX/MetalFX.h>
 #import <QuartzCore/QuartzCore.h>
 #if TARGET_OS_IOS
@@ -296,7 +349,16 @@ _MTLCopyAllDevices(void *obj) {
     params->ret = (wmtr_call(RM_OP_COPY_ALL_DEVICES, 0, 0, &r, sizeof r, 0) == RM_OK) ? r.handle : 0;
     return STATUS_SUCCESS;
   }
-  params->ret = (obj_handle_t)MTLCopyAllDevices();
+  /* iOS < 18: MTLCopyAllDevices is weak-imported and NULL; use the one
+   * device there is, as a +1 array (the Copy rule the callers release). */
+  if (@available(macOS 10.11, iOS 18.0, *)) {
+    params->ret = (obj_handle_t)MTLCopyAllDevices();
+  } else {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    params->ret = (obj_handle_t)(device ? [[NSArray alloc] initWithObjects:&device count:1]
+                                        : [[NSArray alloc] init]);
+    [device release];
+  }
   return STATUS_SUCCESS;
 }
 
@@ -850,7 +912,7 @@ _MTLDevice_newSamplerState(void *obj) {
   sampler_desc.supportArgumentBuffers = info->support_argument_buffers;
 
   id<MTLSamplerState> sampler = [device newSamplerStateWithDescriptor:sampler_desc];
-  info->gpu_resource_id = info->support_argument_buffers ? [sampler gpuResourceID]._impl : 0;
+  info->gpu_resource_id = info->support_argument_buffers ? madeira_gpu_resource_id(sampler) : 0;
   params->ret = (obj_handle_t)sampler;
   [sampler_desc release];
   return STATUS_SUCCESS;
@@ -1155,7 +1217,7 @@ _MTLDevice_newTexture(void *obj) {
 
   id<MTLTexture> ret = [device newTextureWithDescriptor:desc];
   params->ret = (obj_handle_t)ret;
-  info->gpu_resource_id = [ret gpuResourceID]._impl;
+  info->gpu_resource_id = madeira_gpu_resource_id(ret);
   info->mach_port = 0;
 
   [desc release];
@@ -1191,7 +1253,7 @@ _MTLBuffer_newTexture(void *obj) {
   wmt_stale_check(buffer, "buffer newTexture view");   /* ml1156 */
   id<MTLTexture> ret = [buffer newTextureWithDescriptor:desc offset:params->offset bytesPerRow:params->bytes_per_row];
   params->ret = (obj_handle_t)ret;
-  info->gpu_resource_id = [ret gpuResourceID]._impl;
+  info->gpu_resource_id = madeira_gpu_resource_id(ret);
   info->mach_port = 0;
 
   [desc release];
@@ -1257,7 +1319,7 @@ _MTLTexture_newTextureView(void *obj) {
                              slices:NSMakeRange(params->slice_start, params->slice_count)
                             swizzle:to_metal_swizzle(params->swizzle, params->format)];
   params->ret = (obj_handle_t)ret;
-  params->gpu_resource_id = [ret gpuResourceID]._impl;
+  params->gpu_resource_id = madeira_gpu_resource_id(ret);
   return STATUS_SUCCESS;
 }
 
@@ -3726,9 +3788,28 @@ _MetalDrawable_texture(void *obj) {
   return STATUS_SUCCESS;
 }
 
+/* Madeira-15.6: set from the app (madeira_set_app_active). */
+_Atomic int madeira_app_active = 1;
+void madeira_set_app_active(int active)
+{
+  atomic_store_explicit(&madeira_app_active, active ? 1 : 0, memory_order_relaxed);
+}
+int madeira_get_app_active(void)
+{
+  return atomic_load_explicit(&madeira_app_active, memory_order_relaxed);
+}
+
 static NTSTATUS
 _MetalLayer_nextDrawable(void *obj) {
   struct unixcall_generic_obj_obj_ret *params = obj;
+  if (!atomic_load_explicit(&madeira_app_active, memory_order_relaxed)) {
+    params->ret = 0;   /* backgrounded: skip this frame, touch no drawable */
+    { static unsigned madeira_paused;
+      if (madeira_paused++ < 8 || (madeira_paused % 256) == 0)
+        dprintf(STDERR_FILENO, "[present-pause] backgrounded, frame skipped (n=%u)%c",
+                madeira_paused, 10); }
+    return STATUS_SUCCESS;
+  }
   if (wmtr_enabled()) {
     struct rm_ret_drawable r;
     params->ret = 0;
@@ -5490,14 +5571,14 @@ _MTLDevice_newSharedTexture(void *obj) {
     id<MTLTexture> ret = [device newSharedTextureWithHandle:handle];
     extract_texture_descriptor(ret, info);
     params->ret = (obj_handle_t)ret;
-    info->gpu_resource_id = [ret gpuResourceID]._impl;
+    info->gpu_resource_id = madeira_gpu_resource_id(ret);
     [handle release];
   } else {
     MTLTextureDescriptor *desc = [[MTLTextureDescriptor alloc] init];
     fill_texture_descriptor(desc, info);
     id<MTLTexture> ret = [device newSharedTextureWithDescriptor:desc];
     params->ret = (obj_handle_t)ret;
-    info->gpu_resource_id = [ret gpuResourceID]._impl;
+    info->gpu_resource_id = madeira_gpu_resource_id(ret);
 #if TARGET_OS_IOS
     /* An iOS app cannot bootstrap-register the port, so the caller could only
      * fail the creation (Crysis Remastered then crashed on the views it never
@@ -6605,7 +6686,7 @@ _MTLHeap_newTextureAtOffset(void *obj) {
     fill_texture_descriptor(desc, info);
     id<MTLTexture> t = [(id<MTLHeap>)params->heap newTextureWithDescriptor:desc offset:params->offset];
     params->ret = (obj_handle_t)t;
-    info->gpu_resource_id = t ? [t gpuResourceID]._impl : 0;
+    info->gpu_resource_id = t ? madeira_gpu_resource_id(t) : 0;
     info->mach_port = 0;
     [desc release];
   }

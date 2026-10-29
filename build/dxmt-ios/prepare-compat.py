@@ -1,3 +1,13 @@
+"""SUPERSEDED 2026-10-29 -- do not run.
+
+Every patch this script used to apply is now committed inside dxmt/src (dxmt is
+vendored in-tree instead of a willfaust submodule we could not push to), and the
+unix and PE builds compile that tree directly. The file is kept as the record of
+WHY each change exists: each entry's comment names the game, the log line and
+the date that motivated it. Re-running it against the patched tree will abort on
+the first missing anchor, which is the intended outcome.
+
+"""
 import pathlib
 import shutil
 import sys

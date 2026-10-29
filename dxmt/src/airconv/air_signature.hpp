@@ -222,37 +222,37 @@ struct MSLTexture {
 
     switch (resource_kind) {
     case TextureKind::texture_1d:
-      return "texture1d<" + component + "," + access + ">";
+      return "texture1d<" + component + ", " + access + ">";
     case TextureKind::texture_1d_array:
-      return "texture1d_array<" + component + "," + access + ">";
+      return "texture1d_array<" + component + ", " + access + ">";
     case TextureKind::texture_2d:
-      return "texture2d<" + component + "," + access + ">";
+      return "texture2d<" + component + ", " + access + ">";
     case TextureKind::texture_2d_array:
-      return "texture2d_array<" + component + "," + access + ">";
+      return "texture2d_array<" + component + ", " + access + ">";
     case TextureKind::texture_2d_ms:
-      return "texture2d_ms<" + component + "," + access + ">";
+      return "texture2d_ms<" + component + ", " + access + ">";
     case TextureKind::texture_2d_ms_array:
-      return "texture2d_ms_array<" + component + "," + access + ">";
+      return "texture2d_ms_array<" + component + ", " + access + ">";
     case TextureKind::texture_3d:
-      return "texture3d<" + component + "," + access + ">";
+      return "texture3d<" + component + ", " + access + ">";
     case TextureKind::texture_buffer:
-      return "texture_buffer<" + component + "," + access + ">";
+      return "texture_buffer<" + component + ", " + access + ">";
     case TextureKind::texture_cube:
-      return "texturecube<" + component + "," + access + ">";
+      return "texturecube<" + component + ", " + access + ">";
     case TextureKind::texture_cube_array:
-      return "texturecube_array<" + component + "," + access + ">";
+      return "texturecube_array<" + component + ", " + access + ">";
     case TextureKind::depth_2d:
-      return "depth2d<" + component + "," + access + ">";
+      return "depth2d<" + component + ", " + access + ">";
     case TextureKind::depth_2d_array:
-      return "depth2d_array<" + component + "," + access + ">";
+      return "depth2d_array<" + component + ", " + access + ">";
     case TextureKind::depth_2d_ms:
-      return "depth2d_ms<" + component + "," + access + ">";
+      return "depth2d_ms<" + component + ", " + access + ">";
     case TextureKind::depth_2d_ms_array:
-      return "depth2d_ms_array<" + component + "," + access + ">";
+      return "depth2d_ms_array<" + component + ", " + access + ">";
     case TextureKind::depth_cube:
-      return "depthcube<" + component + "," + access + ">";
+      return "depthcube<" + component + ", " + access + ">";
     case TextureKind::depth_cube_array:
-      return "depthcube_array<" + component + "," + access + ">";
+      return "depthcube_array<" + component + ", " + access + ">";
     }
     assert(0 && "unreachable");
   };

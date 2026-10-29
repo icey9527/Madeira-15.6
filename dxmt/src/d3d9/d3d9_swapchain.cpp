@@ -813,13 +813,21 @@ MTLD3D9SwapChain::Present(
     const RECT *pSourceRect, const RECT *pDestRect, HWND hDestWindowOverride, const RGNDATA *pDirtyRegion, DWORD dwFlags
 ) {
   D3D9_CENSUS_FRAME(D3D9_CENSUS_MTLD3D9SwapChain_Present);
+  { static unsigned madeira_present_calls; unsigned n = madeira_present_calls++;
+    if (n < 3 || (n % 300) == 0)
+      Logger::warn(str::format("[d9-present] call n=", n)); }
   D9DeviceLock lock = m_device->LockDevice();
   (void)pDirtyRegion; // hint only, spec-permitted to ignore
   // Lost-device gate: presentStateGate returns S_PRESENT_OCCLUDED (Ex) or
   // D3DERR_DEVICELOST (non-Ex) when the device is not presentable (the wine
   // spec shape), D3D_OK otherwise.
-  if (HRESULT state = m_device->presentStateGate(); state != D3D_OK)
+  if (HRESULT state = m_device->presentStateGate(); state != D3D_OK) {
+    static unsigned madeira_present_gate;
+    if (madeira_present_gate++ < 8 || (madeira_present_gate % 256) == 0)
+      Logger::warn(str::format("[d9-present] rejected state=",
+          (uint32_t)state, " n=", madeira_present_gate));
     return state;
+  }
   // No-display probe. d3d11 has the same shape at d3d11_swapchain.cpp.
   // MSDN's "Lost Devices" page says the DEVICELOST transition is driven
   // by focus loss, but native doesn't synthesize DEVICELOST on a simple

@@ -65,6 +65,7 @@ public:
   HRESULT STDMETHODCALLTYPE LockRect(UINT Level, D3DLOCKED_RECT *pLockedRect, const RECT *pRect, DWORD Flags) override;
   HRESULT STDMETHODCALLTYPE UnlockRect(UINT Level) override;
   HRESULT STDMETHODCALLTYPE AddDirtyRect(const RECT *pDirtyRect) override;
+  void flushLockedLevels() override;
 
   // MTLD3D9CommonTexture overrides: see d3d9_common_texture.hpp.
   // Definitions are inline so the per-bind virtual dispatch lands on

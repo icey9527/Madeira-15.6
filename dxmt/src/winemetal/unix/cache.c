@@ -285,12 +285,16 @@ _CacheWriter_set(void *obj) {
 
 #ifndef DXMT_NO_PRIVATE_API
 
-extern void MTLSetShaderCachePath(NSString* path);
-extern NSString* MTLGetShaderCachePath();
+extern void MTLSetShaderCachePath(NSString* path) __attribute__((weak_import));
+extern NSString* MTLGetShaderCachePath() __attribute__((weak_import));
 
 int
 _WMTSetMetalShaderCachePath(void *obj) {
   struct unixcall_setmetalcachepath *params = obj;
+  if (!MTLSetShaderCachePath || !MTLGetShaderCachePath) {
+    params->ret_success = 0;
+    return 0;
+  }
   NSString *path = [[NSString alloc] initWithCString:params->path.ptr encoding:NSUTF8StringEncoding];
   NSString *resolved_path = resolve_cache_dir(path, false);
 #if TARGET_OS_IPHONE

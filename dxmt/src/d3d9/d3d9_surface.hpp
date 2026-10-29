@@ -232,6 +232,9 @@ public:
   lockedNoDirtyUpdate() const {
     return m_locked_no_dirty_update;
   }
+  // Upload the still-mapped rect without clearing the lock state.
+  void
+  flushLockedUpload();
 
   // Lazy-mirror back-pointer: the container defers mirror allocation
   // until first LockRect. Surface-direct LockRect path drives alloc via

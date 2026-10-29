@@ -266,13 +266,17 @@ MTLD3D9Texture::ensureMirror() {
   uint64_t mirror_gpu_addr = 0;
   void *mirror_host = nullptr;
   if (!m_device->acquireBufferBacking(total_bytes, m_mirrorBuffer, mirror_gpu_addr, mirror_host, m_mirrorBacking)) {
-    m_mirrorBacking = guest_alloc(total_bytes, DXMT_PAGE_SIZE);
-    if (!m_mirrorBacking)
+    const size_t page = guest_page_size();
+    const size_t mirror_alloc = (total_bytes + page - 1) & ~(page - 1);
+    m_mirrorBacking = guest_alloc(mirror_alloc, page);
+    if (!m_mirrorBacking) {
+      Logger::warn(str::format("[d9-mirror] guest_alloc failed bytes=", mirror_alloc));
       return;
-    std::memset(m_mirrorBacking, 0, total_bytes);
+    }
+    std::memset(m_mirrorBacking, 0, mirror_alloc);
 
     WMTBufferInfo binfo{};
-    binfo.length = total_bytes;
+    binfo.length = mirror_alloc;
     // Shared storage so the backing can be donated to and reused from the
     // device block pool (releaseBufferBacking / acquireBufferBacking, whose
     // entries require a Metal registration). The GPU never reads this buffer:
@@ -282,6 +286,8 @@ MTLD3D9Texture::ensureMirror() {
     binfo.memory.set(m_mirrorBacking);
     m_mirrorBuffer = m_device->metalDevice().newBuffer(binfo);
     if (m_mirrorBuffer == nullptr) {
+      Logger::warn(str::format("[d9-mirror] newBuffer failed ptr=", (uintptr_t)m_mirrorBacking,
+          " bytes=", mirror_alloc));
       guest_free(m_mirrorBacking);
       m_mirrorBacking = nullptr;
       return;
@@ -649,6 +655,7 @@ MTLD3D9Texture::~MTLD3D9Texture() {
 void
 MTLD3D9Texture::markLosable() {
   if (!m_isLosable) {
+    m_device->madeiraLosableKind("tex");
     m_isLosable = true;
     // Level-0 bytes as the reported figure (mip tail is a minor term; the
     // value feeds GetAvailableTextureMem, which is documented inexact).
@@ -889,7 +896,16 @@ MTLD3D9Texture::LockRect(UINT Level, D3DLOCKED_RECT *pLockedRect, const RECT *pR
     return D3DERR_INVALIDCALL;
   if ((m_usage & D3DUSAGE_AUTOGENMIPMAP) && Level != 0)
     return D3DERR_INVALIDCALL;
-  return m_levels[Level]->LockRect(pLockedRect, pRect, Flags);
+  HRESULT hr = m_levels[Level]->LockRect(pLockedRect, pRect, Flags);
+  static unsigned lock_logged = 0;
+  if (lock_logged < 8 && (FAILED(hr) || lock_logged < 2)) {
+    ++lock_logged;
+    Logger::warn(str::format(
+        "[d9-lock-result] hr=", (uint32_t)hr, " pool=", (uint32_t)m_pool, " usage=", (uint32_t)m_usage,
+        " fmt=", (uint32_t)m_format, " size=", m_width, "x", m_height, " level=", Level,
+        " flags=", (uint32_t)Flags, " rect=", pRect ? 1 : 0, " mirror=", m_mirrorBacking ? 1 : 0));
+  }
+  return hr;
 }
 
 HRESULT STDMETHODCALLTYPE
@@ -905,6 +921,20 @@ MTLD3D9Texture::UnlockRect(UINT Level) {
   // routed through this wrapper) records them too. wined3d records both via the
   // shared texture regardless of entry point.
   return m_levels[Level]->UnlockRect();
+}
+
+void
+MTLD3D9Texture::flushLockedLevels() {
+  static unsigned texture_logged = 0;
+  if (texture_logged++ < 8) {
+    unsigned locked = 0;
+    for (auto &level : m_levels)
+      if (level.ptr() && level.ptr()->locked()) ++locked;
+    Logger::warn(str::format("[d9-locked-flush] texture levels=", m_levels.size(), " locked=", locked));
+  }
+  for (auto &level : m_levels)
+    if (level.ptr() && level.ptr()->locked())
+      level.ptr()->flushLockedUpload();
 }
 
 HRESULT STDMETHODCALLTYPE

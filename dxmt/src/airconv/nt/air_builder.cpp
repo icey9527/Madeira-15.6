@@ -1,12 +1,13 @@
 #include "air_builder.hpp"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include <format>
+#include <fmt/format.h>
 
 namespace llvm::air {
 
@@ -72,17 +73,17 @@ AIRBuilder::getTypeOverloadSuffix(Type *Ty, Signedness Sign) {
     if (Sign != Signedness::DontCare)
       Ret += "f.";
     if (PointerAddrSpace != ~0u)
-      Ret += std::format("p{}", PointerAddrSpace);
+      Ret += fmt::format("p{}", PointerAddrSpace);
     if (VectorSize)
-      Ret += std::format("v{}", VectorSize);
+      Ret += fmt::format("v{}", VectorSize);
     Ret += "f32";
   } else if (TyScaler->isHalfTy()) {
     if (Sign != Signedness::DontCare)
       Ret += "f.";
     if (PointerAddrSpace != ~0u)
-      Ret += std::format("p{}", PointerAddrSpace);
+      Ret += fmt::format("p{}", PointerAddrSpace);
     if (VectorSize)
-      Ret += std::format("v{}", VectorSize);
+      Ret += fmt::format("v{}", VectorSize);
     Ret += "f16";
   } else if (TyScaler->isIntegerTy()) {
     if (Sign == Signedness::Signed)
@@ -90,10 +91,10 @@ AIRBuilder::getTypeOverloadSuffix(Type *Ty, Signedness Sign) {
     else if (Sign == Signedness::Unsigned)
       Ret += "u.";
     if (PointerAddrSpace != ~0u)
-      Ret += std::format("p{}", PointerAddrSpace);
+      Ret += fmt::format("p{}", PointerAddrSpace);
     if (VectorSize)
-      Ret += std::format("v{}", VectorSize);
-    Ret += std::format("i{}", cast<IntegerType>(TyScaler)->getBitWidth());
+      Ret += fmt::format("v{}", VectorSize);
+    Ret += fmt::format("i{}", cast<IntegerType>(TyScaler)->getBitWidth());
   } else {
     Ret += "unknown_type_overload";
   }
@@ -278,7 +279,7 @@ AIRBuilder::CreateAtomicCmpXchg(
 Type *
 AIRBuilder::getTextureHandleType(const Texture &Texture) {
   assert(Texture.kind <= Texture::last_resource_kind);
-  return getOrCreateStructType(std::format("struct._{}_t", TextureInfo[Texture.kind].air_symbol_suffix))
+  return getOrCreateStructType(fmt::format("struct._{}_t", TextureInfo[Texture.kind].air_symbol_suffix))
       ->getPointerTo(1);
 };
 
@@ -1152,29 +1153,11 @@ AIRBuilder::CreateFMA(Value *X, Value *Y, Value *Z) {
     debug << "invalid operation: fma has unmatched operand types.\n";
     return nullptr; // TODO
   }
-  auto &Context = getContext();
-  auto Attrs = AttributeList::get(
-      Context, {{~0U, Attribute::get(Context, Attribute::AttrKind::ReadNone)},
-                {~0U, Attribute::get(Context, Attribute::AttrKind::NoUnwind)},
-                {~0U, Attribute::get(Context, Attribute::AttrKind::WillReturn)}}
-  );
-
-  SmallVector<Value *> Ops;
-  SmallVector<Type *> Tys;
-
-  Tys.push_back(X->getType());
-  Ops.push_back(X);
-  Tys.push_back(Y->getType());
-  Ops.push_back(Y);
-  Tys.push_back(Z->getType());
-  Ops.push_back(Z);
-
-  std::string FnName = "air.fma";
-  FnName += getTypeOverloadSuffix(X->getType());
-
-  auto Fn = getModule()->getOrInsertFunction(FnName, FunctionType::get(X->getType(), Tys, false), Attrs);
-
-  return builder.CreateCall(Fn, Ops);
+  /* MADEIRA: iOS 15.6's AGX compiler ICEs on air.fma.*; the no-fma probe
+   * fixture, which removes one DXBC mad, passes every pipeline.  DXBC mad
+   * does not require fused rounding, so lower it to the separate mul/add
+   * the older compiler accepts.  Keep the type checks above. */
+  return builder.CreateFAdd(builder.CreateFMul(X, Y), Z);
 }
 
 Value *
@@ -1661,6 +1644,33 @@ AIRBuilder::CreateFPUnOp(FPUnOp Op, Value *Operand, bool FastVariant) {
   auto OperandType = Operand->getType();
 
   std::string FnName = "air.";
+  /* MADEIRA: this device rejects air.fast_saturate,
+   * air.fast_rint and the v4 fast_clamp overload; use
+   * the scalar forms Apple's own iOS 15 metallib uses. */
+  if (Op == saturate || Op == rint) {
+    llvm::Type *ScalarTy = OperandType->getScalarType();
+    auto CallScalar = [&](llvm::Value *V) -> llvm::Value * {
+      if (Op == saturate) {
+        auto Fn = getModule()->getOrInsertFunction(
+            "air.fast_clamp" + getTypeOverloadSuffix(ScalarTy),
+            llvm::FunctionType::get(ScalarTy, {ScalarTy, ScalarTy, ScalarTy}, false), Attrs);
+        return builder.CreateCall(Fn, {V, llvm::ConstantFP::get(ScalarTy, 0.0),
+                                        llvm::ConstantFP::get(ScalarTy, 1.0)});
+      }
+      auto Fn = getModule()->getOrInsertFunction(
+          "air.rint" + getTypeOverloadSuffix(ScalarTy),
+          llvm::FunctionType::get(ScalarTy, {ScalarTy}, false), Attrs);
+      return builder.CreateCall(Fn, {V});
+    };
+    if (auto *VT = llvm::dyn_cast<llvm::FixedVectorType>(OperandType)) {
+      llvm::Value *Result = llvm::UndefValue::get(OperandType);
+      for (unsigned i = 0; i < VT->getNumElements(); ++i)
+        Result = builder.CreateInsertElement(
+            Result, CallScalar(builder.CreateExtractElement(Operand, i)), i);
+      return Result;
+    }
+    return CallScalar(Operand);
+  }
   if (FastVariant)
     FnName += "fast_";
   FnName += FnNames[Op];

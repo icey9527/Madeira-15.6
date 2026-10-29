@@ -45,32 +45,11 @@ python3 "$R/build/dxmt-pe/prepare-meson.py" "$R/dxmt"
 
 # Madeira-15.6: compile the SAME sources the iOS library does.
 #
-# prepare-compat.py patches the D3D11 front end (and the rest of DXMT) into
-# build/dxmt-ios/compat-src, and build.sh there consumes those files one by one.
-# meson cannot, so the patched files are written back over the submodule before
-# configuring. Without this, d3d11.dll shipped upstream code while the unix side
-# shipped ours: the argument-buffer ring allocation probe added to
-# dxmt_command_queue.hpp on 2026-10-28 never appeared in a device log, while the
-# probes in winemetal_unix.c (unix side) did.
-#
-# The output directory is OURS, not the unix build's. prepare-compat.py reads a
-# file from its own output when one is already there (that is how several patch
-# entries for the same file compose), so pointing it at build/dxmt-ios/compat-src
-# after the unix build filled that directory makes it read patched text, miss
-# anchors and abort: "d3d9_texture.cpp: expected 1 match, found 0". A private
-# directory, wiped first, always starts from the pristine tree.
-PE_COMPAT="$R/build/dxmt-pe/compat-src"
-rm -rf "$PE_COMPAT"
-python3 "$R/build/dxmt-ios/prepare-compat.py" "$R/dxmt/src" "$PE_COMPAT" \
-    "${IPHONEOS_DEPLOYMENT_TARGET:-15.6}"
-if [ -d "$PE_COMPAT" ]; then
-    ( cd "$PE_COMPAT" && find . -type f -print0 ) |
-    while IFS= read -r -d '' f; do
-        f="${f#./}"
-        mkdir -p "$R/dxmt/src/$(dirname "$f")"
-        cp "$PE_COMPAT/$f" "$R/dxmt/src/$f"
-    done
-fi
+# dxmt is vendored in-tree and the iOS port is committed to it (2026-10-29), so
+# d3d11.dll and libdxmt_unix.a are built from one tree with no patching step in
+# between. Before that, prepare-compat.py had to be replayed over the submodule
+# here, in a private directory, because the unix build's output could not be
+# patched twice.
 
 if [ ! -f "$W/config.status" ]; then
     mkdir -p "$W"

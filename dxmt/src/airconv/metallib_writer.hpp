@@ -25,7 +25,7 @@ enum class MTLBFourCC : uint32_t {
 
 const uint32_t MTLB_Magic = MTLB_FOURCC('M', 'T', 'L', 'B');
 
-enum class Platform : uint16_t { MTLBPlatform_macOS = 0x8001 };
+enum class Platform : uint16_t { MTLBPlatform_macOS = 0x8001, MTLBPlatform_iOS = 0x0001 };
 
 enum class FileType : uint8_t {
   MTLBType_Executable = 0x00,
@@ -33,6 +33,7 @@ enum class FileType : uint8_t {
 
 enum class OS : uint8_t {
   MTLBOS_macOS = 0x81,
+  MTLBOS_iOS = 0x82,
 };
 
 typedef struct __attribute__((packed)) {

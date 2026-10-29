@@ -1,4 +1,5 @@
 #include "air_signature.hpp"
+#include "ios15_probe.hpp"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Attributes.h"
@@ -552,12 +553,16 @@ auto FunctionSignatureBuilder::CreateFunction(
                   ->string(vertex_out.user);
             },
             [&](const OutputPosition &position) {
-              md.string("air.position")
-                  ->string("air.invariant")
-                  ->string("air.arg_type_name")
+              md.string("air.position");
+              if (!dxmt::airconv_probe::edit_flag("no-invariant") &&
+                  !dxmt::airconv_probe::edit_flag("apple-vs"))
+                  md.string("air.invariant");
+              md.string("air.arg_type_name")
                   ->string(get_name(position.type))
                   ->string("air.arg_name")
-                  ->string("mtl_position");
+                  ->string((dxmt::airconv_probe::edit_flag("apple-vs") ||
+                            dxmt::airconv_probe::edit_flag("position-name"))
+                               ? "position" : "mtl_position");
             },
             [&](const OutputClipDistance clip_distance) {
               md.string("air.clip_distance")
@@ -876,9 +881,16 @@ auto FunctionSignatureBuilder::CreateFunction(
     llvm::Type *field_type = std::visit(
       patterns{
         [&](const OutputVertex &vertex_out) {
-          md.string("air.vertex_output")
-            ->string("user(" + vertex_out.user + ")")
-            ->string("air.arg_type_name")
+          md.string("air.vertex_output");
+          if ((dxmt::airconv_probe::edit_flag("apple-vs") ||
+               dxmt::airconv_probe::edit_flag("generated-output")) &&
+              vertex_out.user == "texcoord0" &&
+              get_name(vertex_out.type) == "float4") {
+            md.string("generated(9texcoord0Dv4_f)");
+          } else {
+            md.string("user(" + vertex_out.user + ")");
+          }
+          md.string("air.arg_type_name")
             ->string(get_name(vertex_out.type))
             ->string("air.arg_name")
             ->string(vertex_out.user);
@@ -905,12 +917,16 @@ auto FunctionSignatureBuilder::CreateFunction(
           return get_llvm_type(render_target.type, context);
         },
         [&](const OutputPosition &position) {
-          md.string("air.position")
-            ->string("air.invariant")
-            ->string("air.arg_type_name")
+          md.string("air.position");
+          if (!dxmt::airconv_probe::edit_flag("no-invariant") &&
+              !dxmt::airconv_probe::edit_flag("apple-vs"))
+            md.string("air.invariant");
+          md.string("air.arg_type_name")
             ->string(get_name(position.type))
             ->string("air.arg_name")
-            ->string("mtl_position");
+            ->string((dxmt::airconv_probe::edit_flag("apple-vs") ||
+                      dxmt::airconv_probe::edit_flag("position-name"))
+                         ? "position" : "mtl_position");
           return get_llvm_type(position.type, context);
         },
         [&](const OutputDepth &depth) {

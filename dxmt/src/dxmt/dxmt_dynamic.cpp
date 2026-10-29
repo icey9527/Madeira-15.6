@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "dxmt_dynamic.hpp"
 #include "dxmt_texture.hpp"
 #include "dxmt_mem_census.hpp"
@@ -96,7 +97,12 @@ DynamicBuffer::allocate(uint64_t coherent_seq_id, bool *out_minted_fresh) {
      *
      * A blanket depth cap would be a use-after-free: an entry whose
      * will_free_at still exceeds coherent_seq_id can be in GPU use right now. */
-    enum { DYN_KEEP_ELIGIBLE = 64 };
+    // Madeira-15.6 (iediot e2e36eb): ~8 MB per buffer, not a flat 64 entries.
+    unsigned DYN_KEEP_ELIGIBLE = 64;
+    if (en && !fifo.empty() && fifo.front().allocation.ptr()) {
+      const uint64_t entry_bytes = std::max<uint64_t>(fifo.front().allocation->census_bytes_, 256);
+      DYN_KEEP_ELIGIBLE = (unsigned)std::clamp<uint64_t>((8ull << 20) / entry_bytes, 64, 4096);
+    }
     if (en > DYN_KEEP_ELIGIBLE) {
       uint64_t drop = en - DYN_KEEP_ELIGIBLE, freed = 0, freed_n = 0;
       while (drop && !fifo.empty()) {

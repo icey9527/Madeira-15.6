@@ -3,9 +3,15 @@
 #include "dxmt_statistics.hpp"
 #include "util_env.hpp"
 #include "util_win32_compat.h"
+/* The arm64ec PE build compiles this file too and has no
+ * winemetal_unix.c. A weak DEFINITION keeps that link happy (an EC
+ * undefined function becomes a .refptr that cannot stay unresolved);
+ * the unix build's strong one in winemetal_unix.c wins. */
+extern "C" __attribute__((weak)) int madeira_get_app_active(void) { return 1; }
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <cstdio>
 
 #define ASYNC_ENCODING 1
@@ -135,6 +141,14 @@ CommandQueue::CommitChunkInternal(CommandChunk &chunk, uint64_t seq) {
   }
   }
 
+  if (!madeira_get_app_active()) {
+    static unsigned madeira_bg_dropped;
+    if (madeira_bg_dropped++ < 8 || (madeira_bg_dropped % 256) == 0)
+      WARN("[bg-commit] dropped frame=", chunk.frame_, " n=", madeira_bg_dropped);
+    ready_for_commit.fetch_add(1, std::memory_order_release);
+    dxmt::atomic_notify_one(ready_for_commit);
+    return;
+  }
   auto cmdbuf = commandQueue.commandBuffer();
   chunk.attached_cmdbuf = cmdbuf;
   if (chunk.resource_initializer_event_id) {
@@ -178,7 +192,17 @@ CommandQueue::WaitForFinishThread() {
       break;
     auto &chunk = chunks[internal_seq % kCommandChunkCount];
     if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
-      chunk.attached_cmdbuf.waitUntilCompleted();
+      unsigned madeira_wait_ms = 0;
+      while (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        madeira_wait_ms += 10;
+        if ((madeira_wait_ms % 2000) == 0) {
+          static unsigned madeira_gpu_wait_said;
+          if (madeira_gpu_wait_said++ < 20)
+            ERR("[gpu-wait] frame=", chunk.frame_, " status=",
+                (int)chunk.attached_cmdbuf.status(), " waited_ms=", madeira_wait_ms);
+        }
+      }
     }
     const bool device_error = chunk.attached_cmdbuf.status() == WMTCommandBufferStatusError;
     if (device_error) {

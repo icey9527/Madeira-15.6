@@ -100,6 +100,7 @@ MTLD3D9VolumeTexture::~MTLD3D9VolumeTexture() {
 void
 MTLD3D9VolumeTexture::markLosable() {
   if (!m_isLosable) {
+    m_device->madeiraLosableKind("vol");
     m_isLosable = true;
     // Level-0 slice bytes times depth; see MTLD3D9Texture::markLosable.
     m_losableBytes = static_cast<int64_t>(D3DFormatLockPitch(m_format, m_width_l0)) *

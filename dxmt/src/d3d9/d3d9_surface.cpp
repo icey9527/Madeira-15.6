@@ -185,6 +185,7 @@ MTLD3D9Surface::~MTLD3D9Surface() {
 void
 MTLD3D9Surface::markLosable() {
   if (!m_isLosable) {
+    m_device->madeiraLosableKind("surf");
     m_isLosable = true;
     // Reported bytes for GetAvailableTextureMem; see MTLD3D9Texture. Depth and
     // NULL formats have no packed bpp, so fall back to a 4-byte estimate.
@@ -241,8 +242,10 @@ MTLD3D9Surface::AddRef() {
     // Implicit surface (backbuffer / auto-DS): count in the device's loss gate
     // while the app holds a public ref, so a non-Ex Reset fails until the app
     // releases it. Bytes 0: implicit resources stay out of the memory report.
-    if (m_isImplicitLosable)
+    if (m_isImplicitLosable) {
+      m_device->madeiraLosableKind("implicit");
       m_device->onLosableResourceCreated();
+    }
   }
   return ref;
 }
@@ -761,6 +764,35 @@ MTLD3D9Surface::UnlockRect() {
   // ml1490: the lock is released and nothing is half recorded.
   m_device->settleUploadPressure();
   return D3D_OK;
+}
+
+void
+MTLD3D9Surface::flushLockedUpload() {
+  if (!m_locked || m_locked_readonly || m_buffer != nullptr || m_cpu_ptr == nullptr || m_texture == nullptr)
+    return;
+  if (!(m_desc.Pool == D3DPOOL_MANAGED || m_desc.Pool == D3DPOOL_DEFAULT) || IsNullFormat(m_desc.Format) ||
+      m_locked_w == 0 || m_locked_h == 0)
+    return;
+  static unsigned flush_logged = 0;
+  if (flush_logged++ < 8)
+    Logger::warn(str::format(
+        "[d9-locked-flush] level=", m_mip_level, " locked=", m_locked_w, "x", m_locked_h, " pool=", m_desc.Pool,
+        " fmt=", m_desc.Format, " buffer=", m_buffer != nullptr ? 1 : 0,
+        " cpu=", m_cpu_ptr != nullptr ? 1 : 0));
+  uint32_t x = m_locked_x, y = m_locked_y, w = m_locked_w, h = m_locked_h;
+  if (Is3DcFormat(m_desc.Format)) {
+    x = 0; y = 0; w = m_desc.Width; h = m_desc.Height;
+  }
+  const bool compressed = IsCompressedFormat(m_desc.Format);
+  const uint32_t row_pitch = D3DFormatRowPitch(m_desc.Format, m_desc.Width);
+  const uint32_t src_offset = image_lock_block_offset(x, y, m_pitch, row_pitch, m_desc.Width, compressed);
+  WMTOrigin origin{}; origin.x = x; origin.y = y; origin.z = 0;
+  WMTSize size{}; size.width = w; size.height = h; size.depth = 1;
+  const void *src = static_cast<const uint8_t *>(m_cpu_ptr) + src_offset;
+  m_device->stageTextureUpload(
+      m_texture, m_dxmtTexture, m_mip_level, m_array_slice, origin, size, src, m_pitch, compressed,
+      /*src_slice_pitch=*/0, D3DFormatRowPitch(m_desc.Format, w)
+  );
 }
 
 HRESULT STDMETHODCALLTYPE

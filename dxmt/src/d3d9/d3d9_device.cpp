@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "d3d9_device.hpp"
 #include "d3d9_guest_alloc.hpp"
 #include "d3d9_madeira_window.hpp"
@@ -92,10 +93,18 @@ namespace {
 // vtable, so reading its type afterwards is safe.
 enum { kLeaf2D = 0, kLeafCube = 1, kLeafVolume = 2 };
 std::atomic<const void *> g_textureLeafVtable[3] = {};
+std::atomic<const void *> g_textureLeafObject[3] = {};
 
 void
 captureTextureLeafVtable(IDirect3DBaseTexture9 *leaf, unsigned index) {
-  g_textureLeafVtable[index].store(*reinterpret_cast<const void *const *>(leaf), std::memory_order_relaxed);
+  const void *vtable = *reinterpret_cast<const void *const *>(leaf);
+  g_textureLeafObject[index].store(leaf, std::memory_order_relaxed);
+  g_textureLeafVtable[index].store(vtable, std::memory_order_relaxed);
+  static unsigned capture_logged = 0;
+  if (capture_logged++ < 8)
+    Logger::warn(str::format(
+        "[d9-locked-flush] capture idx=", index, " ptr=", (uintptr_t)leaf,
+        " vtable=", (uintptr_t)vtable));
 }
 
 // Returns the common texture for a recognised dxmt texture, or null for a null,
@@ -105,6 +114,15 @@ MTLD3D9CommonTexture *
 commonTextureFromBound(IDirect3DBaseTexture9 *iface) {
   if (!iface)
     return nullptr;
+  // The native handle table already validated the object identity.  Match
+  // the canonical pointer as a fallback for the 32-bit bridge, where the
+  // interface pointer can reach this side with a different vtable value.
+  if (iface == g_textureLeafObject[kLeaf2D].load(std::memory_order_relaxed))
+    return static_cast<MTLD3D9Texture *>(static_cast<IDirect3DTexture9 *>(iface));
+  if (iface == g_textureLeafObject[kLeafCube].load(std::memory_order_relaxed))
+    return static_cast<MTLD3D9CubeTexture *>(static_cast<IDirect3DCubeTexture9 *>(iface));
+  if (iface == g_textureLeafObject[kLeafVolume].load(std::memory_order_relaxed))
+    return static_cast<MTLD3D9VolumeTexture *>(static_cast<IDirect3DVolumeTexture9 *>(iface));
   const void *vtable = *reinterpret_cast<const void *const *>(iface);
   // A null vtable is never one of ours, and this guards the degenerate match
   // against a capture slot that no texture of that type has populated yet.
@@ -2622,7 +2640,33 @@ MTLD3D9Device::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
   // blocks usable across Reset; native fails the call). Ex devices are
   // expected to succeed Reset with live DEFAULT resources; the runtime
   // drops those resources via internal release rather than failing.
-  if (!m_isEx && m_losableResourceCount.load(std::memory_order_relaxed) != 0) {
+  /* Madeira-15.6: BaldrSky switches to fullscreen holding one implicit
+   * backbuffer reference and one 800x600 DEFAULT-pool surface, so the spec
+   * gate refuses Reset for ever and the picture freezes with audio and input
+   * still running. Those resources are not part of the swapchain we are about
+   * to recreate, so letting Reset through cannot corrupt them: the game keeps
+   * using its own surfaces, and the new backbuffer arrives as usual.
+   * MADEIRA_D9_RESET_STRICT=1 restores the spec behaviour. */
+  /* Only an explicit "1" brings the spec gate back. Presence alone must not:
+   * the first device run logged "refused" with the patch installed, which
+   * means something in the process environment carries this name with a
+   * value that is not "1" -- so test the value, and print it. */
+  const char *madeira_reset_env = getenv("MADEIRA_D9_RESET_STRICT");
+  const bool madeira_reset_strict =
+      madeira_reset_env && madeira_reset_env[0] == '1' && !madeira_reset_env[1];
+  if (!m_isEx && m_losableResourceCount.load(std::memory_order_relaxed) != 0 &&
+      !madeira_reset_strict) {
+    static unsigned reset_proceeds;
+    if (reset_proceeds++ < 4)
+      Logger::warn(str::format("[d9-reset] proceeding with losable=",
+          m_losableResourceCount.load(std::memory_order_relaxed), " ex=", m_isEx,
+          " strict_env=", madeira_reset_env ? madeira_reset_env : "(unset)"));
+  } else if (!m_isEx && m_losableResourceCount.load(std::memory_order_relaxed) != 0) {
+    static unsigned reset_refusals;
+    if (reset_refusals++ < 8)
+      Logger::warn(str::format("[d9-reset] refused: losable=",
+          m_losableResourceCount.load(std::memory_order_relaxed), " ex=", m_isEx,
+          " strict_env=", madeira_reset_env ? madeira_reset_env : "(unset)"));
     m_deviceState.store(DeviceState::NotReset, std::memory_order_relaxed);
     return D3DERR_INVALIDCALL;
   }
@@ -2637,8 +2681,10 @@ MTLD3D9Device::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
   if (m_dxmtQueue) {
     emitCmdbufTailSignal();
     uint64_t seq = m_dxmtQueue->CurrentSeqId();
+    Logger::warn("[d9-reset] gpu drain begin");
     commitCurrentChunkTimed();
     m_dxmtQueue->WaitCPUFence(seq);
+    Logger::warn("[d9-reset] gpu drain done");
   }
   if (m_currentCmdSeq > 1)
     waitForGpuOrDeviceError(m_currentCmdSeq - 1);
@@ -2670,6 +2716,11 @@ MTLD3D9Device::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
       pPresentationParameters->hDeviceWindow ? pPresentationParameters->hDeviceWindow : m_creationParams.hFocusWindow;
   HRESULT hr = m_implicitSwapChain->ResetForDeviceReset(*pPresentationParameters, effectiveWindow);
   if (FAILED(hr)) {
+    static unsigned reset_failures;
+    if (reset_failures++ < 8)
+      Logger::warn(str::format("[d9-reset] swapchain failed hr=", (uint32_t)hr,
+          " w=", pPresentationParameters->BackBufferWidth,
+          " h=", pPresentationParameters->BackBufferHeight));
     // Non-Ex only: an Ex device never enters NotReset (wine/DXVK gate the store
     // on !extended), so a failed ResetEx returns the error and leaves the
     // device presentable rather than silently occluding Present.
@@ -2760,6 +2811,7 @@ MTLD3D9Device::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
     m_encShadowDirty |= dxmt::D9ES_DIRTY_VIEWPORT;
   }
   m_deviceState.store(DeviceState::Ok, std::memory_order_relaxed);
+  Logger::warn("[d9-reset] done");
   // Re-latch the fullscreen activation state the way wine re-initialises
   // its device state on Reset; the current foreground becomes the new
   // edge-detection baseline.
@@ -2876,6 +2928,9 @@ MTLD3D9Device::Present(
     const RECT *pSourceRect, const RECT *pDestRect, HWND hDestWindowOverride, const RGNDATA *pDirtyRegion
 ) {
   D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_Present);
+  { static unsigned madeira_present_dev; unsigned n = madeira_present_dev++;
+    if (n < 3 || (n % 300) == 0)
+      Logger::warn(str::format("[d9-present] dev Present n=", n)); }
   D9DeviceLock lock = LockDevice();
   // An Ex device presenting an unfocused fullscreen chain reports
   // occlusion without presenting (wine d3d9 device.c); the non-Ex
@@ -6197,6 +6252,16 @@ MTLD3D9Device::Clear(DWORD Count, const D3DRECT *pRects, DWORD Flags, D3DCOLOR C
   if (Count != 0 && pRects == nullptr)
     Count = 0;
 
+  { static unsigned madeira_clear_logged;
+    if (madeira_clear_logged < 64)
+    {
+      MTLD3D9Surface *rt0_log = m_renderTargets[0].ptr();
+      madeira_clear_logged++;
+      Logger::warn(str::format("[d9-clear] flags=", Flags, " color=", (uint32_t)Color,
+          " rects=", Count, " rt0=", rt0_log ? rt0_log->desc().Width : 0, "x",
+          rt0_log ? rt0_log->desc().Height : 0, " vp=", m_viewport.Width, "x", m_viewport.Height));
+    }
+  }
   MTLD3D9Surface *ds = m_depthStencilSurface.ptr();
   // No DS bound + Z/Stencil flag -> INVALIDCALL (DXVK).
   if (!ds && (Flags & (D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL)))
@@ -6206,8 +6271,15 @@ MTLD3D9Device::Clear(DWORD Count, const D3DRECT *pRects, DWORD Flags, D3DCOLOR C
   // dropped whole ("mismatching sizes"), returning OK.
   if (ds && (Flags & D3DCLEAR_TARGET) && (Flags & (D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL))) {
     MTLD3D9Surface *rt0 = m_renderTargets[0].ptr();
-    if (rt0 && (ds->desc().Width < rt0->desc().Width || ds->desc().Height < rt0->desc().Height))
-      return D3D_OK;
+    if (rt0 && (ds->desc().Width < rt0->desc().Width || ds->desc().Height < rt0->desc().Height)) {
+      /* Madeira-15.6: wined3d drops this clear whole; native D3D9 clears each
+       * attachment at its own size, and the paths below do exactly that. The
+       * drop left BaldrSky showing the previous scene behind its title. */
+      static unsigned madeira_clear_mismatch;
+      if (madeira_clear_mismatch++ < 8)
+        Logger::warn(str::format("[d9-clear] mismatched sizes, keeping the clear: ds=",
+            ds->desc().Width, "x", ds->desc().Height, " rt0=", rt0->desc().Width, "x", rt0->desc().Height));
+    }
   }
   // Drop stencil if the bound DS format has no stencil aspect; D3D9
   // silently masks; Metal would reject the encoder. DXVK does
@@ -6650,6 +6722,15 @@ MTLD3D9Device::GetClipPlane(DWORD Index, float *pPlane) {
 HRESULT STDMETHODCALLTYPE
 MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {
   D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);
+  if (State == D3DRS_ALPHATESTENABLE || State == D3DRS_ALPHABLENDENABLE ||
+      State == D3DRS_SRCBLEND || State == D3DRS_DESTBLEND ||
+      State == D3DRS_BLENDOP || State == D3DRS_COLORWRITEENABLE ||
+      State == D3DRS_ZWRITEENABLE || State == D3DRS_CLIPPING) {
+    static unsigned madeira_rs_logged;
+    if (madeira_rs_logged++ < 600)
+      Logger::warn(str::format("[d9-rs] n=", madeira_rs_logged,
+          " state=", (uint32_t)State, " value=", Value));
+  }
   D9DeviceLock lock = LockDevice();
   // One of the hottest entry points in D3D9 (D3DX effect frameworks
   // set every state per draw); keep the caller-thread cost minimal.
@@ -6915,6 +6996,16 @@ MTLD3D9Device::SetTexture(DWORD Stage, IDirect3DBaseTexture9 *pTexture) {
   // Identify the texture without calling through its app-visible vtable (which an
   // overlay may have wrapped, or an app deliberately corrupted): an unrecognised
   // non-null pointer is treated as "no texture", matching wined3d.
+  static unsigned settex_entry_logged = 0;
+  if (settex_entry_logged++ < 8) {
+    const void *bound_vtable =
+        pTexture ? *reinterpret_cast<const void *const *>(pTexture) : nullptr;
+    Logger::warn(str::format(
+        "[d9-locked-flush] entry slot=", slot, " ptr=", (uintptr_t)pTexture,
+        " vtable=", (uintptr_t)bound_vtable,
+        " cap2d=", (uintptr_t)g_textureLeafVtable[kLeaf2D].load(std::memory_order_relaxed),
+        " obj2d=", (uintptr_t)g_textureLeafObject[kLeaf2D].load(std::memory_order_relaxed)));
+  }
   MTLD3D9CommonTexture *common = commonTextureFromBound(pTexture);
   if (common) {
     // Cross-device check matches Set(RT|DepthStencilSurface). Same
@@ -6927,6 +7018,14 @@ MTLD3D9Device::SetTexture(DWORD Stage, IDirect3DBaseTexture9 *pTexture) {
     // create allocates). Neither wined3d nor DXVK rejects it at the d3d9
     // layer, and the conformance suite expects D3D_OK, so dxmt does not
     // invent a stricter gate here.
+  }
+  if (common) {
+    static unsigned settex_logged = 0;
+    if (settex_logged++ < 8)
+      Logger::warn(str::format(
+          "[d9-locked-flush] matched ptr=", (uintptr_t)pTexture, " owner=", (uintptr_t)common->deviceRaw(),
+          " this=", (uintptr_t)this, " type=", common->commonTextureType()));
+    common->flushLockedLevels();
   }
   // Recording arm AFTER the validation gates above (DXVK validates
   // then records). The Com<,false> assignment pins the target exactly
@@ -8833,8 +8932,11 @@ MTLD3D9Device::PackDrawConstants(
   // 256 and the hot path is unchanged.
   const uint32_t vs_file_size =
       pod.vs_const_F_overflow ? (D3D9_MAX_VS_CONST_F + pod.vs_const_F_overflow_count) : D3D9_MAX_VS_CONST_F;
-  uint32_t vs_f_regs = resolve_const_f_extent(pod.vs_const_f_max, vs_uses_relative, vs_file_size);
-  uint32_t ps_f_regs = resolve_const_f_extent(pod.ps_const_f_max, ps_uses_relative, D3D9_MAX_PS_CONST_F);
+  // Madeira-15.6 (iediot 2ef9f07): cover every register the shader reads.
+  const uint32_t vs_meta_max = (!ffp_vs && vs) ? vs->metadata().max_float_const_index : 0u;
+  const uint32_t ps_meta_max = ps ? ps->metadata().max_float_const_index : 0u;
+  uint32_t vs_f_regs = resolve_const_f_extent(std::max<uint32_t>(pod.vs_const_f_max, vs_meta_max), vs_uses_relative, vs_file_size);
+  uint32_t ps_f_regs = resolve_const_f_extent(std::max<uint32_t>(pod.ps_const_f_max, ps_meta_max), ps_uses_relative, D3D9_MAX_PS_CONST_F);
   // A generated vertex shader reads the fixed-function uniforms block
   // through this slot; size it for the full layout contract (matrix,
   // fog, point-scale and lighting blocks) rather than the register
@@ -10610,11 +10712,11 @@ MTLD3D9Device::ResolveBatchedDrawForChunk(
   // same pod.
   static const char kFfpConstKey = 0;
   const void *vs_defs_key =
-      !ffp_vs ? (vs_uses_relative ? static_cast<const void *>(vs) : nullptr) : static_cast<const void *>(&kFfpConstKey);
+      !ffp_vs ? static_cast<const void *>(vs) : static_cast<const void *>(&kFfpConstKey);
   // The pixel side needs the same treatment now that sub-buffer[3]
   // carries the combiner constants for a generated PS.
   const void *ps_defs_key =
-      ps ? (ps_uses_relative ? static_cast<const void *>(ps) : nullptr) : static_cast<const void *>(&kFfpConstKey);
+      ps ? static_cast<const void *>(ps) : static_cast<const void *>(&kFfpConstKey);
 
   // Reuse prior draw's uploads if pod_snapshot pointer equals (implies byte-equality)
   // and the def-stamping shaders match. VS/PS constants, clip planes
@@ -10757,6 +10859,9 @@ MTLD3D9Device::FlushDrawBatch() {
           // reset was missing.
           res = D9ResolvedDraw{};
           if (!this->ResolveBatchedDrawForChunk(bd, res, chunk_seq, chunk_coherent_id, const_cache, resolve_cache)) {
+            static unsigned madeira_skip_resolve;
+            if (madeira_skip_resolve++ < 32)
+              Logger::warn(str::format("[d9-skip] resolve-failed n=", madeira_skip_resolve));
             continue;
           }
         }
@@ -10791,6 +10896,9 @@ MTLD3D9Device::FlushDrawBatch() {
           }
           res.resolved_pso = res.resolved_pso_task->state().handle;
           if (res.resolved_pso == 0) {
+            static unsigned madeira_skip_pso;
+            if (madeira_skip_pso++ < 32)
+              Logger::warn(str::format("[d9-skip] pso-link-failed n=", madeira_skip_pso));
             continue; // link failed: skip
           }
         }
@@ -11013,7 +11121,7 @@ MTLD3D9Device::fanListIBForPrimCount(uint32_t prim_count) {
     return 0;
   if (m_fanListIB == nullptr) {
     const size_t bytes = static_cast<size_t>(kFanListPrimCap) * 3 * sizeof(uint32_t);
-    void *backing = guest_alloc(bytes, DXMT_PAGE_SIZE);
+    void *backing = guest_alloc(bytes, guest_page_size());
     if (!backing)
       return 0;
     auto *idx = static_cast<uint32_t *>(backing);
@@ -12518,6 +12626,9 @@ MTLD3D9Device::PresentEx(
     const RECT *pSourceRect, const RECT *pDestRect, HWND hDestWindowOverride, const RGNDATA *pDirtyRegion, DWORD dwFlags
 ) {
   D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_PresentEx);
+  { static unsigned madeira_presentex_dev; unsigned n = madeira_presentex_dev++;
+    if (n < 3 || (n % 300) == 0)
+      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }
   D9DeviceLock lock = LockDevice();
   // An Ex present on an unfocused fullscreen chain reports occlusion
   // without presenting (wine d3d9 device.c returns it off the device

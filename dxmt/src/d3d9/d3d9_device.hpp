@@ -577,15 +577,32 @@ public:
   // Create*<DEFAULT-pool> and the matching leaf dtor. The implicit RT0 and
   // auto-DS skip this create-time count, but still gate Reset via the separate
   // m_isImplicitLosable path while the app holds a public ref (markImplicitLosable).
+  const char *madeira_last_kind = "?";
+  void madeiraLosableKind(const char *k) { madeira_last_kind = k; }
   void
   onLosableResourceCreated(int64_t bytes = 0) {
     m_losableResourceCount.fetch_add(1, std::memory_order_relaxed);
+    {
+      static unsigned madeira_los_logs;
+      uint32_t now = m_losableResourceCount.load(std::memory_order_relaxed);
+      if (madeira_los_logs++ < 200)
+        Logger::warn(str::format("[d9-los]+ bytes=", (long long)bytes,
+            " live=", now, " kind=", madeira_last_kind));
+      madeira_last_kind = "?";
+    }
     if (bytes)
       m_reportedTextureMemory.fetch_add(bytes, std::memory_order_relaxed);
   }
   void
   onLosableResourceDestroyed(int64_t bytes = 0) {
     m_losableResourceCount.fetch_sub(1, std::memory_order_relaxed);
+    {
+      static unsigned madeira_los_dlogs;
+      uint32_t now = m_losableResourceCount.load(std::memory_order_relaxed);
+      if (madeira_los_dlogs++ < 200)
+        Logger::warn(str::format("[d9-los]- bytes=", (long long)bytes,
+            " live=", now));
+    }
     if (bytes)
       m_reportedTextureMemory.fetch_sub(bytes, std::memory_order_relaxed);
   }

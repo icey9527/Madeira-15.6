@@ -25,6 +25,7 @@ MTLD3D9StateBlock::~MTLD3D9StateBlock() = default;
 void
 MTLD3D9StateBlock::markLosable() {
   if (!m_isLosable) {
+    m_device->madeiraLosableKind("state");
     m_isLosable = true;
     m_device->onLosableResourceCreated();
   }

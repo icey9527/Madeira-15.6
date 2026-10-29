@@ -9,7 +9,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdint>
-#include <format>
+#include <fmt/format.h>
 #include <utility>
 
 namespace dxmt::dxbc {
@@ -453,7 +453,7 @@ convert_dxbc_geometry_shader(
       break;
     }
     default:
-      return llvm::make_error<UnsupportedFeature>(std::format(
+      return llvm::make_error<UnsupportedFeature>(fmt::format(
           "unhandled geometry shader input primitive strip: {}", (uint32_t)pShaderInternal->gs_input_primitive
       ));
     }
@@ -797,7 +797,7 @@ convert_dxbc_vertex_for_geometry_shader(
         break;
       }
       default:
-        return llvm::make_error<UnsupportedFeature>(std::format(
+        return llvm::make_error<UnsupportedFeature>(fmt::format(
             "unhandled geometry shader input primitive strip: {}", (uint32_t)pGeometryStage->gs_input_primitive
         ));
       }

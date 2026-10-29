@@ -10,6 +10,7 @@
 #include "dxmt_mem_census.hpp"
 #include "config/config.hpp"   /* ml754 */
 #include "util_madeira_switch.hpp"
+#include "../airconv/ios15_probe.hpp"
 #include <algorithm>
 #include <atomic>
 
@@ -271,7 +272,8 @@ ArgumentEncodingContext::encodeShaderResources(
       }
       encoded_buffer[arg.StructurePtrOffset] = sampler->sampler_state_handle;
       encoded_buffer[arg.StructurePtrOffset + 1] = sampler->sampler_state_cube_handle;
-      encoded_buffer[arg.StructurePtrOffset + 2] = (uint64_t)std::bit_cast<uint32_t>(sampler->lod_bias);
+      if (!dxmt::airconv_probe::drop_metadata())
+        encoded_buffer[arg.StructurePtrOffset + 2] = (uint64_t)std::bit_cast<uint32_t>(sampler->lod_bias);
       break;
     }
     case SM50BindingType::SRV: {
@@ -313,7 +315,8 @@ ArgumentEncodingContext::encodeShaderResources(
               lvl++;
             min_lod = float(lvl - view_base);
           }
-          encoded_buffer[arg.StructurePtrOffset + 1] = TextureMetadata(srv.texture->arrayLength(viewIdChecked), min_lod);
+          if (!dxmt::airconv_probe::drop_metadata())
+            encoded_buffer[arg.StructurePtrOffset + 1] = TextureMetadata(srv.texture->arrayLength(viewIdChecked), min_lod);
           makeResident<stage, kind>(srv.texture.ptr(), viewIdChecked);
         } else {
           encoded_buffer[arg.StructurePtrOffset] = 0;

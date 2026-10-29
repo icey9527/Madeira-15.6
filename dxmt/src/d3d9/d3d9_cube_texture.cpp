@@ -161,13 +161,15 @@ MTLD3D9CubeTexture::ensureMirror() {
   uint64_t mirror_gpu_addr = 0;
   void *mirror_host = nullptr;
   if (!m_device->acquireBufferBacking(total_bytes, m_mirrorBuffer, mirror_gpu_addr, mirror_host, m_mirrorBacking)) {
-    m_mirrorBacking = guest_alloc(total_bytes, DXMT_PAGE_SIZE);
+    const size_t page = guest_page_size();
+    const size_t mirror_alloc = (total_bytes + page - 1) & ~(page - 1);
+    m_mirrorBacking = guest_alloc(mirror_alloc, page);
     if (!m_mirrorBacking)
       return;
-    std::memset(m_mirrorBacking, 0, total_bytes);
+    std::memset(m_mirrorBacking, 0, mirror_alloc);
 
     WMTBufferInfo binfo{};
-    binfo.length = total_bytes;
+    binfo.length = mirror_alloc;
     binfo.options = (WMTResourceOptions)(WMTResourceCPUCacheModeDefaultCache | WMTResourceStorageModeShared);
     binfo.memory.set(m_mirrorBacking);
     m_mirrorBuffer = m_device->metalDevice().newBuffer(binfo);
@@ -291,6 +293,7 @@ MTLD3D9CubeTexture::restoreMirrorForSource() {
 void
 MTLD3D9CubeTexture::markLosable() {
   if (!m_isLosable) {
+    m_device->madeiraLosableKind("cube");
     m_isLosable = true;
     // Six faces of level-0 bytes; see MTLD3D9Texture::markLosable.
     m_losableBytes = 6 * static_cast<int64_t>(D3DFormatLockPitch(m_format, m_edge_length)) *

@@ -82,6 +82,10 @@ public:
   }
   virtual void
   sweepManagedUpload() {}
+  // A texture still locked at draw time: SetTexture pushes its current
+  // bytes because the app may never call UnlockRect (SDL2/Ponscripter).
+  virtual void
+  flushLockedLevels() {}
   virtual void
   evictManagedMirror() {}
 

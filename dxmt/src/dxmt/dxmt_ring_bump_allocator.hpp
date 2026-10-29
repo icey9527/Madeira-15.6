@@ -6,6 +6,7 @@
 #include "util_math.hpp"
 #include "util_madeira_switch.hpp"
 #include <cassert>
+#include <cstdio>
 #include <mutex>
 #include <queue>
 #include "dxmt_mem_census.hpp"
@@ -220,12 +221,16 @@ public:
        * is exactly the wrong order, so release it explicitly first. */
       buffer = nullptr;
       if (mapped_address) {
-        free(mapped_address);
+        /* Madeira-15.6: a fallback block maps Metal-owned storage, so only
+         * our own malloc may go back. */
+        if (owns_mapped)
+          free(mapped_address);
         mapped_address = nullptr;
       }
     };
     uint64_t census_bytes = 0;                             /* ml677 */
     MemOwner census_owner = MEMOWN_STAGING_RING;           /* ml1243 */
+    bool owns_mapped = true;                               /* Madeira-15.6 */
 
     Block() = default;
 
@@ -236,6 +241,7 @@ public:
       mapped_address = move.mapped_address;
       census_bytes = move.census_bytes;                    /* ml677: move the debt too */
       census_owner = move.census_owner;
+      owns_mapped = move.owns_mapped;
       move.census_bytes = 0;
       move.mapped_address = nullptr;
     };
@@ -274,6 +280,21 @@ public:
     info.length = block_size;
     block.buffer = device_.newBuffer(info);
     block.gpu_address = info.gpu_address;
+    if (!block.buffer && block.mapped_address) {
+      /* Madeira-15.6: the no-copy mapping was refused. Let Metal own the
+       * storage and take ITS mapping as the CPU view, so the ring still
+       * writes where the GPU reads. */
+      fprintf(stderr, "[d11-ring] no-copy refused (%llu bytes); using a Metal-owned buffer%c",
+              (unsigned long long)block_size, 10);
+      free(block.mapped_address);
+      WMTBufferInfo again{};
+      again.options = buffer_info_;
+      again.length = block_size;
+      block.buffer = device_.newBuffer(again);
+      block.mapped_address = again.memory.ptr;
+      block.gpu_address = again.gpu_address;
+      block.owns_mapped = false;
+    }
     block.census_bytes = block_size;                       /* ml677 */
     block.census_owner = census_owner_;
     mem_census_add(census_owner_, block_size);

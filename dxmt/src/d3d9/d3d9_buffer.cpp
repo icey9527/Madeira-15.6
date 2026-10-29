@@ -148,6 +148,7 @@ MTLD3D9VertexBuffer::refreshWholeMirror() {
 void
 MTLD3D9VertexBuffer::markLosable() {
   if (!m_isLosable) {
+    m_device->madeiraLosableKind("vb");
     m_isLosable = true;
     m_device->onLosableResourceCreated(m_size);
   }
@@ -405,6 +406,7 @@ MTLD3D9IndexBuffer::refreshWholeMirror() {
 void
 MTLD3D9IndexBuffer::markLosable() {
   if (!m_isLosable) {
+    m_device->madeiraLosableKind("ib");
     m_isLosable = true;
     m_device->onLosableResourceCreated(m_size);
   }

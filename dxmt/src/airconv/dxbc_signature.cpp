@@ -1,5 +1,5 @@
 #include "dxbc_converter.hpp"
-#include <format>
+#include <fmt/format.h>
 
 using namespace microsoft;
 using namespace dxmt::air;
@@ -156,7 +156,7 @@ void handle_signature_vs(
         }
       }
       uint32_t assigned_index = func_signature.DefineOutput(OutputVertex{
-        .user = std::format("SV_ClipDistance{}", reg),
+        .user = fmt::format("SV_ClipDistance{}", reg),
         .type = msl_float4,
       });
       signature_handlers.push_back([=](SignatureContext &ctx) {
@@ -343,7 +343,7 @@ void handle_signature_ps(
       break;
     case D3D10_SB_NAME_CLIP_DISTANCE:
       assigned_index = func_signature.DefineInput(InputFragmentStageIn{
-        .user = std::format("SV_ClipDistance{}", reg),
+        .user = fmt::format("SV_ClipDistance{}", reg),
         .type = msl_float4,
         .interpolation = interpolation,
         .pull_mode = false
