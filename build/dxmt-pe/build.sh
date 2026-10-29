@@ -53,7 +53,12 @@ python3 "$R/build/dxmt-pe/prepare-meson.py" "$R/dxmt"
 
 if [ ! -f "$W/config.status" ]; then
     mkdir -p "$W"
-    (cd "$W" && ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer)
+    # Native CC must be Apple clang: this llvm-mingw toolchain also installs a
+    # plain `gcc`, and it sits first on PATH, so configure picked the Windows
+    # cross driver for its own host tests and died with "cannot run C compiled
+    # programs" the first time the wine build cache missed (2026-10-29).
+    # CROSSCC names the arm64ec driver for the cross archs wine builds alongside.
+    (cd "$W" && CC=/usr/bin/clang CXX=/usr/bin/clang++ CROSSCC=arm64ec-w64-mingw32-gcc ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer)
 fi
 make -C "$W" -j"$JOBS" \
     libs/winecrt0/arm64ec-windows/libwinecrt0.a \

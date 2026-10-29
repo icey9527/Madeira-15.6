@@ -58,7 +58,12 @@ for m in "$@"; do
 done
 
 if [ ! -f "$B/config.status" ]; then
-    mkdir -p "$B" && (cd "$B" && ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer)
+    # Native CC must be Apple clang: this llvm-mingw toolchain also installs a
+    # plain `gcc`, and it sits first on PATH, so configure picked the Windows
+    # cross driver for its own host tests and died with "cannot run C compiled
+    # programs" the first time the wine build cache missed (2026-10-29).
+    # CROSSCC names the arm64ec driver for the cross archs wine builds alongside.
+    mkdir -p "$B" && (cd "$B" && CC=/usr/bin/clang CXX=/usr/bin/clang++ CROSSCC=arm64ec-w64-mingw32-gcc ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer)
 fi
 # widl looks for stdole2.tlb under aarch64-windows/ when it builds an ARM64EC
 # typelib import (shell32 and others); this tree builds it into arm64ec-windows/.
