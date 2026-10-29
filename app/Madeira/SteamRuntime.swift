@@ -26,15 +26,6 @@ enum SteamRuntimeFiles {
                 sha256: "345f6e4bdc19b27ae53bf752c21e2d894e0e899d94823222fb426e890d1226b5"),
         Package(file: "steam_win32.zip.3e96965d109fc2d4cc14206b2fc4ec960a746ed3", bytes: 2_307_664,
                 sha256: "1369615c795b60de822876b4dc4042186cf58d0dc8f63ea1371167f667e16925"),
-        // The codecs package carries the FFmpeg runtime Steam's video64.dll
-        // imports (libavcodec-62, libavformat-62, libavfilter-11, libavutil-60,
-        // libswresample-6, libswscale-9, plus aom/dav1d/libavif). It is a separate
-        // package in Steam's own client manifest (steam_client_win32), and the
-        // whole set used to be missing here: games that load video64 died at
-        // startup with "import_dll Library libavcodec-62.dll ... not found"
-        // (NOeSIS01, amehazu, SunriderMask of Arcadius, 2026-10-29).
-        Package(file: "bins_codecs_win32.zip.6b4ae7fefdf9cd893140df9dc4026fbb644a3bf2", bytes: 11_208_316,
-                sha256: "f2e264360d8463b238d5398796d8ad8c757a2d44f10101a8dacec856b31efa5c")
     ]
     static let clientSHA256 = "71b391fe9f3e2006cbc81a5c75eef3eb4186012deabfdb2c8b7e8d4850ecf640"
     static let relativeRoot = "Program Files (x86)/Steam"
