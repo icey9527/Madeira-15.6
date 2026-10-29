@@ -1365,6 +1365,10 @@ diag_files = (
          '  struct unixcall_generic_obj_obj_ret *params = obj;\n'
          '  if (!atomic_load_explicit(&madeira_app_active, memory_order_relaxed)) {\n'
          '    params->ret = 0;   /* backgrounded: skip this frame, touch no drawable */\n'
+         '    { static unsigned madeira_paused;\n'
+         '      if (madeira_paused++ < 8 || (madeira_paused % 256) == 0)\n'
+         '        dprintf(STDERR_FILENO, "[present-pause] backgrounded, frame skipped (n=%u)%c",\n'
+         '                madeira_paused, 10); }\n'
          '    return STATUS_SUCCESS;\n'
          '  }\n'),
     ), ('madeira_set_app_active')),
