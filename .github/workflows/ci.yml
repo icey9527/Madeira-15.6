@@ -715,6 +715,14 @@ jobs:
         if: ${{ !cancelled() && env.APP_ONLY != '1' }}
         run: bash build/madeira-dock/build.sh > >(tee ci-logs/dockhost.log) 2>&1
 
+      # A game that imports a Wine builtin the farm lacks cannot start at all:
+      # amehazu.exe imports dxva2.dll ("import_dll Library dxva2.dll ... not
+      # found", 2026-10-29). Wine's dxva2 is a small builtin; build it into the
+      # farm here. Add names to this list when another game names one.
+      - name: Wine builtins the farm needs（dxva2）
+        if: ${{ !cancelled() && env.APP_ONLY != '1' }}
+        run: bash build/wine-pe/build-modules.sh dxva2 > >(tee ci-logs/wine-modules.log) 2>&1
+
       - name: app（xcodebuild 编译冒烟）
         id: app
         env:
