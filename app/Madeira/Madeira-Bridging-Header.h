@@ -22,6 +22,9 @@ void wine_set_ui_log_callback(wine_ui_log_callback_t cb);
 // DXMT present counter (winemetal_unix.c) — for SwiftUI FPS overlay
 #include <stdint.h>
 uint64_t madeira_get_present_count(void);
+/* 0 while the app is backgrounded: DXMT then hands the presenter no drawable,
+ * so nothing is presented into a drawable iOS has invalidated. */
+void madeira_set_app_active(int active);
 // ml1174: GPU busy time for the performance overlay (winemetal_unix.c). While
 // enabled, each committed command buffer adds its GPU time (union) on completion.
 void madeira_gpu_meter_enable(int on);

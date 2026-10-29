@@ -1343,6 +1343,31 @@ diag_files = (
          '    if (n < 3 || (n % 300) == 0)\n'
          '      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }\n'),
     ), ('d9-present] dev Present')),
+    # Backgrounding invalidates the layer's drawables, and the presenter kept
+    # presenting into them: TheShell 2026-10-29 logged 45 "Invalid Resource"
+    # command-buffer failures between "resigned active" and "became active", and
+    # the picture stayed frozen after coming back. Returning nil here is the same
+    # frame-skip the RAW mode below already uses (no drawable touched, the PE side
+    # skips the blit), so nothing is presented into an invalid drawable while the
+    # app is not active; the app flips the flag from its lifecycle notifications.
+    ('winemetal/unix/winemetal_unix.c', (
+        ('static NTSTATUS\n_MetalLayer_nextDrawable(void *obj) {\n'
+         '  struct unixcall_generic_obj_obj_ret *params = obj;\n',
+         '/* Madeira-15.6: set from the app (madeira_set_app_active). */\n'
+         'static _Atomic int madeira_app_active = 1;\n'
+         'void madeira_set_app_active(int active)\n'
+         '{\n'
+         '  atomic_store_explicit(&madeira_app_active, active ? 1 : 0, memory_order_relaxed);\n'
+         '}\n'
+         '\n'
+         'static NTSTATUS\n'
+         '_MetalLayer_nextDrawable(void *obj) {\n'
+         '  struct unixcall_generic_obj_obj_ret *params = obj;\n'
+         '  if (!atomic_load_explicit(&madeira_app_active, memory_order_relaxed)) {\n'
+         '    params->ret = 0;   /* backgrounded: skip this frame, touch no drawable */\n'
+         '    return STATUS_SUCCESS;\n'
+         '  }\n'),
+    ), ('madeira_set_app_active')),
     # The two silent ways a draw disappears: the batched-draw resolver rejects it,
     # or its pipeline object never linked. BaldrSky's title screen is a white
     # background with black text on a PC, and the game issues no white clear at

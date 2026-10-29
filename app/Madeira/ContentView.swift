@@ -1426,11 +1426,17 @@ struct ContentView: View {
                 // the cursor still moves" (2026-10-28): the guest stops presenting
                 // while the app itself is fine. Mark the edge, so the session log
                 // shows exactly where the freeze starts.
+                // DXMT hands the presenter no drawable while this is 0: iOS
+                // invalidates the layer's drawables on suspension, and presenting
+                // into them failed every command buffer (TheShell 2026-10-29:
+                // 45 Invalid Resource errors while backgrounded, frozen after).
+                madeira_set_app_active(0)
                 if library.current != nil {
                     fputs("[lifecycle] session resigned active (backgrounded)\n", stderr)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                madeira_set_app_active(1)
                 madeira_startup_log("startup-v2: lifecycle active begin")
                 library.refreshFlag()
                 if library.enabled && library.current == nil { MetalHostView.shared.isHidden = true }
