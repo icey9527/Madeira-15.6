@@ -131,6 +131,7 @@ struct MadeiraDockView: View {
     @ObservedObject private var signIn = SteamSignInModel.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showSignIn = false
+    @State private var cdnHost = MadeiraConfig.get("steam-cdn") ?? ""
     let start: (DockGame, Bool) -> Void
 
     var body: some View {
@@ -165,6 +166,25 @@ struct MadeiraDockView: View {
                     }
                 } header: { Text("Steam 客户端") } footer: {
                     Text("文件从 Valve 更新服务器下载，并通过固定的 SHA-256 校验值验证。现有 Steam 文件会保留。")
+                }
+                Section {
+                    TextField("自动（每次探测可用主机）", text: $cdnHost)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button("保存线路") {
+                        let value = cdnHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                        MadeiraConfig.set("steam-cdn", value.isEmpty ? nil : value)
+                        cdnHost = MadeiraConfig.get("steam-cdn") ?? ""
+                    }
+                    if !(MadeiraConfig.get("steam-cdn") ?? "").isEmpty {
+                        Button("恢复自动") {
+                            MadeiraConfig.set("steam-cdn", nil)
+                            cdnHost = ""
+                        }
+                    }
+                } header: { Text("下载线路") } footer: {
+                    Text("留空表示自动：下载前探测可用主机，并把真正能用的那台记住，以后的下载直接走它。下载一直「等待」时可以在这里填一台固定线路，例如 https://steampipe.akamaized.net。")
                 }
                 Section {
                     if dock.games.isEmpty {

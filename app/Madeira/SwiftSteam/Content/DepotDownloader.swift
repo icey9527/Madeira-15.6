@@ -702,6 +702,7 @@ final class DepotDownloader {
             do {
                 let raw = try await Self.download("\(host)/depot/\(depotID)/manifest/\(manifestGID)/5\(code)\(auth)")
                 SteamLog.trace("manifest from \(host)")
+                Self.rememberContentHost(host)
                 let cache = depotCache
                 return try await Task.detached(priority: .userInitiated) {
                     let (manifest, payload) = try Self.parseManifestKeepingPayload(raw, depotID: depotID, manifestGID: manifestGID, key: key)
@@ -932,6 +933,10 @@ final class DepotDownloader {
             // blocks every *.steamcontent.com host still reaches this one.
             if reachableCount == 0 { hosts.insert(fallback, at: 0) } else { hosts.append(fallback) }
         }
+        if let pinned = Self.pinnedContentHost() {
+            hosts.removeAll { $0 == pinned }
+            hosts.insert(pinned, at: 0)
+        }
         return hosts
     }
 
@@ -973,7 +978,28 @@ final class DepotDownloader {
         }
     }
 
-    nonisolated static func usableContentHost(_ host: String) -> Bool {        guard host.contains("."), !host.contains(" "), !host.contains("/"), !host.contains("*"),
+    /// The content server that actually worked last time, remembered in
+    /// madeira.cfg as `steam-cdn`.
+    ///
+    /// Probing 22 hosts and timing out on the blocked ones is what made every
+    /// download look like it had hung (2026-10-29: six hosts, 30 s each, then
+    /// url -1001). Once a host has answered, later installs go straight to it.
+    /// Set the key by hand to choose one, clear it to go back to probing.
+    nonisolated static func pinnedContentHost() -> String? {
+        guard let value = MadeiraConfig.get("steam-cdn")?.trimmingCharacters(in: .whitespaces),
+              value.hasPrefix("http"), URL(string: value) != nil else { return nil }
+        return value
+    }
+
+    nonisolated static func rememberContentHost(_ host: String) {
+        guard pinnedContentHost() != host else { return }
+        if MadeiraConfig.set("steam-cdn", host) {
+            SteamLog.event("[steam-cdn] pinned \(host) for future downloads")
+        }
+    }
+
+    nonisolated static func usableContentHost(_ host: String) -> Bool {
+        guard host.contains("."), !host.contains(" "), !host.contains("/"), !host.contains("*"),
               !host.contains("lancache"), !host.contains(":") else { return false }
         return host.hasSuffix(".steamcontent.com") || host.hasSuffix(".akamaized.net") ||
             host.hasSuffix(".steampipe.steamcontent.com") || host.hasSuffix(".steamstatic.com") ||
