@@ -1413,8 +1413,8 @@ diag_files = (
     # blend that keeps the destination, clipping off with a zero-area scissor).
     # Only the states that can do that are logged, only on change, first 600.
     ('d3d9/d3d9_device.cpp', (
-        ('MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {\n',
-         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);\n'
+        ('MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {\n'
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);\n',
          'MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {\n'
          '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);\n'
          '  if (State == D3DRS_ALPHATESTENABLE || State == D3DRS_ALPHABLENDENABLE ||\n'
@@ -1570,9 +1570,11 @@ diag_files = (
     ('dxmt/dxmt_command_queue.cpp', (
         ('#include "util_win32_compat.h"\n',
          '#include "util_win32_compat.h"\n'
-         'extern "C" int madeira_get_app_active(void);\n'),
+         'extern "C" int madeira_get_app_active(void) __attribute__((weak));\n'
+         '/* weak: the arm64ec PE build compiles this file too and has no\n'
+         ' * winemetal_unix.c, so the symbol is absent there. */\n'),
         ('  auto cmdbuf = commandQueue.commandBuffer();\n',
-         '  if (!madeira_get_app_active()) {\n'
+         '  if (madeira_get_app_active && !madeira_get_app_active()) {\n'
          '    static unsigned madeira_bg_dropped;\n'
          '    if (madeira_bg_dropped++ < 8 || (madeira_bg_dropped % 256) == 0)\n'
          '      WARN("[bg-commit] dropped frame=", chunk.frame_, " n=", madeira_bg_dropped);\n'
