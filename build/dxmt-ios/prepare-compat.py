@@ -1570,11 +1570,13 @@ diag_files = (
     ('dxmt/dxmt_command_queue.cpp', (
         ('#include "util_win32_compat.h"\n',
          '#include "util_win32_compat.h"\n'
-         'extern "C" int madeira_get_app_active(void) __attribute__((weak));\n'
-         '/* weak: the arm64ec PE build compiles this file too and has no\n'
-         ' * winemetal_unix.c, so the symbol is absent there. */\n'),
+         '/* The arm64ec PE build compiles this file too and has no\n'
+         ' * winemetal_unix.c. A weak DEFINITION keeps that link happy (an EC\n'
+         ' * undefined function becomes a .refptr that cannot stay unresolved);\n'
+         ' * the unix build\'s strong one in winemetal_unix.c wins. */\n'
+         'extern "C" __attribute__((weak)) int madeira_get_app_active(void) { return 1; }\n'),
         ('  auto cmdbuf = commandQueue.commandBuffer();\n',
-         '  if (madeira_get_app_active && !madeira_get_app_active()) {\n'
+         '  if (!madeira_get_app_active()) {\n'
          '    static unsigned madeira_bg_dropped;\n'
          '    if (madeira_bg_dropped++ < 8 || (madeira_bg_dropped % 256) == 0)\n'
          '      WARN("[bg-commit] dropped frame=", chunk.frame_, " n=", madeira_bg_dropped);\n'
