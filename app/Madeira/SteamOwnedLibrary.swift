@@ -506,11 +506,25 @@ final class SteamOwnedLibrary: ObservableObject {
     private func auditCloudSaves() async {
         guard !cloudAudited, !inSession, Self.cloudEnabled else { return }
         cloudAudited = true
-        let games = SteamGamesModel.shared.games.filter(\.installed).prefix(40)
+        let games = Array(SteamGamesModel.shared.games.filter(\.installed).prefix(40))
         SteamLog.event("[steam-cloud] sync games=\(games.count) automatic=\(Self.cloudAutomatic ? 1 : 0)")
-        for game in games {
-            guard !inSession else { break }
-            await syncCloud(game.id)
+        // Each game is several round trips (app info, the cloud listing, then the
+        // files), and running them one after another spent the first half minute
+        // of every launch on it (2026-10-29: five games, 12:50:58 -> 12:51:17).
+        // Three at a time keeps the request rate modest and still cuts the wait.
+        await withTaskGroup(of: Void.self) { group in
+            var index = 0
+            let limit = 3
+            func addNext() {
+                guard index < games.count else { return }
+                let id = games[index].id
+                index += 1
+                group.addTask { await self.syncCloud(id) }
+            }
+            for _ in 0..<limit { addNext() }
+            while await group.next() != nil {
+                if !inSession { addNext() }
+            }
         }
     }
 
