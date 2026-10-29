@@ -34,7 +34,10 @@ on:
           - macos-26
 
 concurrency:
-  group: port-ci-${{ github.ref }}
+  # dev 上只有带 [build] 的提交才真的构建（见下方 jobs.build.if）。被跳过的
+  # 那些推送会立刻结束，但如果和正在跑的构建同一个 concurrency group，
+  # cancel-in-progress 会把真正在跑的那次干掉 —— 所以它们单独成组。
+  group: port-ci-${{ github.ref }}${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && !contains(github.event.head_commit.message || '', '[build]') && '-skipped' || '' }}
   cancel-in-progress: true
 
 # nightly 预发布需要用默认 GITHUB_TOKEN 创建/删除 Release
@@ -53,6 +56,12 @@ env:
 jobs:
   build:
     name: Build smoke (Debug, unsigned)
+    # dev 是日常开发分支：只有提交信息里带 [build] 才出包，其余推送直接跳过，
+    # 省下每次 20 多分钟的构建。port/ios15.6 仍然每次都构建。
+    if: >-
+      github.event_name != 'push'
+      || github.ref != 'refs/heads/dev'
+      || contains(github.event.head_commit.message || '', '[build]')
     runs-on: ${{ inputs.runner || 'macos-26' }}
     timeout-minutes: 240
     defaults:
