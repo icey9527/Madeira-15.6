@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include "log/log.hpp"
 
 #include "d3d9_census.hpp"
@@ -269,6 +271,19 @@ MTLD3D9Texture::ensureMirror() {
     const size_t page = guest_page_size();
     const size_t mirror_alloc = (total_bytes + page - 1) & ~(page - 1);
     m_mirrorBacking = guest_alloc(mirror_alloc, page);
+    if (!m_mirrorBacking) {
+      /* The arena only grows when a *shim* call returns and finds the
+       * starvation flag guest_alloc just set, and this texture is being created
+       * inside exactly such a call -- so a failed allocation cannot fix itself
+       * from here. Yield instead: the render thread keeps calling the shim, the
+       * next return grows the arena, and the retry lands. Worth the 200 ms:
+       * Baldr Sky 2026-10-29 lost four mirrors (352 KB - 5.6 MB) this way and
+       * the white text background it draws additively never appeared. */
+      for (int attempt = 0; attempt < 40 && !m_mirrorBacking; attempt++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        m_mirrorBacking = guest_alloc(mirror_alloc, page);
+      }
+    }
     if (!m_mirrorBacking) {
       Logger::warn(str::format("[d9-mirror] guest_alloc failed bytes=", mirror_alloc));
       return;
