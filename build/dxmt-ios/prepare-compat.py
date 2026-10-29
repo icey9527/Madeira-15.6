@@ -1343,6 +1343,34 @@ diag_files = (
          '    if (n < 3 || (n % 300) == 0)\n'
          '      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }\n'),
     ), ('d9-present] dev Present')),
+    # The two silent ways a draw disappears: the batched-draw resolver rejects it,
+    # or its pipeline object never linked. BaldrSky's title screen is a white
+    # background with black text on a PC, and the game issues no white clear at
+    # all (64 sampled clears: one opaque black, 63 pure black), so the white must
+    # be geometry -- and a silently skipped draw is exactly how a background
+    # layer goes missing while the text above it still renders.
+    ('d3d9/d3d9_device.cpp', (
+        ('          if (!this->ResolveBatchedDrawForChunk(bd, res, chunk_seq, chunk_coherent_id, const_cache, resolve_cache)) {\n'
+         '            continue;\n'
+         '          }\n',
+         '          if (!this->ResolveBatchedDrawForChunk(bd, res, chunk_seq, chunk_coherent_id, const_cache, resolve_cache)) {\n'
+         '            static unsigned madeira_skip_resolve;\n'
+         '            if (madeira_skip_resolve++ < 32)\n'
+         '              Logger::warn(str::format("[d9-skip] resolve-failed n=", madeira_skip_resolve));\n'
+         '            continue;\n'
+         '          }\n'),
+        ('          res.resolved_pso = res.resolved_pso_task->state().handle;\n'
+         '          if (res.resolved_pso == 0) {\n'
+         '            continue; // link failed: skip\n'
+         '          }\n',
+         '          res.resolved_pso = res.resolved_pso_task->state().handle;\n'
+         '          if (res.resolved_pso == 0) {\n'
+         '            static unsigned madeira_skip_pso;\n'
+         '            if (madeira_skip_pso++ < 32)\n'
+         '              Logger::warn(str::format("[d9-skip] pso-link-failed n=", madeira_skip_pso));\n'
+         '            continue; // link failed: skip\n'
+         '          }\n'),
+    ), ('d9-skip]')),
     # Which clears the game actually asks for, and with what colour. BaldrSky's
     # title is a white screen with black text on a PC; here the previous scene
     # shows through. The mismatched-size drop was NOT it ([d9-clear] never fired),
