@@ -262,6 +262,16 @@ struct SteamAppInfo {
         return parse(appID: appID, from: vdf)
     }
 
+    /// PICS' own language key for the app's current language.
+    static var localizedNameKey: String {
+        let code = (Locale.preferredLanguages.first ?? "en").lowercased()
+        if code.hasPrefix("zh-hant") || code.hasPrefix("zh-tw") || code.hasPrefix("zh-hk") { return "tchinese" }
+        if code.hasPrefix("zh") { return "schinese" }
+        if code.hasPrefix("ja") { return "japanese" }
+        if code.hasPrefix("ko") { return "korean" }
+        return "english"
+    }
+
     /// Parse app info from a VDF dictionary
     static func parse(appID: UInt32, from vdf: [String: Any]) -> SteamAppInfo? {
         var info = SteamAppInfo(appID: appID)
@@ -278,7 +288,18 @@ struct SteamAppInfo {
 
         // Common section
         if let common = appInfo["common"] as? [String: Any] {
-            info.name = common["name"] as? String ?? ""
+            // Steam sends the title in every language it has under
+            // name_localized; prefer the app's own language, else English, else
+            // the plain name (an app with no localized entry at all).
+            let englishName = common["name"] as? String ?? ""
+            if let localized = common["name_localized"] as? [String: Any],
+               let value = (localized[SteamAppInfo.localizedNameKey] as? String)
+                   ?? (localized["english"] as? String),
+               !value.isEmpty {
+                info.name = value
+            } else {
+                info.name = englishName
+            }
             info.type = AppType(pics: common["type"] as? String ?? "")
             info.oslist = common["oslist"] as? String ?? ""
             info.freeToDownload = (common["freetodownload"] as? String) == "1"
