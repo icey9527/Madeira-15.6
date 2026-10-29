@@ -1343,6 +1343,28 @@ diag_files = (
          '    if (n < 3 || (n % 300) == 0)\n'
          '      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }\n'),
     ), ('d9-present] dev Present')),
+    # Which clears the game actually asks for, and with what colour. BaldrSky's
+    # title is a white screen with black text on a PC; here the previous scene
+    # shows through. The mismatched-size drop was NOT it ([d9-clear] never fired),
+    # so the question is whether a white clear is issued at all: no clear means
+    # the white is a drawn quad and something else eats it; a clear that is
+    # issued but never reaches the GPU points at the encoder/merge path.
+    ('d3d9/d3d9_device.cpp', (
+        ('  MTLD3D9Surface *ds = m_depthStencilSurface.ptr();\n'
+         '  // No DS bound + Z/Stencil flag -> INVALIDCALL (DXVK).\n',
+         '  { static unsigned madeira_clear_logged;\n'
+         '    if (madeira_clear_logged < 64)\n'
+         '    {\n'
+         '      MTLD3D9Surface *rt0_log = m_renderTargets[0].ptr();\n'
+         '      madeira_clear_logged++;\n'
+         '      Logger::warn(str::format("[d9-clear] flags=", Flags, " color=", (uint32_t)Color,\n'
+         '          " rects=", Count, " rt0=", rt0_log ? rt0_log->desc().Width : 0, "x",\n'
+         '          rt0_log ? rt0_log->desc().Height : 0, " vp=", m_viewport.Width, "x", m_viewport.Height));\n'
+         '    }\n'
+         '  }\n'
+         '  MTLD3D9Surface *ds = m_depthStencilSurface.ptr();\n'
+         '  // No DS bound + Z/Stencil flag -> INVALIDCALL (DXVK).\n'),
+    ), ('d9-clear] flags=')),
     # wined3d drops a combined TARGET+Z/STENCIL clear when the bound DS is
     # smaller than RT0. Native D3D9 does not: each attachment is cleared at its
     # own size, which the code below already does. BaldrSky's title screen came
