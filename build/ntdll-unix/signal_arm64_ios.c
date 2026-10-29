@@ -7783,11 +7783,30 @@ static int ios_mach_deliver_guest_exception_inner( thread_t thread, arm_thread_s
                  * twin means the number itself was computed -- or read from a
                  * field -- as a small integer. Capped so a loop cannot flood the
                  * log. */
-                if (have_regs && fault_addr < 0x100000)
+                if (fault_addr < 0x100000)
                 {
                     static unsigned madeira_small_n;
                     if (madeira_small_n++ < 8)
                     {
+                        /* The guest copy of the registers lives in the CHPE CPU
+                         * area, which is not published on every thread (regs=0
+                         * above is why the first version of this probe stayed
+                         * silent). The HOST registers always are, and for an
+                         * ARM64EC block they are the ones the faulting store
+                         * used: `str w21,[x19,#4]` keeps its base in host x19. */
+                        {
+                            int hi;
+                            dprintf( 2, "[small-addr] host x0..x12:" );
+                            for (hi = 0; hi <= 12; hi++)
+                                dprintf( 2, " %llx", (unsigned long long)mc.__ss.__x[hi] );
+                            dprintf( 2, "\n[small-addr] host x13..x28:" );
+                            for (hi = 13; hi <= 28; hi++)
+                                dprintf( 2, " %llx", (unsigned long long)mc.__ss.__x[hi] );
+                            dprintf( 2, "\n[small-addr] host fp=%llx lr=%llx sp=%llx pc=%llx caller=%llx\n",
+                                     (unsigned long long)mc.__ss.__fp, (unsigned long long)mc.__ss.__lr,
+                                     (unsigned long long)mc.__ss.__sp, (unsigned long long)mc.__ss.__pc,
+                                     (unsigned long long)__builtin_return_address(0) );
+                        }
                         TEB *t2 = NtCurrentTeb();
                         CHPE_V2_CPU_AREA_INFO *ca2 = t2 ? t2->ChpeV2CpuAreaInfo : NULL;
                         void *fx2 = ca2 ? *(void **)((char *)ca2 + 0x30) : NULL;
