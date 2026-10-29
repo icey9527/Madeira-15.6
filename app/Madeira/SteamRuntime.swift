@@ -25,10 +25,32 @@ enum SteamRuntimeFiles {
         Package(file: "bins_win64_win32.zip.f29d67dc38a4be027f1734802697c668621a6da1", bytes: 10_509_550,
                 sha256: "345f6e4bdc19b27ae53bf752c21e2d894e0e899d94823222fb426e890d1226b5"),
         Package(file: "steam_win32.zip.3e96965d109fc2d4cc14206b2fc4ec960a746ed3", bytes: 2_307_664,
-                sha256: "1369615c795b60de822876b4dc4042186cf58d0dc8f63ea1371167f667e16925")
+                sha256: "1369615c795b60de822876b4dc4042186cf58d0dc8f63ea1371167f667e16925"),
+        // The codecs package carries the FFmpeg runtime Steam's video64.dll
+        // imports (libavcodec-62, libavformat-62, libavfilter-11, libavutil-60,
+        // libswresample-6, libswscale-9, plus aom/dav1d/libavif). It is a separate
+        // package in Steam's own client manifest (steam_client_win32), and the
+        // whole set used to be missing here: games that load video64 died at
+        // startup with "import_dll Library libavcodec-62.dll ... not found"
+        // (NOeSIS01, amehazu, SunriderMask of Arcadius, 2026-10-29).
+        Package(file: "bins_codecs_win32.zip.6b4ae7fefdf9cd893140df9dc4026fbb644a3bf2", bytes: 11_208_316,
+                sha256: "f2e264360d8463b238d5398796d8ad8c757a2d44f10101a8dacec856b31efa5c")
     ]
     static let clientSHA256 = "71b391fe9f3e2006cbc81a5c75eef3eb4186012deabfdb2c8b7e8d4850ecf640"
     static let relativeRoot = "Program Files (x86)/Steam"
+
+    /// Files the pinned packages are recognised by. Used only to decide whether
+    /// the setup button is offered (an install made before a package was added
+    /// still has steam.exe, so presence of steam.exe alone cannot say); the real
+    /// check is the per-file one during prepare.
+    static let sentinelNames = ["steam.exe", "steamclient64.dll", "video64.dll",
+                                "libavcodec-62.dll", "aom.dll"]
+    static func missingComponents(prefix: URL) -> [String] {
+        let steam = prefix.appendingPathComponent("drive_c/" + relativeRoot)
+        return sentinelNames.filter {
+            !FileManager.default.fileExists(atPath: steam.appendingPathComponent($0).path)
+        }
+    }
     static let windowsRoot = "C:\\Program Files (x86)\\Steam"
 
     enum Failure: LocalizedError {
@@ -238,11 +260,12 @@ actor SteamRuntimeInstaller {
             SteamRuntimeFiles.lastConflict = "a linked Steam folder"
             throw SteamRuntimeFiles.Failure.conflict
         }
-        // Existing installs are retained; this trial prepares missing files.
-        guard !fm.fileExists(atPath: root.appendingPathComponent("steam.exe").path) else {
-            SteamRuntimeFiles.lastConflict = "steam.exe already there"
-            throw SteamRuntimeFiles.Failure.conflict
-        }
+        // An existing install is fleshed out, not replaced: the preflight below
+        // refuses any file that is present and differs from the pinned packages,
+        // and the commit only writes files that are missing. That is what lets a
+        // package added later (the codecs one, 2026-10-29) reach a prefix that an
+        // earlier build prepared. A foreign Steam install still conflicts there,
+        // because its files differ.
         let stage = fm.temporaryDirectory.appendingPathComponent("madeira-runtime-" + UUID().uuidString)
         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: stage) }
