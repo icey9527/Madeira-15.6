@@ -1241,6 +1241,14 @@ public:
   void
   STDMETHODCALLTYPE
   CopyResource(ID3D11Resource *pDstResource, ID3D11Resource *pSrcResource) override {
+    // GetBuffer 等前序调用失败时，不能对空资源继续调用 GetType。
+    // CopySubresourceRegion/ResolveSubresource 也采用相同的空参数早退。
+    if (!pDstResource || !pSrcResource) {
+      static std::atomic<unsigned> rejected{0};
+      if (rejected.fetch_add(1, std::memory_order_relaxed) < 4)
+        WARN("[copy-resource] null destination=", !pDstResource, " source=", !pSrcResource);
+      return;
+    }
     BCCensusRecordOp(BCCensusFormatOf(pDstResource), 1);  /* ml653 */
     std::lock_guard<mutex_t> lock(mutex);
 

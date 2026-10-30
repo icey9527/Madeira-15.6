@@ -200,11 +200,17 @@ public:
     if (desc_.BufferUsage & DXGI_USAGE_UNORDERED_ACCESS)
       backbuffer_desc_.BindFlags |= D3D11_BIND_UNORDERED_ACCESS;
 
-    // FIXME: check HRESULT!
-    ResizeBuffers(0, desc_.Width, desc_.Height, DXGI_FORMAT_UNKNOWN, desc_.Flags);
+    init_hr_ = ResizeBuffers(0, desc_.Width, desc_.Height, DXGI_FORMAT_UNKNOWN, desc_.Flags);
+    if (FAILED(init_hr_)) {
+      ERR("MTLD3D11SwapChain: initial ResizeBuffers failed hr=", (uint32_t)init_hr_);
+      return;
+    }
     if (!fullscreen_desc_.Windowed)
       EnterFullscreenMode(nullptr);
   };
+
+  /** CreateSwapChain 用它把初始化失败变成 HRESULT，而不是交付一个空交换链。 */
+  HRESULT InitResult() const { return init_hr_; }
 
   ~MTLD3D11SwapChain() {
     device_context_->WaitUntilGPUIdle();
@@ -253,12 +259,32 @@ public:
   HRESULT
   STDMETHODCALLTYPE
   GetBuffer(UINT buffer_idx, REFIID riid, void **surface) final {
+    if (!surface)
+      return E_POINTER;
+    *surface = nullptr;
     if (buffer_idx == 0) {
+      if (backbuffer_ == nullptr)
+        return DXGI_ERROR_INVALID_CALL;
       return backbuffer_->QueryInterface(riid, surface);
-    } else {
-      ERR("Non zero-index buffer is not supported");
-      return DXGI_ERROR_UNSUPPORTED;
     }
+    // blt SEQUENTIAL 下 0 < idx < BufferCount 是合法的只读后备缓冲。
+    if (desc_.SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL && buffer_idx < desc_.BufferCount) {
+      const size_t extra = buffer_idx - 1;
+      if (extra < sequential_backbuffers_.size() && sequential_backbuffers_[extra] != nullptr)
+        return sequential_backbuffers_[extra]->QueryInterface(riid, surface);
+    }
+
+    // 设置菜单后的空指针紧随此失败发生，需要真实索引和交换模式才能判定
+    // 是有效的多缓冲请求还是越界探测，不能把所有索引都伪装成第零块。
+    static std::atomic<unsigned> failures{0};
+    if (failures.fetch_add(1, std::memory_order_relaxed) < 16)
+      ERR("[swap-buffer] rejected index=", buffer_idx, " count=", desc_.BufferCount,
+          " effect=", static_cast<unsigned>(desc_.SwapEffect),
+          " backing=", backbuffer_ != nullptr, " extras=", sequential_backbuffers_.size(),
+          " caller=", __builtin_return_address(0));
+    if (buffer_idx >= desc_.BufferCount || desc_.SwapEffect == DXGI_SWAP_EFFECT_DISCARD || !backbuffer_)
+      return DXGI_ERROR_INVALID_CALL;
+    return DXGI_ERROR_UNSUPPORTED;
   };
 
   HRESULT
@@ -478,60 +504,106 @@ public:
   STDMETHODCALLTYPE
   ResizeBuffers(UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT Format,
                 UINT flags) final {
-    /* BufferCount ignored */
+    // 0 表示沿用原数量。仅为 blt SEQUENTIAL 补独立缓冲，其他模式保持原路径。
+    if (BufferCount > 16)
+      return DXGI_ERROR_INVALID_CALL;
+    const UINT new_count = BufferCount ? BufferCount : desc_.BufferCount;
+    if (new_count == 0 || new_count > 16)
+      return DXGI_ERROR_INVALID_CALL;
+
+    UINT new_width = desc_.Width, new_height = desc_.Height;
     if (Width == 0 || Height == 0) {
-      wsi::getWindowSize(hWnd, &desc_.Width, &desc_.Height);
+      wsi::getWindowSize(hWnd, &new_width, &new_height);
     } else {
-      desc_.Width = Width;
-      desc_.Height = Height;
+      new_width = Width;
+      new_height = Height;
     }
-    if (Format != DXGI_FORMAT_UNKNOWN) {
-      if (ConvertSwapChainFormat(Format) != WMTPixelFormatInvalid)
-        desc_.Format = Format;
-    }
+    DXGI_FORMAT new_format = desc_.Format;
+    if (Format != DXGI_FORMAT_UNKNOWN && ConvertSwapChainFormat(Format) != WMTPixelFormatInvalid)
+      new_format = Format;
 
-    backbuffer_ = nullptr;
-    if (desc_.Width == 0 || desc_.Height == 0) {
-      backbuffer_desc_.Width = 1;
-      backbuffer_desc_.Height = 1;
+    D3D11_TEXTURE2D_DESC1 new_backbuffer_desc = backbuffer_desc_;
+    if (new_width == 0 || new_height == 0) {
+      new_backbuffer_desc.Width = 1;
+      new_backbuffer_desc.Height = 1;
     } else {
-      backbuffer_desc_.Width = desc_.Width;
-      backbuffer_desc_.Height = desc_.Height;
+      new_backbuffer_desc.Width = new_width;
+      new_backbuffer_desc.Height = new_height;
     }
+    new_backbuffer_desc.Format = new_format;
 
-    ApplyLayerProps();
-
-    backbuffer_desc_.Format = desc_.Format;
-
-    backbuffer_ = nullptr;
-    if (FAILED(dxmt::CreateDeviceTexture2D(
-            device_, &backbuffer_desc_, nullptr, reinterpret_cast<ID3D11Texture2D1 **>(&backbuffer_)
-        )))
-      return E_FAIL;
-    // CreateDeviceTexture2D returns public reference, change to private one here
-    backbuffer_->AddRefPrivate();
-    backbuffer_->Release();
-
-    if constexpr (EnableMetalFX) {
-      D3D11_TEXTURE2D_DESC1 upscaled_desc_ = backbuffer_desc_;
-      upscaled_desc_.Height *= scale_factor;
-      upscaled_desc_.Width *= scale_factor;
-      upscaled_backbuffer_ = nullptr;
+    auto make_backbuffer = [&](Com<D3D11ResourceCommon, false> &out) -> HRESULT {
       if (FAILED(dxmt::CreateDeviceTexture2D(
-              device_, &upscaled_desc_, nullptr, reinterpret_cast<ID3D11Texture2D1 **>(&upscaled_backbuffer_)
+              device_, &new_backbuffer_desc, nullptr, reinterpret_cast<ID3D11Texture2D1 **>(&out)
+          )))
+        return E_FAIL;
+      // CreateDeviceTexture2D returns public reference, change to private one here
+      out->AddRefPrivate();
+      out->Release();
+      return S_OK;
+    };
+
+    /* 事务式重建：任何分配失败都保留旧的后备缓冲，交换链不会停在半成品状态。 */
+    Com<D3D11ResourceCommon, false> new_backbuffer;
+    if (FAILED(make_backbuffer(new_backbuffer)))
+      return E_FAIL;
+
+    std::vector<Com<D3D11ResourceCommon, false>> new_sequential;
+    Com<D3D11ResourceCommon, false> new_rotation_temp;
+    if (desc_.SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL && new_count > 1) {
+      // 非零缓冲必须有自己的资源身份与内容，不能返回第零块的别名。
+      for (UINT i = 1; i <= new_count; ++i) {
+        Com<D3D11ResourceCommon, false> buffer;
+        if (FAILED(make_backbuffer(buffer)))
+          return E_FAIL;
+        if (i == new_count)
+          new_rotation_temp = std::move(buffer);
+        else
+          new_sequential.push_back(std::move(buffer));
+      }
+    }
+
+    std::conditional<EnableMetalFX, Com<D3D11ResourceCommon>, std::monostate>::type new_upscaled;
+    std::conditional<EnableMetalFX, WMT::Reference<WMT::FXSpatialScaler>, std::monostate>::type new_scaler;
+    if constexpr (EnableMetalFX) {
+      D3D11_TEXTURE2D_DESC1 upscaled_desc = new_backbuffer_desc;
+      upscaled_desc.Height *= scale_factor;
+      upscaled_desc.Width *= scale_factor;
+      if (FAILED(dxmt::CreateDeviceTexture2D(
+              device_, &upscaled_desc, nullptr, reinterpret_cast<ID3D11Texture2D1 **>(&new_upscaled)
           )))
         return E_FAIL;
 
       WMTFXSpatialScalerInfo info;
-      info.input_height = desc_.Height;
-      info.input_width = desc_.Width;
-      info.output_height = desc_.Height * scale_factor;
-      info.output_width = desc_.Width * scale_factor;
-      info.color_format = backbuffer_->texture()->pixelFormat();
-      info.output_format =upscaled_backbuffer_->texture()->pixelFormat();
-      metalfx_scaler = device_->GetMTLDevice().newSpatialScaler(info);
-      D3D11_ASSERT(metalfx_scaler && "otherwise metalfx failed to initialize");
+      info.input_height = new_height;
+      info.input_width = new_width;
+      info.output_height = new_height * scale_factor;
+      info.output_width = new_width * scale_factor;
+      info.color_format = new_backbuffer->texture()->pixelFormat();
+      info.output_format = new_upscaled->texture()->pixelFormat();
+      new_scaler = device_->GetMTLDevice().newSpatialScaler(info);
+      if (!new_scaler) {
+        // 仍在 commit 之前：scaler 失败必须保持旧的后备缓冲与旧 scaler。
+        ERR("ResizeBuffers: MetalFX spatial scaler creation failed");
+        return E_FAIL;
+      }
     }
+
+    // 提交：此后不再有会失败的分配。
+    desc_.Width = new_width;
+    desc_.Height = new_height;
+    desc_.Format = new_format;
+    desc_.BufferCount = new_count;
+    backbuffer_desc_ = new_backbuffer_desc;
+    backbuffer_ = std::move(new_backbuffer);
+    sequential_backbuffers_ = std::move(new_sequential);
+    sequential_rotation_temp_ = std::move(new_rotation_temp);
+    if constexpr (EnableMetalFX) {
+      upscaled_backbuffer_ = std::move(new_upscaled);
+      metalfx_scaler = std::move(new_scaler);
+    }
+
+    ApplyLayerProps();
 
     return S_OK;
   };
@@ -793,6 +865,12 @@ public:
 
     std::unique_lock<d3d11_device_mutex> lock(device_->mutex);
 
+    if (backbuffer_ == nullptr) {
+      // 初始化/ResizeBuffers 失败时不要在这里对空资源取 texture()。
+      ERR("Present: no backbuffer, swapchain is not usable");
+      return DXGI_ERROR_INVALID_CALL;
+    }
+
     device_context_->PrepareFlush();
     if (hr == DXGI_STATUS_OCCLUDED) {
       // flush commands without presenting
@@ -857,6 +935,19 @@ public:
         ReleaseSemaphore(present_semaphore_, 1, nullptr);
         this->UpdateStatistics(ctx.queue().statistics, ctx.currentFrameId());
       });
+    }
+    if (!sequential_backbuffers_.empty() && sequential_rotation_temp_ && backbuffer_) {
+      // D3D11 的逻辑缓冲0保持可绘制，Present后轮换其内容，而不是切换
+      // GetCurrentBackBufferIndex让应用突然绘制/显示错缓冲。先以GPU拷贝
+      // 保持逻辑资源及已有view身份；临时纹理避免首块被覆盖后丢失。
+      // 注意：SEQUENTIAL N 缓冲每帧多出 N+1 次全屏 blit（文档已注明开销，
+      // 后续再独立优化，不用 allocation rename 偷换资源身份）。
+      device_context_->CopyResource(sequential_rotation_temp_.ptr(), backbuffer_.ptr());
+      device_context_->CopyResource(backbuffer_.ptr(), sequential_backbuffers_.front().ptr());
+      for (size_t i = 1; i < sequential_backbuffers_.size(); ++i)
+        device_context_->CopyResource(sequential_backbuffers_[i - 1].ptr(), sequential_backbuffers_[i].ptr());
+      device_context_->CopyResource(sequential_backbuffers_.back().ptr(), sequential_rotation_temp_.ptr());
+      device_context_->PrepareFlush();
     }
     device_context_->Commit();
 
@@ -1125,6 +1216,9 @@ private:
   D3D11_TEXTURE2D_DESC1 backbuffer_desc_;
   IMTLD3D11DeviceContext* device_context_;
   Com<D3D11ResourceCommon, false> backbuffer_;
+  std::vector<Com<D3D11ResourceCommon, false>> sequential_backbuffers_;
+  Com<D3D11ResourceCommon, false> sequential_rotation_temp_;
+  HRESULT init_hr_ = S_OK;
   HANDLE present_semaphore_;
 
   /* [PRESENT_GAP] accumulators — Present1 is only called from the game
@@ -1181,17 +1275,29 @@ CreateSwapChain(
   }
   if (env::getEnvVar("DXMT_METALFX_SPATIAL_SWAPCHAIN") == "1") {
     if (pDevice->GetMTLDevice().supportsFXSpatialScaler()) {
-      *ppSwapChain = new MTLD3D11SwapChain<true>(
+      auto *chain = new MTLD3D11SwapChain<true>(
           pFactory, pDevice, layer_factory.ptr(), hWnd, pDesc, pFullscreenDesc
       );
+      HRESULT hr = chain->InitResult();
+      if (FAILED(hr)) {
+        chain->Release();
+        return hr;
+      }
+      *ppSwapChain = chain;
       return S_OK;
     } else {
       WARN("MetalFX spatial scaler is not supported on this device");
     }
   }
-  *ppSwapChain = new MTLD3D11SwapChain<false>(
+  auto *chain = new MTLD3D11SwapChain<false>(
       pFactory, pDevice, layer_factory.ptr(), hWnd, pDesc, pFullscreenDesc
   );
+  HRESULT hr = chain->InitResult();
+  if (FAILED(hr)) {
+    chain->Release();
+    return hr;
+  }
+  *ppSwapChain = chain;
   return S_OK;
 };
 

@@ -15,9 +15,11 @@
 # kind of object it names, because each answer points at a different fix.
 # ml955 already does exactly this for NtReadFile.
 #
-# Three probes, all bounded by a per-process InterlockedIncrement counter and
-# capped at 64 lines each. No dedup tables: a static "seen" array raced across
-# threads and a per-link cap could miss the game's handle entirely. Every line
+# Three probes, each bounded by a per-thread __thread counter (Wine's clang
+# supports __thread; a new game thread therefore gets its own 64-line budget
+# instead of sharing one global counter already drained by Steam startup) and
+# capped at 64 lines per thread. No dedup tables: a static "seen" array raced
+# across threads and a per-link cap could miss the game's handle entirely. Every line
 # carries the wine tid and the handle, so a wait-begin without a wait-end is
 # the pending write.
 #
@@ -51,8 +53,10 @@ replacement1 = (
     '     * (include/wine/server_protocol.h) really has INVALID/FILE/DIR/\n'
     '     * SOCKET/SERIAL/CHAR/DEVICE/NB_TYPES; no names are invented here. */\n'
     '    {\n'
-    '        static LONG ml2108_fd_n;\n'
-    '        LONG ml2108_n = InterlockedIncrement( &ml2108_fd_n );\n'
+    '        /* ml2108: 线程局部预算。每次调用自增，每个线程各自有 64 行上限；\n'
+    '         * 之前是全局 InterlockedIncrement，Steam 启动就把额度耗光了。 */\n'
+    '        static __thread unsigned int ml2108_fd_n;\n'
+    '        unsigned int ml2108_n = ++ml2108_fd_n;\n'
     '\n'
     '        if (!status && ml2108_n <= 64)\n'
     '        {\n'
@@ -93,8 +97,9 @@ replacement2 = (
     '    if (status == STATUS_BAD_DEVICE_TYPE)\n'
     '    {\n'
     '#ifdef WINE_IOS\n'
-    '        static LONG ml2108_server_n;\n'
-    '        LONG ml2108_n = InterlockedIncrement( &ml2108_server_n );\n'
+    '        /* ml2108: 线程局部预算，新游戏线程不再受 Steam 已消耗的全局计数影响。 */\n'
+    '        static __thread unsigned int ml2108_server_n;\n'
+    '        unsigned int ml2108_n = ++ml2108_server_n;\n'
     '\n'
     '        if (ml2108_n <= 64)\n'
     '            ERR( "ml2108 [write-src] server-path #%d tid=%04x handle=%p len=%u offset=%s%I64x no-client-fd\\n",\n'
@@ -148,10 +153,11 @@ replacement3 = (
     '\n'
     '    if (wait_handle)\n'
     '    {\n'
-    '        /* ml2108 [write-src]: the wait point. Bounded per process, no\n'
-    '         * dedup; every line names the wine tid and the handle. */\n'
-    '        static LONG ml2108_wait_n;\n'
-    '        LONG ml2108_n = InterlockedIncrement( &ml2108_wait_n );\n'
+    '        /* ml2108 [write-src]: the wait point. 线程局部预算，每个线程\n'
+    '         * 各 64 行，避免 Steam 启动耗尽全局额度后游戏线程没有探针。\n'
+    '         * 无去重；每行都带 wine tid 和 handle。 */\n'
+    '        static __thread unsigned int ml2108_wait_n;\n'
+    '        unsigned int ml2108_n = ++ml2108_wait_n;\n'
     '\n'
     '        if (ml2108_n <= 64)\n'
     '            ERR( "ml2108 [write-src] wait-begin #%d tid=%04x handle=%p wait=%p size=%u options=%08x alertable=%d\\n",\n'
@@ -179,7 +185,7 @@ patched = patched.replace(anchor2, replacement2, 1)
 patched = patched.replace(anchor3, replacement3, 1)
 
 # Source validation: each probe exists exactly once and the patch changed the
-# text. InterlockedIncrement and NtCurrentTeb already appear in this tree.
+# text. __thread and NtCurrentTeb are already used in this tree.
 checks = (
     ('ml2108 [write-src] fd #%d tid=%04x handle=%p fd=%d', 1),
     ('ml2108 [write-src] server-path #%d tid=%04x handle=%p', 1),

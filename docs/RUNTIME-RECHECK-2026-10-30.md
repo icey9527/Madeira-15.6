@@ -1,7 +1,48 @@
-# 2026-10-30 修复复核（本地，未推送）
+# 2026-10-30 修复复核
 
-分支：`fix/runtime-recheck-20261030`，基于 `9f0e9681`。
-本轮没有推送、触发 CI、改写设备配置或启动游戏。
+第一批基于 `9f0e9681`，经用户允许后已统一提交、推送为 `f8bd78a0`。
+用户最新真机反馈：**下载速度明显改善，切后台恢复不再卡死**；BSD 第1章白底仍不正确。
+雨霏霏、太阳骑士、死亡细胞仍无法游玩。新发现：壳之少女游戏内打开设置后画面停住、音频循环，另行取证中。
+
+下文保留第一批改动与当时验证范围；本轮修复经用户授权统一提交、推送并出测试包。
+
+> 2026-10-30 新现场：`F:\Madeira\refs\tmp\triage-20261030-1048\current.log` 为
+> TheShell.exe（Part I），`previous.log` 为 TheShell2.exe（Part II）；两份不含那三个启动失败游戏的现场。
+> 写入探针前64次预算已被Steam启动期耗尽，本轮改为线程局部预算，避免漏掉后启动的游戏线程。
+> Wine 基线已核实为11.4；整套升级未获选择或实施。已有触控Xbox布局和XInput通路，可后续优化入口与交互。
+
+## 第二批本地取证：设置菜单冻结（本轮提交）
+
+两次现场分别是Part I和Part II。`current.log:15596-15598` 与
+`previous.log:25677-25679` 都在 `Non zero-index buffer is not supported` 后立刻
+发生空指针读取（RCX=0），PC对应 `d3d11.dll+0x7e190`；随后没有新帧。
+结合本地源码，该地址落在 `CopyResource` 路径：先调用资源的 `GetType` 取 vtable
+并按 `Dimension` 分支，再构造 `BlitObject`（`dxmt/src/d3d11/d3d11_context_impl.cpp:308-310`）。
+`GetType` 是虚调用，空资源即对 RCX=0 解引用；完整调用链仍缺该构建符号佐证。
+
+旧段“仅有 GetBuffer 诊断”已过时。日志显示 SEQUENTIAL(effect=1)、count=2 时
+合法 `GetBuffer(1)` 被拒并返回空指针，游戏随即把它传入 `CopyResource`。
+本地已实现独立额外后备缓冲并用 GPU copy 维持 COM/view 身份与逻辑 0；
+成功 Present 后环转，N 个缓冲需 N+1 次 blits
+（`dxmt/src/d3d11/d3d11_swapchain.cpp:226-235`），有明显性能成本。
+另加 `CopyResource` 空指针早退（`d3d11_context_impl.cpp:1244`）、
+ResizeBuffers 事务式重建（失败保留旧缓冲）与初始化错误返回 `InitResult()`。
+
+`tests/host/check-swap-buffer.py`、`check-copy-resource-guard.py`、
+`check-present-rotation.py`、`check-resize-buffers-txn.py` 四支均通过，
+分别覆盖：GetBuffer 空输出/索引0/SEQUENTIAL 额外缓冲/越界与缺后备；
+CopyResource 空参数在 BlitObject 前早退；Present 先捕获后备再环转，
+内容 A/B/C→B/C/A 且不别名；ResizeBuffers 第 k 次分配或 scaler 失败保留旧状态、
+count=0 复用、count 2→3 得到 3 个后备加 scratch。
+四支都只验证从生产代码提取的函数体逻辑，不等于 macOS/iOS 完整编译通过，
+也不等于真机设置菜单成功。缺 `GetUsage` READ_ONLY 标志为已知限制。
+
+BSD白底仍未定位具体draw。前600条状态不能覆盖后面的第1章；尤其旧解释把
+D3DBLEND_ZERO=1误称ONE（实际ONE=2），此前的“白底是加法混合”不能作为已证实根因。
+本轮不再据此修改混合公式或换Wine。
+
+虚拟手柄并非从零：游戏会话菜单“触控操作”开启后已有布局选择（内置Xbox controller）、
+编辑控件、透明度/大小；底层已有双摇杆/扳机/按键到XInput。前端整理与手柄入口优化留作独立批次。
 
 ## 已有证据支持的修复
 
