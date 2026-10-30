@@ -7775,6 +7775,96 @@ static int ios_mach_deliver_guest_exception_inner( thread_t thread, arm_thread_s
                              (fault_addr >= cbase && fault_addr < cbase + csize) ? 1 : 0 );
                 dprintf( 2, " regs=%d rev=ml613\n", have_regs );
 
+                /* iOS-Madeira ml613 [jit-pc]: a fault whose pc lies in a tail
+                 * carve names a JIT pool range but not a MODULE, so
+                 * "hostpc=0x2cee49508" cannot be attributed. Reverse-translate
+                 * the host pc and lr to their original PE images (ml454 table
+                 * walk; ios_pe_module_name is fault-safe since ml347) and dump
+                 * x0-x3 plus whether the TEB held in x18 is this thread's own:
+                 * the 2026-10-30 fault arrived with sp=0xfb58f0000 while x18's
+                 * TEB claimed stack 0x146490000..0x146c90000, i.e. a foreign
+                 * TEB delivered it. Read-only, no locks, capped at 8. All reads
+                 * of the x18 TEB go through mach_vm so a bogus x18 cannot
+                 * nest-fault the handler. */
+                {
+                    static unsigned int jit_pc_n;
+                    unsigned int jit_pc_seq;
+                    char pmn[64] = "(outside mappings)", lmn[64] = "(outside mappings)";
+
+                    /* Lock-free on AArch64: 32-bit fetch_add is a single LDADD
+                     * (no libatomic, no lock, no TLS init) — safe on the Mach
+                     * exception-handler thread. */
+                    jit_pc_seq = __atomic_fetch_add( &jit_pc_n, 1, __ATOMIC_RELAXED ) + 1;
+                    if (jit_pc_seq <= 8)
+                    {
+                        extern uint64_t ios_jit_reverse_translate( uint64_t addr, uint64_t *module_base );
+                        uint64_t jpc = (uint64_t)arm_thread_state64_get_pc( mc.__ss );
+                        uint64_t jlr = (uint64_t)arm_thread_state64_get_lr( mc.__ss );
+                        uint64_t jsp = (uint64_t)arm_thread_state64_get_sp( mc.__ss );
+                        uint64_t pmb = 0, plr = 0, pva = 0, lva = 0;
+                        uint64_t x18 = (uint64_t)mc.__ss.__x[18], cur_peb = 0;
+                        TEB *tnow = NtCurrentTeb();
+
+                        if (tnow) cur_peb = (uint64_t)(uintptr_t)tnow->Peb;
+                        pva = ios_jit_reverse_translate( jpc, &pmb );
+                        lva = ios_jit_reverse_translate( jlr, &plr );
+                        /* ios_pe_module_name returns a single static namebuf;
+                         * copy each name out before the next call overwrites it
+                         * (manual bounded copy: no allocation, guaranteed NUL). */
+                        if (pmb)
+                        {
+                            const char *m = ios_pe_module_name( pmb );
+                            unsigned k = 0;
+                            while (k < sizeof(pmn) - 1 && m[k]) { pmn[k] = m[k]; k++; }
+                            pmn[k] = 0;
+                        }
+                        if (plr)
+                        {
+                            const char *m = ios_pe_module_name( plr );
+                            unsigned k = 0;
+                            while (k < sizeof(lmn) - 1 && m[k]) { lmn[k] = m[k]; k++; }
+                            lmn[k] = 0;
+                        }
+                        dprintf( 2, "[jit-pc] #%u pc=0x%llx %s+0x%llx | lr=0x%llx %s+0x%llx\n",
+                                 jit_pc_seq, (unsigned long long)jpc,
+                                 pmn,
+                                 (unsigned long long)(pmb ? pva - pmb : 0),
+                                 (unsigned long long)jlr,
+                                 lmn,
+                                 (unsigned long long)(plr ? lva - plr : 0) );
+                        dprintf( 2, "[jit-pc]   x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x18=0x%llx\n",
+                                 (unsigned long long)mc.__ss.__x[0],
+                                 (unsigned long long)mc.__ss.__x[1],
+                                 (unsigned long long)mc.__ss.__x[2],
+                                 (unsigned long long)mc.__ss.__x[3],
+                                 (unsigned long long)x18 );
+                        if (x18)
+                        {
+                            uint64_t x18_peb = 0, xs_b = 0, xs_l = 0;
+                            mach_vm_size_t g2 = 0;
+                            int ok_peb = mach_vm_read_overwrite( mach_task_self(),
+                                             (mach_vm_address_t)(x18 + 0x60), 8,
+                                             (mach_vm_address_t)&x18_peb, &g2 ) == KERN_SUCCESS
+                                         && g2 == 8;
+                            int ok_st  = mach_vm_read_overwrite( mach_task_self(),
+                                             (mach_vm_address_t)(x18 + 0x8), 8,
+                                             (mach_vm_address_t)&xs_b, &g2 ) == KERN_SUCCESS
+                                         && g2 == 8
+                                      && mach_vm_read_overwrite( mach_task_self(),
+                                             (mach_vm_address_t)(x18 + 0x10), 8,
+                                             (mach_vm_address_t)&xs_l, &g2 ) == KERN_SUCCESS
+                                         && g2 == 8;
+                            dprintf( 2, "[jit-pc]   x18_peb=%s0x%llx cur_peb=%p same_peb=%d "
+                                        "x18_stack=0x%llx..0x%llx sp_in_x18_stack=%d\n",
+                                     ok_peb ? "" : "<unreadable>",
+                                     (unsigned long long)x18_peb, (void *)(uintptr_t)cur_peb,
+                                     (ok_peb && x18_peb == cur_peb) ? 1 : 0,
+                                     (unsigned long long)xs_l, (unsigned long long)xs_b,
+                                     (ok_st && jsp > xs_l && jsp <= xs_b) ? 1 : 0 );
+                        }
+                    }
+                }
+
                 /* iOS-Madeira: a fault at a small address (Dead Cells writes four
                  * bytes at 0x10000+4) means a pointer that should be wide was
                  * used narrow. Dump all 16 guest GPRs and the top of the guest

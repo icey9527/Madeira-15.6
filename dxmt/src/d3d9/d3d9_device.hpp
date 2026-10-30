@@ -8,6 +8,7 @@
 #include "d3d9_clear_quad.hpp"
 #include "d3d9_common_texture.hpp"
 #include "d3d9_diag.hpp"
+#include "d3d9_draw_trace.hpp"
 #include "d3d9_enc_state.hpp"
 #include "d3d9_mem.hpp"
 #include "d3d9_multithread.hpp"
@@ -1783,6 +1784,17 @@ private:
   // Bound vertex / pixel shaders. NULL is allowed (apps unbind to
   // switch to FFP). Same priv-pin shape as the other slot bindings.
   Com<class MTLD3D9VertexShader, false> m_vertexShader;
+
+  // Madeira: native D3D9 dynamic draw trace. Documents/madeira.cfg
+  // "env.DXMT_D9_DRAW_TRACE = 1" opens an 8-frame / 256-draw window at the
+  // next Present poll; the window is latched closed when the budget runs out
+  // and only a 0 -> 1 cfg edge re-arms it. Calling-thread state only; one
+  // instance per device. See d3d9_draw_trace.hpp.
+  void PollDrawTrace();
+  void TraceBatchedDraw(BatchedDraw &draw);
+  dxmt::D9DrawTrace m_drawTrace;
+  dxmt::D9DrawTracePoll m_drawTracePoll;
+  uint32_t m_drawTraceDevice = 0;
   Com<class MTLD3D9PixelShader, false> m_pixelShader;
 
   // VS constant register file. The hot array stays the hardware-VP size;

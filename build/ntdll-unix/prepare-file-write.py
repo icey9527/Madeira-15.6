@@ -172,9 +172,46 @@ replacement3 = (
     '}\n'
 )
 
+# ---------------------------------------------------------------- anchors 4/5
+# ml2112 [iosb-src]: the IOSB cookie the caller hands to server_async(), in
+# both server_read_file() and server_write_file().  On device a 32-bit write
+# faulted in set_async_iosb writing the IO_STATUS_BLOCK32 at x19=0x10000; this
+# pins whether the cookie is already wrong at REQUEST time (host cookies are
+# wow_guest_base + raw, per wow64_private.h), or only on the completion side.
+# Bounded per thread (32 lines); no buffer contents, no paths.
+iosb_probe = (
+    '#ifdef WINE_IOS\n'
+    '        {\n'
+    '            static __thread unsigned int ml2108_iosb_n;\n'
+    '            unsigned int ml2108_n = ++ml2108_iosb_n;\n'
+    '\n'
+    '            if (ml2108_n <= 32)\n'
+    '            {\n'
+    '                ULONG_PTR ml2108_base = ios_wow_host_base();\n'
+    '                ULONG_PTR ml2108_ptr  = (ULONG_PTR)iosb_client_ptr( io );\n'
+    '\n'
+    '                ERR( "[iosb-src] tid=%04x handle=%p io=%p ptr=%p wowcall=%d hostbase=%p io_in_window=%d ptr_in_window=%d buf=%p\\n",\n'
+    '                     (unsigned)(ULONG_PTR)NtCurrentTeb()->ClientId.UniqueThread, handle, (void *)io, (void *)ml2108_ptr,\n'
+    '                     (int)in_wow64_call(), (void *)ml2108_base,\n'
+    '                     ml2108_base && (ULONG_PTR)io >= ml2108_base && (ULONG_PTR)io < ml2108_base + 0x100000000ULL,\n'
+    '                     ml2108_base && ml2108_ptr >= ml2108_base && ml2108_ptr < ml2108_base + 0x100000000ULL,\n'
+    '                     (void *)buffer );\n'
+    '            }\n'
+    '        }\n'
+    '#endif\n'
+)
+
+anchor4 = '    SERVER_START_REQ( read )\n'
+replacement4 = iosb_probe + anchor4
+
+anchor5 = '    SERVER_START_REQ( write )\n'
+replacement5 = iosb_probe + anchor5
+
 for name, anchor in (('NtWriteFile get_unix_fd', anchor1),
                      ('NtWriteFile server path', anchor2),
-                     ('server_write_file tail', anchor3)):
+                     ('server_write_file tail', anchor3),
+                     ('server_read_file request', anchor4),
+                     ('server_write_file request', anchor5)):
     count = text.count(anchor)
     if count != 1:
         raise SystemExit(
@@ -183,6 +220,8 @@ for name, anchor in (('NtWriteFile get_unix_fd', anchor1),
 patched = text.replace(anchor1, replacement1, 1)
 patched = patched.replace(anchor2, replacement2, 1)
 patched = patched.replace(anchor3, replacement3, 1)
+patched = patched.replace(anchor4, replacement4, 1)
+patched = patched.replace(anchor5, replacement5, 1)
 
 # Source validation: each probe exists exactly once and the patch changed the
 # text. __thread and NtCurrentTeb are already used in this tree.
@@ -191,6 +230,7 @@ checks = (
     ('ml2108 [write-src] server-path #%d tid=%04x handle=%p', 1),
     ('ml2108 [write-src] wait-begin #%d tid=%04x handle=%p', 1),
     ('ml2108 [write-src] wait-end #%d tid=%04x handle=%p', 1),
+    ('[iosb-src] tid=%04x handle=%p io=%p ptr=%p', 2),
 )
 for needle, expected in checks:
     found = patched.count(needle)
@@ -203,4 +243,4 @@ if 'ml2108_seen' in patched or 'ml2108_wait_handles' in patched:
 
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(patched, encoding='utf-8')
-print(f'NtWriteFile source probes applied to {relative}: 3 anchors, {len(patched) - len(text):+d} bytes')
+print(f'NtWriteFile source probes applied to {relative}: 5 anchors, {len(patched) - len(text):+d} bytes')

@@ -1,5 +1,15 @@
 #include <cstdint>
 #include "d3d9_device.hpp"
+/* Madeira native D3D9 draw trace. Native iOS is the only target whose build
+ * has the repository's build/ include directory; PE/i386 and other DXMT
+ * targets keep the no-op Poll/Trace so a missing header cannot break them.
+ * DXMT_IOS alone is not a safe test (Windows targets define it too). */
+#if defined(DXMT_MADEIRA) && !defined(_WIN32) && __has_include("madeira_cfg.h")
+#include "madeira_cfg.h"   // Documents/madeira.cfg: env.DXMT_D9_DRAW_TRACE
+#define MADEIRA_D9_DRAW_TRACE 1
+#else
+#define MADEIRA_D9_DRAW_TRACE 0
+#endif
 #include "d3d9_guest_alloc.hpp"
 #include "d3d9_madeira_window.hpp"
 
@@ -2932,6 +2942,13 @@ MTLD3D9Device::Present(
     if (n < 3 || (n % 300) == 0)
       Logger::warn(str::format("[d9-present] dev Present n=", n)); }
   D9DeviceLock lock = LockDevice();
+#if MADEIRA_D9_DRAW_TRACE
+  // Madeira draw trace: close the frame, then poll the cfg (<= once/250 ms).
+  // Under the device lock so EndFrame/SetEnabled cannot race another app
+  // thread calling Present; the cfg read is rate-limited.
+  m_drawTrace.EndFrame();
+  PollDrawTrace();
+#endif
   // An Ex device presenting an unfocused fullscreen chain reports
   // occlusion without presenting (wine d3d9 device.c); the non-Ex
   // device transitions toward the lost state instead, and the chain's
@@ -7626,6 +7643,115 @@ MTLD3D9Device::BuildDrawCapture() {
   return cap;
 }
 
+// Madeira: native D3D9 dynamic draw trace. PollDrawTrace runs on the present
+// thread at most once per 250 ms and reads Documents/madeira.cfg on every
+// interval (not mtime/size: a 0 -> 1 edit keeps the same length and can share
+// a coarse timestamp). TraceBatchedDraw records the state already frozen for
+// this draw on the calling thread. It must NOT read m_encodeSideRefs: the
+// encode thread mutates that mirror in arrival order after the draw is queued,
+// so its contents do not correspond to this draw.
+void
+MTLD3D9Device::PollDrawTrace() {
+#if MADEIRA_D9_DRAW_TRACE
+  const uint64_t now_ms = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+  if (!m_drawTracePoll.Due(now_ms))
+    return;
+  char value[16];
+  bool on = false;
+  if (madeira_cfg_get("env.DXMT_D9_DRAW_TRACE", value, sizeof value)) {
+    on = !std::strcmp(value, "1") || !std::strcmp(value, "on") ||
+         !std::strcmp(value, "true") || !std::strcmp(value, "yes");
+  }
+  m_drawTrace.SetEnabled(on);
+#endif
+}
+
+void
+MTLD3D9Device::TraceBatchedDraw(BatchedDraw &draw) {
+#if MADEIRA_D9_DRAW_TRACE
+  if (!m_drawTrace.WantsDraw() || draw.pod_snapshot == nullptr)
+    return;
+  static std::atomic<uint32_t> next_trace_device{0};
+  if (m_drawTraceDevice == 0)
+    m_drawTraceDevice = next_trace_device.fetch_add(1, std::memory_order_relaxed) + 1;
+
+  dxmt::D9DrawTraceRecord rec{};
+  rec.device = m_drawTraceDevice;
+  rec.frame = m_drawTrace.frame;
+  rec.seq = ++m_drawTrace.seq;
+  rec.primitive = static_cast<uint32_t>(draw.primitive_type);
+  rec.count = draw.vertex_or_index_count;
+  rec.start = draw.start_vertex_or_index;
+  rec.base_vertex = draw.base_vertex;
+  rec.indexed = draw.type == BatchedDraw::kIndexed ? 1u : 0u;
+  rec.vs = reinterpret_cast<uintptr_t>(m_vertexShader.ptr());
+  rec.ps = reinterpret_cast<uintptr_t>(m_pixelShader.ptr());
+  rec.fixed_shader = (rec.vs == 0 && rec.ps == 0) ? 1u : 0u;
+
+  const dxmt::D9EncodingState &pod = *draw.pod_snapshot;
+  const DWORD *rs = pod.render_states ? pod.render_states->v : nullptr;
+  if (rs) {
+    rec.blend_enable = rs[D3DRS_ALPHABLENDENABLE];
+    rec.src_blend = rs[D3DRS_SRCBLEND];
+    rec.dst_blend = rs[D3DRS_DESTBLEND];
+    rec.blend_op = rs[D3DRS_BLENDOP];
+    rec.write_mask = rs[D3DRS_COLORWRITEENABLE];
+    rec.alpha_test = rs[D3DRS_ALPHATESTENABLE];
+    rec.alpha_ref = rs[D3DRS_ALPHAREF];
+    rec.z_enable = rs[D3DRS_ZENABLE];
+    rec.z_write = rs[D3DRS_ZWRITEENABLE];
+  }
+  rec.vp_x = static_cast<int32_t>(pod.viewport.X);
+  rec.vp_y = static_cast<int32_t>(pod.viewport.Y);
+  rec.vp_w = pod.viewport.Width;
+  rec.vp_h = pod.viewport.Height;
+  rec.vp_minz = pod.viewport.MinZ;
+  rec.vp_maxz = pod.viewport.MaxZ;
+  rec.sc_l = pod.scissor_rect.left;
+  rec.sc_t = pod.scissor_rect.top;
+  rec.sc_r = pod.scissor_rect.right;
+  rec.sc_b = pod.scissor_rect.bottom;
+
+  if (MTLD3D9Surface *rt0 = m_renderTargets[0].ptr()) {
+    const D3DSURFACE_DESC &d = rt0->desc();
+    rec.rt0 = reinterpret_cast<uintptr_t>(rt0);
+    rec.rt0_format = static_cast<uint32_t>(d.Format);
+    rec.rt0_w = d.Width;
+    rec.rt0_h = d.Height;
+  }
+  if (MTLD3D9Surface *ds = m_depthStencilSurface.ptr()) {
+    const D3DSURFACE_DESC &d = ds->desc();
+    rec.ds = reinterpret_cast<uintptr_t>(ds);
+    rec.ds_format = static_cast<uint32_t>(d.Format);
+    rec.ds_w = d.Width;
+    rec.ds_h = d.Height;
+  }
+  if (MTLD3D9CommonTexture *t0 = m_textures[0].ptr()) {
+    rec.tex0 = reinterpret_cast<uintptr_t>(t0);
+    rec.tex0_format = static_cast<uint32_t>(t0->d3dFormat());
+    // Level-0 desc from the existing per-level surface mirror. GetLevelDesc
+    // only takes the recursive device lock and reads stored values; no Metal
+    // bridge call is added on the calling thread.
+    if (auto *tex = dynamic_cast<MTLD3D9Texture *>(t0)) {
+      D3DSURFACE_DESC desc{};
+      if (SUCCEEDED(tex->GetLevelDesc(0, &desc))) {
+        rec.tex0_format = static_cast<uint32_t>(desc.Format);
+        rec.tex0_w = desc.Width;
+        rec.tex0_h = desc.Height;
+      }
+    }
+  }
+
+  char line[640];
+  dxmt::FormatD9DrawTrace(line, sizeof line, rec);
+  Logger::warn(str::format("[d9-draw-trace] ", line));
+  m_drawTrace.ConsumeDraw();
+#endif
+}
+
 void
 MTLD3D9Device::QueueBatchedDraw(BatchedDraw &&draw) {
   // Regenerate any bound AUTOGENMIPMAP texture's dirty mip chain before this
@@ -7913,6 +8039,9 @@ MTLD3D9Device::QueueBatchedDraw(BatchedDraw &&draw) {
     m_encShadowDirty = 0;
   }
   draw.pod_snapshot = m_encShadowLastSnap;
+#if MADEIRA_D9_DRAW_TRACE
+  TraceBatchedDraw(draw);
+#endif
 
   // No per-draw ref snapshot; ref-counted state lives on the
   // device-side m_encodeSideRefs mirror that the chunk walker mutates
@@ -12645,6 +12774,10 @@ MTLD3D9Device::PresentEx(
     if (n < 3 || (n % 300) == 0)
       Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }
   D9DeviceLock lock = LockDevice();
+#if MADEIRA_D9_DRAW_TRACE
+  m_drawTrace.EndFrame();
+  PollDrawTrace();
+#endif
   // An Ex present on an unfocused fullscreen chain reports occlusion
   // without presenting (wine d3d9 device.c returns it off the device
   // state ahead of the swapchain present).
