@@ -563,8 +563,8 @@ public:
       }
     }
 
-    std::conditional<EnableMetalFX, Com<D3D11ResourceCommon>, std::monostate>::type new_upscaled;
-    std::conditional<EnableMetalFX, WMT::Reference<WMT::FXSpatialScaler>, std::monostate>::type new_scaler;
+    typename std::conditional<EnableMetalFX, Com<D3D11ResourceCommon>, std::monostate>::type new_upscaled;
+    typename std::conditional<EnableMetalFX, WMT::Reference<WMT::FXSpatialScaler>, std::monostate>::type new_scaler;
     if constexpr (EnableMetalFX) {
       D3D11_TEXTURE2D_DESC1 upscaled_desc = new_backbuffer_desc;
       upscaled_desc.Height *= scale_factor;

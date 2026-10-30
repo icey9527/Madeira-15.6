@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """从生产 ResizeBuffers 抽取函数体，验证分配失败/初始化失败的事务性与 count 语义。
 
-harness 以 EnableMetalFX=true 实例化（走 Com/Reference 真分支），因此同时覆盖
-MetalFX 分配与 scaler 创建失败；编译期 false 分支在 C++ 模板里本来就不会实例化。
+harness 使用与生产一致的 `template <bool EnableMetalFX> struct Chain`，
+分别实例化 EnableMetalFX=true 与 false：true 覆盖 MetalFX 分配与 scaler 创建失败；
+false 只走非 MetalFX 路径，且断言不访问 MetalFX mock（scaler 调用次数为 0）。
+另做负对照：把生产片段里的两个 typename 去掉后必须编译失败，证明该注解是必需的。
 """
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -57,7 +60,6 @@ using DXGI_FORMAT = int;
 struct HWND__ {}; using HWND = HWND__ *;
 constexpr int S_OK = 0, E_FAIL = -1, DXGI_ERROR_INVALID_CALL = -2, DXGI_FORMAT_UNKNOWN = 0;
 constexpr unsigned DXGI_SWAP_EFFECT_DISCARD = 0, DXGI_SWAP_EFFECT_SEQUENTIAL = 1;
-constexpr bool EnableMetalFX = true;
 #define FAILED(hr) ((hr) < 0)
 #define D3D11_ASSERT(x) ((void)0)
 #define ERR(...) ((void)0)
@@ -112,7 +114,9 @@ inline HRESULT CreateDeviceTexture2D(Dev *, D3D11_TEXTURE2D_DESC1 *, void *, ID3
 }
 struct MTLDeviceMock {
   bool scaler_fail = false;
+  int scaler_calls = 0;
   WMT::Reference<WMT::FXSpatialScaler> newSpatialScaler(WMTFXSpatialScalerInfo) {
+    ++scaler_calls;
     if (scaler_fail) return {};
     static WMT::FXSpatialScaler s;
     WMT::Reference<WMT::FXSpatialScaler> r;
@@ -122,7 +126,7 @@ struct MTLDeviceMock {
 };
 struct Dev {
   MTLDeviceMock mtl;
-  MTLDeviceMock GetMTLDevice() { return mtl; }
+  MTLDeviceMock &GetMTLDevice() { return mtl; }
 };
 namespace dxmt {
 inline HRESULT CreateDeviceTexture2D(Dev *, D3D11_TEXTURE2D_DESC1 *, void *, ID3D11Texture2D1 **out) {
@@ -140,6 +144,7 @@ struct Desc {
   unsigned SwapEffect = DXGI_SWAP_EFFECT_SEQUENTIAL;
 };
 
+template <bool EnableMetalFX>
 struct Chain {
   Dev *device_ = nullptr;
   HWND hWnd = nullptr;
@@ -148,8 +153,8 @@ struct Chain {
   Com<D3D11ResourceCommon, false> backbuffer_;
   std::vector<Com<D3D11ResourceCommon, false>> sequential_backbuffers_;
   Com<D3D11ResourceCommon, false> sequential_rotation_temp_;
-  std::conditional<EnableMetalFX, Com<D3D11ResourceCommon>, std::monostate>::type upscaled_backbuffer_;
-  std::conditional<EnableMetalFX, WMT::Reference<WMT::FXSpatialScaler>, std::monostate>::type metalfx_scaler;
+  typename std::conditional<EnableMetalFX, Com<D3D11ResourceCommon>, std::monostate>::type upscaled_backbuffer_;
+  typename std::conditional<EnableMetalFX, WMT::Reference<WMT::FXSpatialScaler>, std::monostate>::type metalfx_scaler;
   float scale_factor = 1.0f;
   int layer_calls = 0;
   void ApplyLayerProps() { ++layer_calls; }
@@ -160,10 +165,10 @@ BODY
 };
 
 static Dev g_dev;
-static Com<D3D11ResourceCommon, false> g_b0, g_e0, g_t0;
 
-static Chain make_chain() {
-  Chain c;
+template <bool EnableMetalFX>
+static Chain<EnableMetalFX> make_chain() {
+  Chain<EnableMetalFX> c;
   c.device_ = &g_dev;
   c.backbuffer_.p = new D3D11ResourceCommon();
   c.sequential_backbuffers_.push_back(Com<D3D11ResourceCommon, false>{});
@@ -175,10 +180,13 @@ static Chain make_chain() {
   return c;
 }
 
-int main() {
+template <bool EnableMetalFX>
+static int run_cases() {
+  constexpr int upscaled_alloc = EnableMetalFX ? 1 : 0;
+
   // A: 第 2 次分配（extra）失败，旧状态必须原样保留。
   {
-    Chain c = make_chain();
+    Chain<EnableMetalFX> c = make_chain<EnableMetalFX>();
     auto *b0 = c.backbuffer_.p, *e0 = c.sequential_backbuffers_[0].p, *t0 = c.sequential_rotation_temp_.p;
     dxmt::g_created = 0; dxmt::g_fail_at = 2;
     HRESULT hr = c.ResizeBuffers(0, 1024, 768, DXGI_FORMAT_UNKNOWN, 0);
@@ -191,7 +199,7 @@ int main() {
 
   // B: 空链上 0 号分配失败，不能留下半成品。
   {
-    Chain c;
+    Chain<EnableMetalFX> c;
     c.device_ = &g_dev;
     c.desc_ = Desc{};
     dxmt::g_created = 0; dxmt::g_fail_at = 1;
@@ -201,58 +209,102 @@ int main() {
     if (c.layer_calls != 0) return 7;
   }
 
-  // C: count=0 沿用 2，成功后 0 号 + 1 个 extra + scratch + upscaled = 4 次分配。
+  // C: count=0 沿用 2，成功后 0 号 + 1 extra + scratch (+ upscaled) 次分配。
   {
-    Chain c = make_chain();
+    Chain<EnableMetalFX> c = make_chain<EnableMetalFX>();
+    g_dev.mtl.scaler_calls = 0;
     dxmt::g_created = 0; dxmt::g_fail_at = 0;
     if (c.ResizeBuffers(0, 1024, 768, DXGI_FORMAT_UNKNOWN, 0) != S_OK) return 8;
     if (c.desc_.BufferCount != 2 || c.desc_.Width != 1024 || c.desc_.Height != 768) return 9;
     if (c.backbuffer_.p == nullptr || c.sequential_backbuffers_.size() != 1 ||
         c.sequential_backbuffers_[0].p == nullptr || c.sequential_rotation_temp_.p == nullptr) return 10;
-    if (dxmt::g_created != 4) return 11;
+    if (dxmt::g_created != 3 + upscaled_alloc) return 11;
     if (c.layer_calls != 1) return 12;
     if (c.backbuffer_desc_.Width != 1024 || c.backbuffer_desc_.Height != 768) return 13;
+    if constexpr (EnableMetalFX) {
+      if (!c.upscaled_backbuffer_ || !c.metalfx_scaler) return 131;
+      if (g_dev.mtl.scaler_calls != 1) return 132;
+    } else {
+      // false 分支不得实例化/调用任何 MetalFX 访问。
+      if (g_dev.mtl.scaler_calls != 0) return 133;
+    }
   }
 
-  // D: 显式 count=3 -> 0 号 + 2 extra + scratch + upscaled。
+  // D: 显式 count=3 -> 0 号 + 2 extra + scratch (+ upscaled)。
   {
-    Chain c = make_chain();
+    Chain<EnableMetalFX> c = make_chain<EnableMetalFX>();
     dxmt::g_created = 0; dxmt::g_fail_at = 0;
     if (c.ResizeBuffers(3, 0, 0, DXGI_FORMAT_UNKNOWN, 0) != S_OK) return 14;
     if (c.desc_.BufferCount != 3 || c.sequential_backbuffers_.size() != 2 ||
-        c.sequential_rotation_temp_.p == nullptr || dxmt::g_created != 5) return 15;
+        c.sequential_rotation_temp_.p == nullptr ||
+        dxmt::g_created != 3 + 1 + upscaled_alloc) return 15;
   }
 
   // E: 非法 count 不分配、不改状态。
   {
-    Chain c = make_chain();
+    Chain<EnableMetalFX> c = make_chain<EnableMetalFX>();
     auto *b0 = c.backbuffer_.p;
     dxmt::g_created = 0; dxmt::g_fail_at = 0;
     if (c.ResizeBuffers(17, 1024, 768, DXGI_FORMAT_UNKNOWN, 0) != DXGI_ERROR_INVALID_CALL) return 16;
     if (dxmt::g_created != 0 || c.backbuffer_.p != b0 || c.desc_.BufferCount != 2) return 17;
   }
 
-  // F: MetalFX scaler 失败必须整体回滚（旧 desc/buffers/scaler 不变）。
-  {
-    Chain c = make_chain();
+  // F: MetalFX scaler 失败必须整体回滚（仅 true 分支存在该路径）。
+  if constexpr (EnableMetalFX) {
+    Chain<EnableMetalFX> c = make_chain<EnableMetalFX>();
     g_dev.mtl.scaler_fail = true;
     auto *b0 = c.backbuffer_.p, *t0 = c.sequential_rotation_temp_.p;
     dxmt::g_created = 0; dxmt::g_fail_at = 0;
-    if (c.ResizeBuffers(0, 1024, 768, DXGI_FORMAT_UNKNOWN, 0) != E_FAIL) return 18;
+    HRESULT hr = c.ResizeBuffers(0, 1024, 768, DXGI_FORMAT_UNKNOWN, 0);
     g_dev.mtl.scaler_fail = false;
+    if (hr != E_FAIL) return 18;
     if (c.desc_.Width != 800 || c.desc_.BufferCount != 2) return 19;
     if (c.backbuffer_.p != b0 || c.sequential_rotation_temp_.p != t0) return 20;
     if (c.layer_calls != 0) return 21;
   }
+  return 0;
+}
 
-  std::puts("PASS: ResizeBuffers k-th alloc failure/scaler failure keeps old state, count=0 reuse, count2 -> 3 backbuffers+scratch");
+int main() {
+  int r = run_cases<true>();
+  if (r) return r;
+  r = run_cases<false>();
+  if (r) return 100 + r;
+  std::puts("PASS: ResizeBuffers txn verified for EnableMetalFX=true and =false "
+            "(alloc/scaler failure rollback, count=0 reuse, false never touches MetalFX)");
   return 0;
 }
 '''.replace("BODY", body)
 
+# 负对照：只在内存副本里去掉生产片段的两个 typename，不动工作树。
+neg_body, removed = re.subn(r"typename\s+std::conditional", "std::conditional", body)
+if removed != 2:
+    raise SystemExit(f"负对照预置失败：期望生产片段有 2 处 typename std::conditional，实际 {removed}")
+neg_program = program.replace(body, neg_body)
+assert neg_program != program
+
 with tempfile.TemporaryDirectory(prefix="madeira-resize-") as tmp:
-    cpp = Path(tmp) / "resize.cpp"
-    exe = Path(tmp) / ("resize.exe" if os.name == "nt" else "resize")
+    tmp = Path(tmp)
+    cpp = tmp / "resize.cpp"
+    exe = tmp / ("resize.exe" if os.name == "nt" else "resize")
     cpp.write_text(program, encoding="utf-8")
-    subprocess.run([compiler, "-std=c++17", str(cpp), "-o", str(exe)], check=True)
+    common = [compiler, "-std=c++17", "-pedantic-errors"]
+    subprocess.run(common + [str(cpp), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True, timeout=5)
+
+    neg_cpp = tmp / "resize_neg.cpp"
+    neg_exe = tmp / ("resize_neg.exe" if os.name == "nt" else "resize_neg")
+    neg_cpp.write_text(neg_program, encoding="utf-8")
+    neg = subprocess.run(common + [str(neg_cpp), "-o", str(neg_exe)],
+                         capture_output=True, text=True)
+    if neg.returncode == 0:
+        raise SystemExit("负对照失败：去掉 typename 后仍被编译器接受，该注解在 "
+                         + os.path.basename(compiler) + " 下未被验证为必需")
+    err = neg.stderr
+    if not re.search(r"need 'typename'|dependent scope|is a dependent type", err):
+        raise SystemExit("负对照失败原因不是缺失 typename（可能引入其它错误）:\n" + err[:2000])
+    print("NEGATIVE CONTROL OK: removing both 'typename' fails as dependent type:")
+    for line in err.splitlines():
+        if "need 'typename'" in line or "dependent" in line:
+            print("  " + line.strip())
+            break
