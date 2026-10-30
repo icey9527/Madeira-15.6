@@ -42,4 +42,32 @@ template <typename T>
 size_t d9BatchCharge(const std::vector<T>& batch, bool used) {
   return (used ? batch.size() : batch.capacity()) * sizeof(T);
 }
+
+// ml1972: pure decision used by the FlushDrawBatch arrival-order walker BEFORE
+// it indexes a captured container. `kind` carries MTLD3D9Device::PendingOpRef::
+// Kind (the walker static_asserts the mapping). Returns false both for an
+// unknown kind and for index >= the container that kind names; `known`
+// separates the two. Only sizes are read -- no payload storage is touched.
+constexpr bool
+d9WalkRefIndexValid(uint8_t kind, uint32_t index, size_t draws_size,
+                    size_t blits_size, size_t ref_ops_size, size_t &bound,
+                    bool &known) {
+  known = true;
+  switch (kind) {
+  case 0: // PendingOpRef::Draw
+    bound = draws_size;
+    break;
+  case 1: // PendingOpRef::Blit
+    bound = blits_size;
+    break;
+  case 2: // PendingOpRef::SetRef
+    bound = ref_ops_size;
+    break;
+  default:
+    bound = 0;
+    known = false;
+    return false;
+  }
+  return index < bound;
+}
 }

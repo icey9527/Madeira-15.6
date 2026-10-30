@@ -10982,6 +10982,43 @@ MTLD3D9Device::FlushDrawBatch() {
     };
 
     for (auto &ref : ops) {
+      // ml1972: hard check on the arrival-order ref before its payload is
+      // touched. The captured vectors are indexed by ref.index; an
+      // out-of-range or unknown-kind record would read outside the moved
+      // storage and hand a foreign pointer to the encoder (the 16:50 native
+      // crash dereferenced blits[idx].src_tex +0x80 with the index
+      // unverified). Unknown kind is NOT treated as a blit.
+      size_t walker_bound = 0;
+      bool walker_kind_known = false;
+      if (!d9WalkRefIndexValid(static_cast<uint8_t>(ref.kind), ref.index,
+              draws.size(), blits.size(), ref_ops.size(), walker_bound,
+              walker_kind_known)) {
+        static std::atomic<unsigned> madeira_walker_bad{0};
+        const unsigned n = madeira_walker_bad.fetch_add(1, std::memory_order_relaxed);
+        if (n < 8)
+          Logger::err(str::format("[d9-walker-invalid] ml1972 n=", n,
+              " op-kind=", unsigned(ref.kind), walker_kind_known ? "" : " (unknown-kind)",
+              " index=", ref.index,
+              " bound=", static_cast<unsigned long long>(walker_bound),
+              " ops=", static_cast<unsigned long long>(ops.size()),
+              " draws=", static_cast<unsigned long long>(draws.size()),
+              " blits=", static_cast<unsigned long long>(blits.size()),
+              " ref_ops=", static_cast<unsigned long long>(ref_ops.size()),
+              " chunk-seq=", chunk_seq, " coherent=", chunk_coherent_id,
+              " action=terminate-op-stream"));
+        // Diagnostic failure, NOT a repair and not a normal success: stop
+        // consuming this chunk so no later Draw runs against a SetRef that was
+        // never applied and no Blit disappears silently. `break` (not return)
+        // keeps the lambda tail (end_current_pass) and the chunk's completion
+        // target alive; the sticky queue error tells the frontend this batch
+        // did not complete correctly.
+        this->m_dxmtQueue->MarkDeviceError();
+        break;
+      }
+      static_assert(unsigned(PendingOpRef::Draw) == 0 &&
+                        unsigned(PendingOpRef::Blit) == 1 &&
+                        unsigned(PendingOpRef::SetRef) == 2,
+                    "d9WalkRefIndexValid kind mapping drifted");
       if (ref.kind == PendingOpRef::SetRef) {
         // Apply the ref-state mutation onto the persistent encode-side
         // mirror BEFORE any subsequent Draw reads it. The walker is the
