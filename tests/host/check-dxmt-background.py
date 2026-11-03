@@ -119,14 +119,28 @@ def find_finish(lines):
     return start + 1, text
 
 
+def find_classify(lines):
+    for i, line in enumerate(lines):
+        if "static bool madeira_is_background_rejection(const char *description) {" in line:
+            depth = 0
+            for j in range(i, len(lines)):
+                depth += lines[j].count("{") - lines[j].count("}")
+                if j > i and depth == 0:
+                    return i + 1, "\n".join(lines[i:j + 1])
+            break
+    raise SystemExit("production background-rejection classifier not found")
+
+
 HARNESS = r"""
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <thread>
+#include <string>
 #include <vector>
 
 #define WARN(...) do { (void)0; } while (0)
@@ -149,7 +163,7 @@ struct GpuCompletionTarget {
   virtual ~GpuCompletionTarget() = default;
 };
 
-struct String { const char *getUTF8String() const { return ""; } };
+struct String { std::string getUTF8String() const { return {}; } };
 struct CmdbufError { String description() const { return {}; } };
 struct LogElement { String description() const { return {}; } };
 struct Logs {
@@ -216,6 +230,9 @@ static std::atomic<unsigned> g_encoded{0}, g_committed{0}, g_ready{0};
 extern "C" int madeira_get_app_active(void) {
   return g_active.load(std::memory_order_acquire);
 }
+static int madeira_get_app_active_force(void) {
+  return g_active.load(std::memory_order_acquire);
+}
 
 static void publish_like_production(FakeChunk &chunk, uint64_t seq) {
   /* The three calls CommitChunkInternal makes after the gate. */
@@ -224,6 +241,8 @@ static void publish_like_production(FakeChunk &chunk, uint64_t seq) {
   g_committed.fetch_add(1, std::memory_order_relaxed);
   g_ready.fetch_add(1, std::memory_order_release);
 }
+
+%(CLASSIFY)s
 
 /* ---- %(GATE)s ---- */
 static void run_gate(FakeChunk &chunk, uint64_t seq) {
@@ -404,6 +423,7 @@ def main():
     lines = SRC.read_text(encoding="utf-8").splitlines()
     gate_line, gate = find_gate(lines)
     finish_line, finish = find_finish(lines)
+    classify_line, classify = find_classify(lines)
     print(f"extracted gate at dxmt_command_queue.cpp:{gate_line}")
     print(f"extracted finish at dxmt_command_queue.cpp:{finish_line}")
 
@@ -412,7 +432,7 @@ def main():
         print("no C++ compiler found (tried CXX, C:/TDM-GCC-32/bin/g++.exe, g++)", file=sys.stderr)
         return 2
 
-    code = HARNESS % {"GATE": gate, "FINISH": finish}
+    code = HARNESS % {"GATE": gate, "FINISH": finish, "CLASSIFY": classify}
     work = Path(tempfile.mkdtemp(prefix="dxmt-bg-"))
     src = work / "harness.cpp"
     exe = work / "harness.exe"

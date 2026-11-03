@@ -8,6 +8,7 @@
 #include <chrono>
 #include <thread>
 #include <cstdio>
+#include <cstring>
 #if defined(_WIN32)
 #include <sys/stat.h>   /* _stat64: the background marker below */
 #endif
@@ -16,8 +17,10 @@
 /* The arm64ec PE build cannot see winemetal's unix-side atomic, so the app
  * publishes the state as a file at the prefix root -- one byte means the app is
  * active, an empty file means it is backgrounded -- and this side stats it.
- * 200 ms is a cache, not a poll: without it this would be 60 file lookups a
- * second, and _stat64 costs one syscall and opens nothing.
+ * 16 ms is a cache, not a poll: one _stat64 syscall covers at most a single
+ * 60 Hz frame, so a background transition can no longer hide behind a stale
+ * answer across a whole frame (the old 200 ms window could, which is how
+ * frame 3209 was submitted after the app had gone to background).
  *
  * Why it matters: iOS refuses GPU submissions from a backgrounded app (Code=7,
  * kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted) and the
@@ -25,22 +28,47 @@
  *
  * Keyed on _WIN32, not DXMT_IOS: meson defines DXMT_IOS for every Windows host
  * system, so it cannot tell the PE module from the unix library. */
-extern "C" int madeira_get_app_active(void) {
-  static thread_local int cached = 1;
-  static thread_local std::chrono::steady_clock::time_point last;
-  auto now = std::chrono::steady_clock::now();
-  if (last != std::chrono::steady_clock::time_point{} &&
-      std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() < 200)
-    return cached;
-  last = now;
+/* Pure: is a cached answer still within the window? Extracted by
+ * tests/host/check-bg-code7.py, so keep it side-effect free. */
+static bool madeira_active_cache_fresh(long long age_ms) { return age_ms < 16; }
+
+/* -1 = stat failed; keep the previous answer, as the old code did. */
+static int madeira_stat_app_active(void) {
   struct _stat64 info;
   if (_stat64("C:\\madeira-active", &info) == 0)
-    cached = info.st_size ? 1 : 0;
-  return cached;
+    return info.st_size ? 1 : 0;
+  return -1;
+}
+
+static thread_local int madeira_active_cached = 1;
+static thread_local bool madeira_active_cached_valid = false;
+static thread_local std::chrono::steady_clock::time_point madeira_active_last;
+
+/* The commit border: ignore the cache and stat now. CommitChunkInternal calls
+ * this at every chunk boundary, so the next chunk after a background
+ * transition always sees inactive. */
+static int madeira_get_app_active_force(void) {
+  int fresh = madeira_stat_app_active();
+  if (fresh >= 0)
+    madeira_active_cached = fresh;
+  madeira_active_last = std::chrono::steady_clock::now();
+  madeira_active_cached_valid = true;
+  return madeira_active_cached;
+}
+
+extern "C" int madeira_get_app_active(void) {
+  auto now = std::chrono::steady_clock::now();
+  if (madeira_active_cached_valid &&
+      madeira_active_cache_fresh(
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - madeira_active_last).count()))
+    return madeira_active_cached;
+  return madeira_get_app_active_force();
 }
 #else
 // 原生库直接读取 winemetal 的真实状态，不用恒为前台的弱定义兜底。
 extern "C" int madeira_get_app_active(void);
+// unix reads an atomic directly: the forced refresh is the same read.
+static int madeira_get_app_active_force(void) { return madeira_get_app_active(); }
 #endif
 
 #define ASYNC_ENCODING 1
@@ -174,7 +202,10 @@ CommandQueue::CommitChunkInternal(CommandChunk &chunk, uint64_t seq) {
   // 那会交给完成线程一个空 cmdbuf（status=0），它永远等不到完成。
   // 后台暂停消费，保留整个 chunk；前台恢复后仍按原顺序提交。
   bool paused = false;
-  while (!madeira_get_app_active()) {
+  // Force one fresh read at the commit border, not the cached one: this is the
+  // last point before Metal submission, so the chunk encoded right after the
+  // app went to background must not slip through on a stale cached value.
+  while (!madeira_get_app_active_force()) {
     if (stopped.load(std::memory_order_acquire))
       return;
     if (!paused) {
@@ -219,6 +250,16 @@ CommandQueue::EncodingThread() {
   return 0;
 }
 
+/* winemetal's WMT::Error (Metal.hpp:168) only wraps Object::description(); it
+ * exposes no domain/code pair, so the only signal is the text. iOS renders
+ * Code=7 as
+ *   Error Domain=MTLCommandBufferErrorDomain Code=7 ... BackgroundExecutionNotPermitted
+ * "Code=7" alone would also match unrelated domains, so require the token.
+ * Pure, and extracted by tests/host/check-bg-code7.py. */
+static bool madeira_is_background_rejection(const char *description) {
+  return description && std::strstr(description, "BackgroundExecutionNotPermitted") != nullptr;
+}
+
 uint32_t
 CommandQueue::WaitForFinishThread() {
   env::setThreadName("dxmt-finish-thread");
@@ -248,11 +289,35 @@ CommandQueue::WaitForFinishThread() {
     }
     if (stopped.load(std::memory_order_acquire))
       break;
-    const bool device_error = missing_cmdbuf || chunk.attached_cmdbuf.status() == WMTCommandBufferStatusError;
+    bool device_error = missing_cmdbuf || chunk.attached_cmdbuf.status() == WMTCommandBufferStatusError;
     if (device_error) {
-      if (!missing_cmdbuf)
-        ERR("Device error at frame ", chunk.frame_, ": ", chunk.attached_cmdbuf.error().description().getUTF8String());
-      MarkDeviceError();
+      // iOS refuses submissions from a backgrounded app (Code=7,
+      // kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted).
+      // That is not a lost device, and it stays non-fatal even if the user has
+      // already returned to the foreground by the time we inspect the error:
+      // the rejection already happened. Escalating it to a device fault would
+      // stall the whole queue and eventually kill the process; losing this one
+      // frame is the cheaper outcome. Any other error, and a missing cmdbuf,
+      // stays fatal.
+      bool bg_rejected = false;
+      if (!missing_cmdbuf) {
+        auto description = chunk.attached_cmdbuf.error().description().getUTF8String();
+        bg_rejected = madeira_is_background_rejection(description.c_str());
+        if (!bg_rejected)
+          ERR("Device error at frame ", chunk.frame_, ": ", description);
+      }
+      if (bg_rejected) {
+        device_error = false;
+        static std::atomic<unsigned> madeira_bg_rejected{0};
+        unsigned n = madeira_bg_rejected.fetch_add(1, std::memory_order_relaxed) + 1;
+        // active= distinguishes "still backgrounded, as expected" from
+        // "rejection raced the return to foreground"; both are tolerated.
+        if (n <= 8 || (n % 256) == 0)
+          ERR("[bg-commit] rejected-by-ios frame=", chunk.frame_, " n=", n,
+              " active=", madeira_get_app_active());
+      } else {
+        MarkDeviceError();
+      }
     }
     if (!missing_cmdbuf) {
       if (auto logs = chunk.attached_cmdbuf.logs()) {
