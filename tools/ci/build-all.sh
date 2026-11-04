@@ -993,7 +993,7 @@ stage_app() {
   # the two configurations side by side and the app cache expects that path.
   CONFIG="${MADEIRA_CONFIG:-Debug}"
   DEBUG_DYLIB="${MADEIRA_DEBUG_DYLIB:-YES}"
-  step "xcodebuild 编译冒烟 (Debug, 未签名, DerivedData=$DD)"
+  step "xcodebuild 编译冒烟 ($CONFIG, 未签名, DerivedData=$DD)"
   rc=0
   tic
   xcodebuild -project app/Madeira.xcodeproj -scheme Madeira \
@@ -1025,7 +1025,10 @@ stage_app() {
   tail -n 5 "$LOGDIR/xcodebuild.log"
 
   step "构建产物校验（部署目标 / MetalFX 链接形态）"
-  APP_BUILT="$DD/Build/Products/Debug-iphoneos/Madeira.app"
+  # The channel decides the configuration: dev is Debug, port/ios15.6 is
+  # Release (ci.yml exports MADEIRA_CONFIG). Xcode keeps both side by side
+  # under the same DerivedData, so the check has to name the one it built.
+  APP_BUILT="$DD/Build/Products/${CONFIG}-iphoneos/Madeira.app"
   [ -d "$APP_BUILT" ] || { ls "$DD/Build/Products" 2>/dev/null || true; die "构建成功但找不到 Madeira.app"; }
   echo "  App  MinimumOSVersion = $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_BUILT/Info.plist" 2>/dev/null)"
   if [ -f "$APP_BUILT/PlugIns/MadeiraJITHelper.appex/Info.plist" ]; then
