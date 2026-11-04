@@ -3064,11 +3064,14 @@ struct ContentView: View {
             }
 
             // D3D9 frontend for 32-bit programs. The i386 d3d9.dll is DXMT's thin
-            // shim; unset (the default) or "emulated", it forwards every export to
-            // d3d9-emulated.dll, DXMT's D3D9 frontend built for i386 and translated
-            // by FEX like the program. "native" makes the shim bind its unix side
-            // and run the frontend as native ARM64 code in libdxmt_combined.a.
-            // Only the i386 shim reads MADEIRA_D3D9; 64-bit programs are unaffected.
+            // shim. Unset (the default), it tries the native frontend -- the shim
+            // binds its unix side and runs as native ARM64 code in
+            // libdxmt_combined.a -- and falls back to d3d9-emulated.dll once if
+            // that frontend is unavailable. "emulated" skips native entirely and
+            // forwards every export to d3d9-emulated.dll, the D3D9 frontend built
+            // for i386 and translated by FEX like the program. "native" is native
+            // or nothing (the A/B comparison). Only the i386 shim reads
+            // MADEIRA_D3D9; 64-bit programs are unaffected.
             if let txt = MadeiraConfig.get("d3d9") {
                 let v = txt.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !v.isEmpty {
@@ -3093,20 +3096,19 @@ struct ContentView: View {
                 }
             }
 
-            // ml731: Windows shared-data clock A/B. Documents/madeira-usd-time.txt == "1"
-            // makes wineserver update KUSER_SHARED_DATA's SystemTime, InterruptTime
-            // and TickCount again. Without it those stay frozen at their init values,
-            // so GetTickCount/Environment.TickCount/DateTime.UtcNow never advance and
-            // every time-gated transition in a managed game waits forever while the
-            // renderer keeps drawing. Opt-in only because the old code claimed the
-            // write faulted; this should become unconditional once proven.
-            if let txt = MadeiraConfig.get("usd-time") {
-                let v = txt.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !v.isEmpty {
-                    setenv("MADEIRA_USD_TIME", v, 1)
-                    logStore.log("Shared-data clock: MADEIRA_USD_TIME=\(v) via madeira.cfg usd-time")
-                }
-            }
+            // ml731: Windows shared-data clock. Makes wineserver update
+            // KUSER_SHARED_DATA's SystemTime, InterruptTime and TickCount.
+            // Without it those stay frozen at their init values, so
+            // GetTickCount/Environment.TickCount/DateTime.UtcNow never advance
+            // and every time-gated transition in a managed game waits forever
+            // while the renderer keeps drawing. It was opt-in while the old
+            // code claimed the write faulted; the port has since run it on
+            // device, so it is the default now. usd-time = 0 restores the
+            // frozen behaviour for an A/B run.
+            let usdTimeSetting = (MadeiraConfig.get("usd-time") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let usdTime = usdTimeSetting.isEmpty ? "1" : usdTimeSetting
+            setenv("MADEIRA_USD_TIME", usdTime, 1)
+            logStore.log("Shared-data clock: MADEIRA_USD_TIME=\(usdTime) via madeira.cfg usd-time (default 1)")
 
             // ml730: REAL thread suspension A/B. Documents/madeira-real-suspend.txt == "1"
             // makes a Wine suspend actually stop the Mach thread and keep it stopped

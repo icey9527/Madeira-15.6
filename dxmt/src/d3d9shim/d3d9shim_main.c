@@ -99,8 +99,8 @@ d3d9shim_log_once(const char *what)
 
 enum d3d9shim_mode {
     D3D9SHIM_MODE_UNSET = 0,
-    D3D9SHIM_MODE_DEFAULT,     /* no knob: forward to the emulated frontend,
-                                * which is the shipped default (see below) */
+    D3D9SHIM_MODE_DEFAULT,     /* no knob: native first, emulated if the native
+                                * frontend is unavailable (see below) */
     D3D9SHIM_MODE_NATIVE,      /* MADEIRA_D3D9=native: native or nothing */
     D3D9SHIM_MODE_EMULATED     /* forward everything to d3d9-emulated.dll */
 };
@@ -117,9 +117,9 @@ read_mode(void)
     len = GetEnvironmentVariableA("MADEIRA_D3D9", value, sizeof(value));
     if (len == 0 || len >= sizeof(value)) {
         shim_mode = D3D9SHIM_MODE_DEFAULT;
-        d3d9shim_trace("[d3d9] MADEIRA_D3D9 unset: forwarding to "
-                       "d3d9-emulated.dll (Documents/madeira-d3d9.txt = "
-                       "native selects the native ARM64 frontend)");
+        d3d9shim_trace("[d3d9] MADEIRA_D3D9 unset: native frontend first; "
+                       "falling back to d3d9-emulated.dll if it is unavailable "
+                       "(Documents/madeira-d3d9.txt = emulated skips it)");
         return;
     }
     if (!_stricmp(value, "emulated") || !_stricmp(value, "pe")
@@ -138,20 +138,22 @@ read_mode(void)
                    "using the default");
 }
 
-/* THE SHIPPED DEFAULT IS THE EMULATED FRONTEND (native D3D9 plan step 4,
- * item 6).  The shim is what games import -- build-pe.sh installs it as
- * d3d9.dll with MADEIRA_D3D9_DEFAULT=shim -- but with no knob set it forwards
- * all ten exports to d3d9-emulated.dll, so the default path is byte for byte
- * the frontend section 6 measured and Log 41 ran at 30-40 fps.  The native
- * path is opt-in: Documents/madeira-d3d9.txt = `native`, which ContentView
- * exports as MADEIRA_D3D9.  Making native the default before it has run on
- * device would have staked the whole app on an untested path with no way to
- * compare, which is the opposite of what an A/B knob is for. */
+/* THE SHIPPED DEFAULT IS THE NATIVE FRONTEND, WITH A FALLBACK.  The shim is
+ * what games import -- build-pe.sh installs it as d3d9.dll with
+ * MADEIRA_D3D9_DEFAULT=shim -- and with no knob set it now tries the native
+ * ARM64 frontend first.  That path has since run on device across the port's
+ * games, which is what the old opt-in default was waiting for; the emulated
+ * frontend is no longer the only measured path.
+ *
+ * If the native frontend cannot be created (no unix side, a refused init
+ * handshake, a missing export), Direct3DCreate9/Create9Ex fall back to
+ * d3d9-emulated.dll exactly once, as before.  MADEIRA_D3D9=native still means
+ * native or nothing, so the A/B comparison keeps its meaning; =emulated keeps
+ * the old path byte for byte. */
 static int
 forwarding(void)
 {
-    return shim_mode == D3D9SHIM_MODE_EMULATED
-           || shim_mode == D3D9SHIM_MODE_DEFAULT;
+    return shim_mode == D3D9SHIM_MODE_EMULATED;
 }
 
 /* Resolve one export out of the emulated frontend.  A failure here is fatal
@@ -380,9 +382,8 @@ create_interface(UINT sdk_version, int is_ex)
 
 /* MADEIRA_D3D9=native asks for the native frontend and nothing else: a
  * missing or broken unix side has to be a visible failure, not a silently
- * slower frame, or the A/B measures the wrong thing.  Every other mode is
- * already forwarding by the time it gets here, so there is nothing to fall
- * back FROM. */
+ * slower frame, or the A/B measures the wrong thing.  The unset/default mode
+ * is the one that falls back, once, to d3d9-emulated.dll. */
 static int
 fall_back_to_emulated(void)
 {
