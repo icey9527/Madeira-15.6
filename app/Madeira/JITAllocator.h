@@ -65,7 +65,22 @@ void jit_arm_trap_fallback(void);
 // Returns false when the kernel does not report them.
 bool jit_cs_status(uint32_t *flags);
 
-bool jit_trollstore_mode(void);
+/* Which JIT memory backend the user asked for. AUTO resolves at runtime. */
+typedef enum {
+    JIT_MODE_AUTOMATIC = 0,
+    JIT_MODE_TROLLSTORE = 1,
+    JIT_MODE_STIKDEBUG = 2,
+} jit_memory_mode_t;
+
+void jit_set_requested_mode(int mode);   /* 0/1/2, out-of-range ignored */
+int  jit_requested_mode(void);
+int  jit_effective_mode(void);           /* JIT_MODE_TROLLSTORE or JIT_MODE_STIKDEBUG */
+bool jit_trollstore_available(void);     /* the _TrollStore marker exists */
+/* Last failure from the TrollStore allocation path, "" when none. For the UI. */
+const char *jit_last_error(void);
+/* One-page self-test of the TrollStore path (entry -> RX map -> free). */
+bool jit_trollstore_probe(void);
+bool jit_trollstore_mode(void);          /* effective mode == TrollStore */
 
 // The user address map [min, max) from TASK_VM_INFO: max is 0xfc0000000 (63 GB)
 // on a standard map and 0x8000000000 (512 GB) on an extended one. Returns false

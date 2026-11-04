@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 
 enum JITMethod: String, CaseIterable, Identifiable {
     case automatic
+    case trollStore
     case stikDebug
     case builtIn
 
@@ -15,9 +16,26 @@ enum JITMethod: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .automatic: return "Automatic"
+        case .trollStore: return "TrollStore"
         case .stikDebug: return "StikDebug"
         case .builtIn: return "Built-in StikJIT"
         }
+    }
+
+    var memoryMode: Int32 {
+        switch self {
+        case .automatic: return 0
+        case .trollStore: return 1
+        case .stikDebug, .builtIn: return 2
+        }
+    }
+}
+
+enum JITMemoryMode {
+    static func applyStored() {
+        let method = UserDefaults.standard.string(forKey: "madeiraJITMethod")
+            .flatMap(JITMethod.init(rawValue:)) ?? .automatic
+        jit_set_requested_mode(method.memoryMode)
     }
 }
 
@@ -174,7 +192,10 @@ final class JITCoordinator: ObservableObject {
     }
 
     @Published var method: JITMethod {
-        didSet { UserDefaults.standard.set(method.rawValue, forKey: "madeiraJITMethod") }
+        didSet {
+            UserDefaults.standard.set(method.rawValue, forKey: "madeiraJITMethod")
+            jit_set_requested_mode(method.memoryMode)
+        }
     }
     @Published private(set) var connectionProblem: ConnectionProblem?
     /// What the last loopback check found (nil: none ran). A JIT failure after it found no
@@ -192,15 +213,20 @@ final class JITCoordinator: ObservableObject {
     private init() {
         method = UserDefaults.standard.string(forKey: "madeiraJITMethod")
             .flatMap(JITMethod.init(rawValue:)) ?? .automatic
+        jit_set_requested_mode(method.memoryMode)
     }
 
     var resolvedMethod: JITMethod {
         guard method == .automatic else { return method }
+        if StikJITHelper.trollStoreMarkerPresent { return .trollStore }
         return StikJITHelper.isAvailable ? .stikDebug : .builtIn
     }
 
     var automaticDescription: String {
-        StikJITHelper.isAvailable
+        if StikJITHelper.trollStoreMarkerPresent {
+            return "TrollStore is detected, so Madeira will use TrollStore JIT."
+        }
+        return StikJITHelper.isAvailable
             ? "StikDebug is installed, so Madeira will open it directly."
             : "StikDebug was not detected, so Madeira will use its built-in helper."
     }
@@ -211,6 +237,12 @@ final class JITCoordinator: ObservableObject {
     }
 
     func enable(completion: @escaping (Result<Void, Error>) -> Void) {
+        if method == .trollStore && !StikJITHelper.trollStoreMarkerPresent {
+            let message = "没检测到 TrollStore 安装（缺 _TrollStore 标记），请选 Automatic 或 StikDebug"
+            error = message
+            completion(.failure(CoordinatorError.setupRequired(message)))
+            return
+        }
         if StikJITHelper.usesTrollStore {
             if StikJITHelper.ready {
                 completion(.success(()))
@@ -319,6 +351,10 @@ final class JITCoordinator: ObservableObject {
         switch resolvedMethod {
         case .automatic:
             assertionFailure("Automatic must resolve to a concrete JIT method")
+        case .trollStore:
+            let message = "TrollStore JIT is enabled by opening Madeira with JIT in TrollStore."
+            error = message
+            completion(.failure(CoordinatorError.setupRequired(message)))
         case .stikDebug:
             guard StikJITHelper.isAvailable else {
                 let message = "StikDebug is not installed. Install it or choose Built-in StikJIT."
@@ -602,6 +638,7 @@ struct JITSetupView: View {
     @ObservedObject private var coordinator = JITCoordinator.shared
     @ObservedObject private var pairing = OnDevicePairing.shared
     @State private var importing = false
+    @State private var trollStoreProbeResult: String?
     @Environment(\.dismiss) private var dismiss
 
     private var pairingLabel: String {
@@ -621,6 +658,7 @@ struct JITSetupView: View {
                             Text(method.title).tag(method)
                         }
                     }
+                    LabeledContent15("当前生效", value: coordinator.resolvedMethod.title)
                     if coordinator.method == .automatic {
                         Text(coordinator.automaticDescription)
                             .font(.caption).foregroundStyle(.secondary)
@@ -635,7 +673,30 @@ struct JITSetupView: View {
                     Text("如果已安装 StikDebug，自动模式会使用它。失败后 Madeira 不会在未提示的情况下自动切换方式。")
                 }
 
-                if coordinator.method != .stikDebug {
+                if coordinator.resolvedMethod == .trollStore {
+                    Section {
+                        LabeledContent15("TrollStore 标记",
+                                         value: StikJITHelper.trollStoreMarkerPresent ? "Detected" : "Missing")
+                        LabeledContent15("CS_DEBUGGED",
+                                         value: SigningStatus.current.debugged ? "Set" : "Not set")
+                        Button("检查 TrollStore JIT") {
+                            let passed = jit_trollstore_probe()
+                            let detail = StikJITHelper.lastJITError
+                            trollStoreProbeResult = passed
+                                ? "TrollStore JIT probe passed."
+                                : (detail.isEmpty ? "TrollStore JIT probe failed." : detail)
+                        }
+                        if let trollStoreProbeResult {
+                            Text(trollStoreProbeResult)
+                        }
+                    } header: {
+                        Text("TrollStore")
+                    } footer: {
+                        Text("iOS 17 上若失败会显示具体失败阶段。")
+                    }
+                }
+
+                if coordinator.resolvedMethod == .builtIn {
                     Section {
                         LabeledContent15("配对", value: pairingLabel)
                         if OnDevicePairing.isSupported {
@@ -666,7 +727,7 @@ struct JITSetupView: View {
                             coordinator.resetDDI()
                         }.disabled(coordinator.busy)
                     }
-                } else {
+                } else if coordinator.resolvedMethod == .stikDebug {
                     Section {
                         if StikJITHelper.isAvailable {
                             Button("通过 StikDebug 启用 JIT") { coordinator.enable() { _ in } }

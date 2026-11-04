@@ -4,6 +4,7 @@ import SwiftUI
 struct MadeiraApp: App {
     init() {
         madeira_startup_log("startup-v2: SwiftUI App init begin")
+        JITMemoryMode.applyStored()
         // ml1172: read the screen on the main thread; library entries, whose
         // default Resolution comes from it, are also made on other threads.
         _ = ResolutionChoices.screen
