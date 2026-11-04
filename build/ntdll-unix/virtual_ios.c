@@ -3961,6 +3961,25 @@ void *ios_jit_translate_addr_for_owner(void *addr, void *owner_peb)
     int i, fallback = -1, any_live = -1;
     uintptr_t a = (uintptr_t)addr;
 
+    /* iOS-Madeira ml613 [xlate-bad]: a caller that hands raw 64-bit DATA to
+     * this function is invisible today — the value matches no mapping and is
+     * returned unchanged, so nothing (not even the caller) notices. The
+     * 2026-10-30 watchdog caught the heal/iat-sync scan inside this loop with
+     * a=0x7eff85f0e7830fe3 (guest bytes, far above the 2^47 user limit) and
+     * owner=the parent PEB. Name the first few callers; the RETURN VALUE is
+     * not touched. Capped at 8 so a scan cannot flood the log. */
+    if (a >= 0x0000800000000000ULL)
+    {
+        static unsigned int bad_n;
+        /* 32-bit fetch_add is lock-free on AArch64 (LDADD); no lock here. */
+        unsigned int bad_seq = __atomic_fetch_add( &bad_n, 1, __ATOMIC_RELAXED ) + 1;
+
+        if (bad_seq <= 8)
+            dprintf( 2, "[xlate-bad] #%u addr=0x%llx owner=%p caller=%p rev=ml613\n",
+                     bad_seq, (unsigned long long)a, owner_peb,
+                     __builtin_return_address( 0 ) );
+    }
+
     for (i = 0; i < ios_jit_mapping_count; i++)
     {
         uintptr_t base = (uintptr_t)ios_jit_mappings[i].pe_base;

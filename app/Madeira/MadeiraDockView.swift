@@ -131,6 +131,7 @@ struct MadeiraDockView: View {
     @ObservedObject private var signIn = SteamSignInModel.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showSignIn = false
+    @State private var cdnHost = MadeiraConfig.get("steam-cdn") ?? ""
     let start: (DockGame, Bool) -> Void
 
     var body: some View {
@@ -148,15 +149,42 @@ struct MadeiraDockView: View {
                     }
                 }
                 Section {
-                    if dock.clientInstalled {
-                        Label("Valve 客户端组件已安装", systemImage: "checkmark.circle")
-                    } else if dock.preparing {
+                    if dock.preparing {
                         HStack(spacing: 12) { ProgressView(); Text(dock.progress).foregroundStyle(.secondary) }
+                    } else if !dock.clientInstalled {
+                        Button("下载 Valve 客户端组件（约 84 MB）") { dock.prepareClient() }
+                    } else if SteamRuntimeFiles.missingComponents(prefix: MadeiraDock.prefix).count > 0 {
+                        // An install prepared before the codecs package existed:
+                        // fill in what is missing (the FFmpeg runtime Steam's
+                        // video64.dll imports) without touching the rest.
+                        Button("补齐 Valve 客户端组件（\(SteamRuntimeFiles.missingComponents(prefix: MadeiraDock.prefix).count) 个文件）") {
+                            dock.prepareClient()
+                        }
+                        .foregroundStyle(.orange)
                     } else {
-                        Button("下载 Valve 客户端组件（约 73 MB）") { dock.prepareClient() }
+                        Label("Valve 客户端组件已安装", systemImage: "checkmark.circle")
                     }
                 } header: { Text("Steam 客户端") } footer: {
                     Text("文件从 Valve 更新服务器下载，并通过固定的 SHA-256 校验值验证。现有 Steam 文件会保留。")
+                }
+                Section {
+                    TextField("自动（每次探测可用主机）", text: $cdnHost)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button("保存线路") {
+                        let value = cdnHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                        MadeiraConfig.set("steam-cdn", value.isEmpty ? nil : value)
+                        cdnHost = MadeiraConfig.get("steam-cdn") ?? ""
+                    }
+                    if !(MadeiraConfig.get("steam-cdn") ?? "").isEmpty {
+                        Button("恢复自动") {
+                            MadeiraConfig.set("steam-cdn", nil)
+                            cdnHost = ""
+                        }
+                    }
+                } header: { Text("下载线路") } footer: {
+                    Text("留空表示自动：从当前下载地区返回的节点中选择可用线路。保存线路后会直接使用该节点，不再自动测速或改写；节点不可用时可点「恢复自动」。")
                 }
                 Section {
                     if dock.games.isEmpty {

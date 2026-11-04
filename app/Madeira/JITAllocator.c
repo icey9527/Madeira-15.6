@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <libkern/OSCacheControl.h>
 #include <pthread.h>
@@ -453,8 +454,26 @@ bool jit_cs_status(uint32_t *flags) {
     return true;
 }
 
-bool jit_trollstore_mode(void) {
-    if (__builtin_available(iOS 16.0, *)) return false;
+static volatile int g_requested_mode = JIT_MODE_AUTOMATIC;
+static char g_last_error[256];
+
+static void jit_set_last_error(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(g_last_error, sizeof(g_last_error), fmt, args);
+    va_end(args);
+}
+
+static int jit_resolve_mode(int requested, bool marker) {
+    if (requested == JIT_MODE_TROLLSTORE) return JIT_MODE_TROLLSTORE;
+    if (requested == JIT_MODE_STIKDEBUG)  return JIT_MODE_STIKDEBUG;
+    return marker ? JIT_MODE_TROLLSTORE : JIT_MODE_STIKDEBUG;
+}
+
+/* The old OS gate made every iOS 16+ install take StikDebug even when TrollStore
+ * was present. TrollStore 1 and 2 use the same marker layout; a future layout
+ * change surfaces as marker=0 rather than a crash. */
+static bool jit_trollstore_marker(void) {
     char path[4096];
     uint32_t length = sizeof(path);
     if (_NSGetExecutablePath(path, &length) != 0) return false;
@@ -468,6 +487,41 @@ bool jit_trollstore_mode(void) {
     return access(path, F_OK) == 0;
 }
 
+void jit_set_requested_mode(int mode) {
+    if (mode < JIT_MODE_AUTOMATIC || mode > JIT_MODE_STIKDEBUG) return;
+    g_requested_mode = mode;
+}
+
+int jit_requested_mode(void) {
+    return g_requested_mode;
+}
+
+int jit_effective_mode(void) {
+    return jit_resolve_mode(g_requested_mode, jit_trollstore_marker());
+}
+
+bool jit_trollstore_available(void) {
+    return jit_trollstore_marker();
+}
+
+bool jit_trollstore_mode(void) {
+    return jit_effective_mode() == JIT_MODE_TROLLSTORE;
+}
+
+const char *jit_last_error(void) {
+    return g_last_error;
+}
+
+static void jit_set_marker_error(void) {
+    char path[4096];
+    uint32_t length = sizeof(path);
+    if (_NSGetExecutablePath(path, &length) != 0) {
+        jit_set_last_error("cannot resolve the executable path");
+    } else {
+        jit_set_last_error("TrollStore environment not detected: no _TrollStore marker next to the app");
+    }
+}
+
 static void *jit_trollstore_allocate_rx(size_t size) {
     if (!size || size > SIZE_MAX - (JIT_PAGE_SIZE - 1)) return NULL;
     size = align_to_page(size);
@@ -479,6 +533,7 @@ static void *jit_trollstore_allocate_rx(size_t size) {
         MAP_MEM_NAMED_CREATE | VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE,
         &entry, MACH_PORT_NULL);
     if (result != KERN_SUCCESS) {
+        jit_set_last_error("mach_make_memory_entry_64 failed (kr=%d: %s)", result, mach_error_string(result));
         jit_log("[trollstore] memory entry failed: %d", result);
         return NULL;
     }
@@ -488,11 +543,28 @@ static void *jit_trollstore_allocate_rx(size_t size) {
                     VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE, VM_INHERIT_DEFAULT);
     mach_port_deallocate(task, entry);
     if (result != KERN_SUCCESS) {
+        jit_set_last_error("vm_map RX failed (kr=%d: %s)", result, mach_error_string(result));
         jit_log("[trollstore] RX mapping failed: %d", result);
         return NULL;
     }
     jit_log("[trollstore] RX mapped at %p size=%zu", (void *)address, size);
     return (void *)address;
+}
+
+bool jit_trollstore_probe(void) {
+    g_last_error[0] = '\0';
+    if (!jit_trollstore_marker()) {
+        jit_set_marker_error();
+        return false;
+    }
+    if (!jit_check_debugged()) {
+        jit_set_last_error("CS_DEBUGGED is not set: open Madeira with JIT from TrollStore");
+        return false;
+    }
+    void *address = jit_trollstore_allocate_rx(JIT_PAGE_SIZE);
+    if (!address) return false;
+    vm_deallocate(mach_task_self(), (vm_address_t)address, JIT_PAGE_SIZE);
+    return true;
 }
 
 bool jit_task_map_range(uint64_t *min_address, uint64_t *max_address) {
@@ -517,12 +589,25 @@ uint64_t jit_available_memory(void) {
 
 __attribute__((noinline, optnone))
 void *jit26_prepare_region(void *addr, size_t len) {
+    g_last_error[0] = '\0';
     if (jit_trollstore_mode()) {
-        if (!len || !jit_check_debugged()) return NULL;
+        if (g_requested_mode == JIT_MODE_TROLLSTORE && !jit_trollstore_marker()) {
+            jit_set_marker_error();
+            return NULL;
+        }
+        if (!len) {
+            jit_set_last_error("invalid region size");
+            return NULL;
+        }
+        if (!jit_check_debugged()) {
+            jit_set_last_error("CS_DEBUGGED is not set: open Madeira with JIT from TrollStore");
+            return NULL;
+        }
         if (!addr) return jit_trollstore_allocate_rx(len);
         kern_return_t result = vm_protect(mach_task_self(), (vm_address_t)addr, len,
                                           FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
         if (result != KERN_SUCCESS) {
+            jit_set_last_error("vm_protect RX failed (kr=%d: %s)", result, mach_error_string(result));
             jit_log("[trollstore] RX protection failed: %d", result);
             return NULL;
         }

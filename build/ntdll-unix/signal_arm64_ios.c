@@ -6749,6 +6749,21 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
 
     if (self && (flags & CONTEXT_DEBUG_REGISTERS)) self = FALSE;
 
+    /* Subnautica (Mono) died jumping to 0x3600000070A12829: a Mono code address
+     * with its bytes shifted one place. If a context set carries such a PC, say
+     * who set it. Also the first cross-thread PC rewrites, to see if Mono
+     * redirects threads at all. */
+    if (flags & CONTEXT_CONTROL)
+    {
+        static int ctl_n, bad_n;
+        int bad = (context->Pc >> 47) != 0;
+        if ((bad && bad_n++ < 16) || (!self && ctl_n++ < 32))
+            dprintf( 2, "[set-ctx-pc] %s self=%d handle=%p pc=%p sp=%p lr=%p x0=%p x8=%p flags=%#x caller=%p\n",
+                     bad ? "NONCANONICAL" : "cross", self, handle, (void *)context->Pc, (void *)context->Sp,
+                     (void *)context->Lr, (void *)context->X[0], (void *)context->X[8], (unsigned)context->ContextFlags,
+                     __builtin_return_address(0) );
+    }
+
     /* iOS-Madeira diag: companion to [set-ctx] in signal_set_full_context —
      * catch cross-thread PC rewrites into the FEX tail carve that land on
      * data words (suspend/invalidate machinery redirecting threads). */
@@ -7759,6 +7774,167 @@ static int ios_mach_deliver_guest_exception_inner( thread_t thread, arm_thread_s
                              cidx, cbase, csize, cfree ? "FREE(recycled!)" : "live",
                              (fault_addr >= cbase && fault_addr < cbase + csize) ? 1 : 0 );
                 dprintf( 2, " regs=%d rev=ml613\n", have_regs );
+
+                /* iOS-Madeira ml613 [jit-pc]: a fault whose pc lies in a tail
+                 * carve names a JIT pool range but not a MODULE, so
+                 * "hostpc=0x2cee49508" cannot be attributed. Reverse-translate
+                 * the host pc and lr to their original PE images (ml454 table
+                 * walk; ios_pe_module_name is fault-safe since ml347) and dump
+                 * x0-x3 plus whether the TEB held in x18 is this thread's own:
+                 * the 2026-10-30 fault arrived with sp=0xfb58f0000 while x18's
+                 * TEB claimed stack 0x146490000..0x146c90000, i.e. a foreign
+                 * TEB delivered it. Read-only, no locks, capped at 8. All reads
+                 * of the x18 TEB go through mach_vm so a bogus x18 cannot
+                 * nest-fault the handler. */
+                {
+                    static unsigned int jit_pc_n;
+                    unsigned int jit_pc_seq;
+                    char pmn[64] = "(outside mappings)", lmn[64] = "(outside mappings)";
+
+                    /* Lock-free on AArch64: 32-bit fetch_add is a single LDADD
+                     * (no libatomic, no lock, no TLS init) — safe on the Mach
+                     * exception-handler thread. */
+                    jit_pc_seq = __atomic_fetch_add( &jit_pc_n, 1, __ATOMIC_RELAXED ) + 1;
+                    if (jit_pc_seq <= 8)
+                    {
+                        extern uint64_t ios_jit_reverse_translate( uint64_t addr, uint64_t *module_base );
+                        uint64_t jpc = (uint64_t)arm_thread_state64_get_pc( mc.__ss );
+                        uint64_t jlr = (uint64_t)arm_thread_state64_get_lr( mc.__ss );
+                        uint64_t jsp = (uint64_t)arm_thread_state64_get_sp( mc.__ss );
+                        uint64_t pmb = 0, plr = 0, pva = 0, lva = 0;
+                        uint64_t x18 = (uint64_t)mc.__ss.__x[18], cur_peb = 0;
+                        TEB *tnow = NtCurrentTeb();
+
+                        if (tnow) cur_peb = (uint64_t)(uintptr_t)tnow->Peb;
+                        pva = ios_jit_reverse_translate( jpc, &pmb );
+                        lva = ios_jit_reverse_translate( jlr, &plr );
+                        /* ios_pe_module_name returns a single static namebuf;
+                         * copy each name out before the next call overwrites it
+                         * (manual bounded copy: no allocation, guaranteed NUL). */
+                        if (pmb)
+                        {
+                            const char *m = ios_pe_module_name( pmb );
+                            unsigned k = 0;
+                            while (k < sizeof(pmn) - 1 && m[k]) { pmn[k] = m[k]; k++; }
+                            pmn[k] = 0;
+                        }
+                        if (plr)
+                        {
+                            const char *m = ios_pe_module_name( plr );
+                            unsigned k = 0;
+                            while (k < sizeof(lmn) - 1 && m[k]) { lmn[k] = m[k]; k++; }
+                            lmn[k] = 0;
+                        }
+                        dprintf( 2, "[jit-pc] #%u pc=0x%llx %s+0x%llx | lr=0x%llx %s+0x%llx\n",
+                                 jit_pc_seq, (unsigned long long)jpc,
+                                 pmn,
+                                 (unsigned long long)(pmb ? pva - pmb : 0),
+                                 (unsigned long long)jlr,
+                                 lmn,
+                                 (unsigned long long)(plr ? lva - plr : 0) );
+                        dprintf( 2, "[jit-pc]   x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x18=0x%llx\n",
+                                 (unsigned long long)mc.__ss.__x[0],
+                                 (unsigned long long)mc.__ss.__x[1],
+                                 (unsigned long long)mc.__ss.__x[2],
+                                 (unsigned long long)mc.__ss.__x[3],
+                                 (unsigned long long)x18 );
+                        if (x18)
+                        {
+                            uint64_t x18_peb = 0, xs_b = 0, xs_l = 0;
+                            mach_vm_size_t g2 = 0;
+                            int ok_peb = mach_vm_read_overwrite( mach_task_self(),
+                                             (mach_vm_address_t)(x18 + 0x60), 8,
+                                             (mach_vm_address_t)&x18_peb, &g2 ) == KERN_SUCCESS
+                                         && g2 == 8;
+                            int ok_st  = mach_vm_read_overwrite( mach_task_self(),
+                                             (mach_vm_address_t)(x18 + 0x8), 8,
+                                             (mach_vm_address_t)&xs_b, &g2 ) == KERN_SUCCESS
+                                         && g2 == 8
+                                      && mach_vm_read_overwrite( mach_task_self(),
+                                             (mach_vm_address_t)(x18 + 0x10), 8,
+                                             (mach_vm_address_t)&xs_l, &g2 ) == KERN_SUCCESS
+                                         && g2 == 8;
+                            dprintf( 2, "[jit-pc]   x18_peb=%s0x%llx cur_peb=%p same_peb=%d "
+                                        "x18_stack=0x%llx..0x%llx sp_in_x18_stack=%d\n",
+                                     ok_peb ? "" : "<unreadable>",
+                                     (unsigned long long)x18_peb, (void *)(uintptr_t)cur_peb,
+                                     (ok_peb && x18_peb == cur_peb) ? 1 : 0,
+                                     (unsigned long long)xs_l, (unsigned long long)xs_b,
+                                     (ok_st && jsp > xs_l && jsp <= xs_b) ? 1 : 0 );
+                        }
+                    }
+                }
+
+                /* iOS-Madeira: a fault at a small address (Dead Cells writes four
+                 * bytes at 0x10000+4) means a pointer that should be wide was
+                 * used narrow. Dump all 16 guest GPRs and the top of the guest
+                 * stack: a value whose low 32 bits equal the fault page (a
+                 * "twin", e.g. 0x12ab000000010000) names truncation, while no
+                 * twin means the number itself was computed -- or read from a
+                 * field -- as a small integer. Capped so a loop cannot flood the
+                 * log. */
+                if (fault_addr < 0x100000)
+                {
+                    static unsigned madeira_small_n;
+                    if (madeira_small_n++ < 8)
+                    {
+                        /* The guest copy of the registers lives in the CHPE CPU
+                         * area, which is not published on every thread (regs=0
+                         * above is why the first version of this probe stayed
+                         * silent). The HOST registers always are, and for an
+                         * ARM64EC block they are the ones the faulting store
+                         * used: `str w21,[x19,#4]` keeps its base in host x19. */
+                        {
+                            int hi;
+                            dprintf( 2, "[small-addr] host x0..x12:" );
+                            for (hi = 0; hi <= 12; hi++)
+                                dprintf( 2, " %llx", (unsigned long long)mc.__ss.__x[hi] );
+                            dprintf( 2, "\n[small-addr] host x13..x28:" );
+                            for (hi = 13; hi <= 28; hi++)
+                                dprintf( 2, " %llx", (unsigned long long)mc.__ss.__x[hi] );
+                            dprintf( 2, "\n[small-addr] host fp=%llx lr=%llx sp=%llx pc=%llx caller=%llx\n",
+                                     (unsigned long long)mc.__ss.__fp, (unsigned long long)mc.__ss.__lr,
+                                     (unsigned long long)mc.__ss.__sp, (unsigned long long)mc.__ss.__pc,
+                                     (unsigned long long)__builtin_return_address(0) );
+                            /* Which thread is this? The TEB's stack bounds say
+                             * whether the faulting sp even belongs to it: Dead
+                             * Cells faults at 0x10004 with sp BELOW its own
+                             * StackBase, i.e. on a stack the TEB does not know. */
+                            {
+                                uint64_t teb = (uint64_t)(uintptr_t)NtCurrentTeb();
+                                uint64_t sb = *(volatile uint64_t *)(uintptr_t)(teb + 0x8);
+                                uint64_t sl = *(volatile uint64_t *)(uintptr_t)(teb + 0x10);
+                                dprintf( 2, "[small-addr] teb=%llx stackBase=%llx stackLimit=%llx sp_in_stack=%d\n",
+                                         (unsigned long long)teb, (unsigned long long)sb,
+                                         (unsigned long long)sl,
+                                         (mc.__ss.__sp > sl && mc.__ss.__sp <= sb) ? 1 : 0 );
+                            }
+                        }
+                        TEB *t2 = NtCurrentTeb();
+                        CHPE_V2_CPU_AREA_INFO *ca2 = t2 ? t2->ChpeV2CpuAreaInfo : NULL;
+                        void *fx2 = ca2 ? *(void **)((char *)ca2 + 0x30) : NULL;
+                        if (fx2)
+                        {
+                            const uint64_t *gr2 = &((const uint64_t *)fx2)[0x20 / 8];
+                            int gi;
+                            dprintf( 2, "[small-addr] gprs:" );
+                            for (gi = 0; gi < 16; gi++)
+                                dprintf( 2, " %llx", (unsigned long long)gr2[gi] );
+                            dprintf( 2, "\n[small-addr] stack:" );
+                            for (gi = 0; gi < 32; gi++)
+                            {
+                                uint64_t v = 0;
+                                mach_vm_size_t got = 0;
+                                if (mach_vm_read_overwrite( mach_task_self(), gr2[4] + (uint64_t)gi * 8,
+                                                            sizeof(v), (mach_vm_address_t)&v, &got ) != KERN_SUCCESS
+                                    || got != sizeof(v))
+                                    break;
+                                dprintf( 2, " %llx", (unsigned long long)v );
+                            }
+                            dprintf( 2, "\n" );
+                        }
+                    }
+                }
 
                 /* iOS-Madeira ml619 [tree-caller]: NAME THE CORRUPTED CONTAINER.
                  *
@@ -9820,6 +9996,78 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
                                 ERR("  [guest-exact] ml885 block=%p rip=%p (bytes unreadable)\n", (void*)bb, (void*)xrip);
                         }
                         else ERR("  [guest-exact] ml885 block=%p unresolved: %s\n", (void*)bb, why);
+                        /* The fault is in the dispatcher (an indirect jmp/call/ret to a bad
+                         * target): the block that branched there is at lr-4. Name its x86. */
+                        if (!xrip && bb)
+                        {
+                            const char *why2 = "";
+                            uint64_t lrip = ios_native_rip_from_hostpc( bb, (uint64_t)REGn_sig(30, context) - 4, &why2 );
+                            uint8_t xb[16]; mach_vm_size_t g3 = 0;
+                            if (lrip && mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)lrip, sizeof(xb),
+                                                                (mach_vm_address_t)xb, &g3 ) == KERN_SUCCESS && g3 == sizeof(xb))
+                            {
+                                ERR("  [guest-exact] via lr: rip=%p x86=%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                                    (void*)lrip, xb[0],xb[1],xb[2],xb[3],xb[4],xb[5],xb[6],xb[7],xb[8],xb[9],xb[10],xb[11],xb[12],xb[13],xb[14],xb[15]);
+                                /* An indirect call/jmp through memory ([base+disp], no SIB):
+                                 * dump the table around the slot it read, so one bad slot
+                                 * (a bad store) and a whole shifted block (a bad copy) can
+                                 * be told apart (Subnautica: call [rax-0x88]). */
+                                {
+                                    int k = 0, rexb = 0;
+                                    if ((xb[0] & 0xf0) == 0x40) { rexb = xb[0] & 1; k = 1; }
+                                    if (xb[k] == 0xff)
+                                    {
+                                        uint8_t m = xb[k + 1];
+                                        int mod = m >> 6, reg = (m >> 3) & 7, rm = m & 7;
+                                        if (reg >= 2 && reg <= 5 && (mod == 1 || mod == 2) && rm != 4)
+                                        {
+                                            int64_t disp = mod == 1 ? (int8_t)xb[k + 2]
+                                                                    : (int32_t)(xb[k + 2] | xb[k + 3] << 8 | xb[k + 4] << 16 | (uint32_t)xb[k + 5] << 24);
+                                            /* The frame's gregs are stale here (FEX keeps guest registers
+                                             * in host registers): read the base from its ARM64EC home. */
+                                            static const int sra[16] = { 8, 0, 1, 27, 23, 29, 25, 26, 2, 3, 4, 5, 19, 20, 21, 22 };
+                                            int hr = sra[rm | rexb << 3];
+                                            uint64_t basev = hr == 29 ? (uint64_t)FP_sig(context) : (uint64_t)REGn_sig(hr, context);
+                                            uint64_t ea = basev + disp, q[12];
+                                            ERR("  [slot] base=x%d=%p disp=%lld (stale frame value %p)\n", hr, (void*)basev,
+                                                (long long)disp, (void*)cs[1 + (rm | rexb << 3)]);
+                                            mach_vm_size_t g4 = 0;
+                                            if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(ea - 48), sizeof(q),
+                                                                        (mach_vm_address_t)q, &g4 ) == KERN_SUCCESS && g4 == sizeof(q))
+                                            {
+                                                int j;
+                                                ERR("  [slot] ea=%p (slot = [6])\n", (void*)ea);
+                                                for (j = 0; j < 12; j += 4)
+                                                    ERR("  [slot]   %016llx %016llx %016llx %016llx\n",
+                                                        (unsigned long long)q[j], (unsigned long long)q[j+1],
+                                                        (unsigned long long)q[j+2], (unsigned long long)q[j+3]);
+                                            }
+                                            else ERR("  [slot] ea=%p unreadable\n", (void*)ea);
+                                        }
+                                    }
+                                    /* The host code FEX emitted for this exit (lr-64..lr+4). */
+                                    {
+                                        uint32_t hc[18]; mach_vm_size_t g6 = 0; int j;
+                                        uint64_t lr = (uint64_t)REGn_sig(30, context);
+                                        if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(lr - 64), sizeof(hc),
+                                                                    (mach_vm_address_t)hc, &g6 ) == KERN_SUCCESS && g6 == sizeof(hc))
+                                            for (j = 0; j < 18; j += 6)
+                                                ERR("  [slot-host] lr%+d: %08x %08x %08x %08x %08x %08x\n", j * 4 - 64,
+                                                    hc[j], hc[j+1], hc[j+2], hc[j+3], hc[j+4], hc[j+5]);
+                                    }
+                                    /* The target rotated back one byte, and what is there. */
+                                    {
+                                        uint64_t v = cs[0], r = (v << 8) | (v >> 56);
+                                        uint8_t tb[16]; mach_vm_size_t g5 = 0;
+                                        if ((v >> 47) && mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)r, sizeof(tb),
+                                                                                 (mach_vm_address_t)tb, &g5 ) == KERN_SUCCESS && g5 == sizeof(tb))
+                                            ERR("  [slot] rol8(rip)=%p bytes=%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                                                (void*)r, tb[0],tb[1],tb[2],tb[3],tb[4],tb[5],tb[6],tb[7],tb[8],tb[9],tb[10],tb[11],tb[12],tb[13],tb[14],tb[15]);
+                                    }
+                                }
+                            }
+                            else ERR("  [guest-exact] via lr=%p: %s\n", (void*)REGn_sig(30, context), lrip ? "bytes unreadable" : why2);
+                        }
                     }
                     for (i = 0; i < 16; i += 4)
                         ERR("  [guest-state]   %s=%p %s=%p %s=%p %s=%p\n",

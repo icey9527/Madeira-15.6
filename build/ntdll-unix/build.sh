@@ -208,6 +208,12 @@ for src in $WINE_SRC/dlls/ntdll/unix/*.c; do
             # prepare-sync.py rewrote the two os_sync availability checks
             compile_one "$OBJ_DIR/sync.c" "sync"
             ;;
+        file)
+            # ml2108: build-time NtWriteFile source probe (write-src), added
+            # without touching the wine submodule -- same pattern as sync.
+            python3 "$BUILD_DIR/prepare-file-write.py" "$WINE_SRC" "$OBJ_DIR/file.c"
+            compile_one "$OBJ_DIR/file.c" "file"
+            ;;
         *)
             compile_one "$src" "$name"
             ;;

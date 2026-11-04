@@ -12,31 +12,11 @@ DXMT_ROOT="$REPO_ROOT/dxmt"
 
 # One tree, one copy of every file — decided here, before any -I path is built.
 #
-# This build used to compile a patched .cpp straight out of compat-src while its
-# quoted includes fell back to the pristine tree through -I. That works until a
-# HEADER is patched: then a translation unit sees the header twice (the compat
-# copy through its own directory, the source copy through -I) and every symbol
-# in it is "redefinition". Merging into one throwaway tree makes include
-# resolution uniform, and the real source tree stays pristine, so a rerun
-# regenerates the same patches from the same input.
-#
-# The merged tree sits at dxmt/build-src, not under build/, because
-# winemetal_unix.c includes "../../../../build/madeira_cfg.h" — four levels up
-# from its own directory must still be the repository root.
-# Always regenerate: prepare-compat.py reads a file from its own output when one
-# is already there, so a second run in the same workspace would patch patched
-# text and die on a missing anchor.
-rm -rf "$BUILD_DIR/compat-src"
-python3 "$BUILD_DIR/prepare-compat.py" "$DXMT_SRC" "$BUILD_DIR/compat-src" "${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
-OVERLAY="$DXMT_ROOT/build-src"
-rm -rf "$OVERLAY"
-mkdir -p "$OVERLAY"
-cp -R "$DXMT_SRC/." "$OVERLAY/"
-if [ -d "$BUILD_DIR/compat-src" ]; then
-    cp -R "$BUILD_DIR/compat-src/." "$OVERLAY/"
-fi
-DXMT_SRC="$OVERLAY"
-echo "  merged tree: $(find "$OVERLAY" -type f | wc -l | tr -d ' ') files ($(du -sh "$OVERLAY" | cut -f1))"
+# The iOS port's edits live in dxmt/src itself since 2026-10-29 (dxmt is
+# vendored in-tree and the port is committed, no build-time patching), so build
+# straight from it. winemetal_unix.c now includes madeira_cfg.h by name, which
+# is why -I$REPO_ROOT/build below replaces the four-levels-up path that used to
+# resolve only from the old dxmt/build-src merged tree.
 LLVM_SRC="$REPO_ROOT/toolchains/llvm-project/llvm"
 LLVM_BUILD="$REPO_ROOT/toolchains/llvm-ios-build"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -48,7 +28,7 @@ mkdir -p "$OBJ_DIR"
 [ -s "$LLVM_BUILD/lib/libLLVMPasses.a" ] || { echo "Build iOS LLVM first: bash build/llvm-ios/build.sh"; exit 1; }
 [ -s "$LLVM_BUILD/include/llvm/Config/llvm-config.h" ] || { echo "LLVM generated headers missing"; exit 1; }
 for header in d3d9.h d3d11.h dxgi.h; do
-    [ -s "$DXMT_ROOT/include/native/directx/$header" ] || { echo "Missing DXMT submodule header: $header; run git -C dxmt submodule update --init"; exit 1; }
+    [ -s "$DXMT_ROOT/include/native/directx/$header" ] || { echo "Missing DXMT header: $header (dxmt/ is vendored in-tree)"; exit 1; }
 done
 if [ ! -s "$REPO_ROOT/FEX/External/fmt/include/fmt/format.h" ]; then
     echo "Missing pinned fmt headers from FEX/External/fmt"
@@ -93,7 +73,7 @@ for shader in air_msad air_samplepos air_tessellation; do
 done
 
 COMMON_FLAGS="-arch arm64 -isysroot $SDK -miphoneos-version-min=${IPHONEOS_DEPLOYMENT_TARGET:-18.0} -fblocks -O2"
-INCLUDES="-I$DXMT_ROOT/include -I$DXMT_ROOT/libs -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv"
+INCLUDES="-I$REPO_ROOT/build -I$DXMT_ROOT/include -I$DXMT_ROOT/libs -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv"
 INCLUDES_DIRECTX="-I$DXMT_ROOT/include/native/directx -I$DXMT_ROOT/include/native/windows"
 INCLUDES_SHADERS="-I$BUILD_DIR/shader-headers"
 LLVM_INCLUDES="-I$LLVM_BUILD/include -I$LLVM_SRC/include"
@@ -114,7 +94,7 @@ CXX_FLAGS="-std=c++20 -fno-exceptions -fno-rtti"
 # (winemetal_unix.c:5084), so point it at the real symbol on the command line
 # rather than editing either file.
 MADEIRA_DEFS="-DDXMT_NATIVE=1 -DDXMT_MADEIRA=1 -DDXMT_IOS=1 -DDXMT_PAGE_SIZE=4096 -DNOMINMAX"
-MADEIRA_INCLUDES="-I$DXMT_SRC/nativemetal -I$DXMT_ROOT/include -I$DXMT_ROOT/libs \
+MADEIRA_INCLUDES="-I$REPO_ROOT/build -I$DXMT_SRC/nativemetal -I$DXMT_ROOT/include -I$DXMT_ROOT/libs \
  -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv -I$DXMT_SRC/util -I$DXMT_SRC/dxmt \
  -I$DXMT_SRC/d3d9 -I$DXMT_SRC/d3d9/unix -I$DXMT_SRC/d3d9shim"
 # The frontend throws (MTLD3DError) and the imported code uses dynamic_cast,
@@ -450,7 +430,7 @@ echo "Staged: $APP_COPY ($(wc -c < "$APP_COPY" | tr -d ' ') bytes)"
 # is a false pass, not a working fix.
 for d3d9_obj in d3d9_device d3d9_surface d3d9_texture; do
     if ! LC_ALL=C grep -aq 'd9-locked-flush' "$OBJ_DIR/$d3d9_obj.o"; then
-        echo "::error::$d3d9_obj.o has no locked-texture flush -- compile_madeira_cxx did not consume compat-src/d3d9/$d3d9_obj.cpp"
+        echo "::error::$d3d9_obj.o has no locked-texture flush -- dxmt/src/d3d9/$d3d9_obj.cpp lost the flush patch (see prepare-compat.py for why it exists)"
         exit 1
     fi
 done
@@ -463,7 +443,7 @@ echo "D3D9 locked-texture flush: present in d3d9_device/surface/texture objects"
 # its receipt in the compiled object; without it the archive is not shippable.
 if ! LC_ALL=C grep -aq 'initWithObjects:count:' "$APP_COPY"; then
     echo "::error::libdxmt_combined.a has no MTLCopyAllDevices fallback -- either prepare-compat.py's winemetal rewrite is not in the objects, or its guard folded the fallback away (see the comment in prepare-compat.py about the NULL test)"
-    echo "  compat winemetal_unix.c MTLCreateSystemDefaultDevice hits: $(grep -c MTLCreateSystemDefaultDevice "$BUILD_DIR/compat-src/winemetal/unix/winemetal_unix.c" 2>/dev/null || true)"
+    echo "  compat winemetal_unix.c MTLCreateSystemDefaultDevice hits: $(grep -c MTLCreateSystemDefaultDevice "$DXMT_SRC/winemetal/unix/winemetal_unix.c" 2>/dev/null || true)"
     echo "  winemetal_unix.o $(wc -c < "$OBJ_DIR/winemetal_unix.o" 2>/dev/null || echo MISSING) bytes, initWithObjects:count: hits: $(LC_ALL=C grep -ac 'initWithObjects:count:' "$OBJ_DIR/winemetal_unix.o" 2>/dev/null || true)"
     exit 1
 fi

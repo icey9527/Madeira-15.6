@@ -48,7 +48,8 @@ AREAS = (
 
 
 def git(*args, check=True):
-    result = subprocess.run(("git",) + args, cwd=ROOT, capture_output=True, text=True)
+    result = subprocess.run(("git",) + args, cwd=ROOT, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
     if check and result.returncode != 0:
         raise SystemExit(f"git {' '.join(args)}: {result.stderr.strip()}")
     return result.stdout

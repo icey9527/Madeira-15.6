@@ -31,7 +31,12 @@ TC="$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin"
 export PATH="$TC:$PATH"
 B="$R/wine/build-arm64ec"
 if [ ! -f "$B/config.status" ]; then
-    mkdir -p "$B" && cd "$B" && ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer
+    # Native CC must be Apple clang: this llvm-mingw toolchain also installs a
+    # plain `gcc`, and it sits first on PATH, so configure picked the Windows
+    # cross driver for its own host tests and died with "cannot run C compiled
+    # programs" the first time the wine build cache missed (2026-10-29).
+    # CROSSCC names the arm64ec driver for the cross archs wine builds alongside.
+    mkdir -p "$B" && cd "$B" && CC=/usr/bin/clang CXX=/usr/bin/clang++ CROSSCC=arm64ec-w64-mingw32-gcc ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer
 fi
 cd "$B" && make -C dlls/ntdll
 SRC="$B/dlls/ntdll/arm64ec-windows/ntdll.dll"; OUT="$R/app/Madeira/arm64ec-windows/ntdll.dll"

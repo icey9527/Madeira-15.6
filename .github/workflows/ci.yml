@@ -14,7 +14,10 @@ on:
   # d3d9_device.hpp 的 void 割裂就是合并后才暴露的），却每次都多跑一轮，
   # 和合并后的构建互相打断。改动按分支推、合并即构建。
   push:
-    branches: [port/ios15.6]
+    # dev is the test channel: every push there builds and publishes a
+    # pre-release, so day-to-day testing never needs a merge. port/ios15.6
+    # publishes the stable release on merge.
+    branches: [port/ios15.6, dev]
   # A weekly no-change build keeps the action caches alive: GitHub drops cache
   # entries unused for 7 days, and the first build after that rebuilds the iOS
   # LLVM toolchain from scratch (15+ minutes) instead of restoring it.
@@ -31,7 +34,10 @@ on:
           - macos-26
 
 concurrency:
-  group: port-ci-${{ github.ref }}
+  # dev 上只有带 [build] 的提交才真的构建（见下方 jobs.build.if）。被跳过的
+  # 那些推送会立刻结束，但如果和正在跑的构建同一个 concurrency group，
+  # cancel-in-progress 会把真正在跑的那次干掉 —— 所以它们单独成组。
+  group: port-ci-${{ github.ref }}${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && !contains(github.event.head_commit.message || '', '[build]') && '-skipped' || '' }}
   cancel-in-progress: true
 
 # nightly 预发布需要用默认 GITHUB_TOKEN 创建/删除 Release
@@ -50,6 +56,12 @@ env:
 jobs:
   build:
     name: Build smoke (Debug, unsigned)
+    # dev 是日常开发分支：只有提交信息里带 [build] 才出包，其余推送直接跳过，
+    # 省下每次 20 多分钟的构建。port/ios15.6 仍然每次都构建。
+    if: >-
+      github.event_name != 'push'
+      || github.ref != 'refs/heads/dev'
+      || contains(github.event.head_commit.message || '', '[build]')
     runs-on: ${{ inputs.runner || 'macos-26' }}
     timeout-minutes: 240
     defaults:
@@ -91,9 +103,32 @@ jobs:
             exit 0
           fi
           case "$GITHUB_REF" in
-            refs/heads/port/ios15.6) echo "分支正确: $GITHUB_REF" ;;
+            refs/heads/port/ios15.6) echo "分支正确（正式通道）: $GITHUB_REF" ;;
+            refs/heads/dev) echo "分支正确（测试通道）: $GITHUB_REF" ;;
             *) echo "::error::CI 只允许在 port/ios15.6 分支运行（当前 $GITHUB_REF），不要拿原版分支跑构建"; exit 1 ;;
           esac
+
+      # dev is the test channel, port/ios15.6 the release channel. Decided once,
+      # right after the guard, so the IPA file name, the artifact and the release
+      # all agree (the package step runs long before the publish step).
+      - name: Release channel
+        id: channel
+        run: |
+          if [ "$GITHUB_REF" = "refs/heads/dev" ]; then
+            echo "tag=nightly" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15.6 移植 Nightly（dev 测试构建）" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-dev.ipa" >> "$GITHUB_OUTPUT"
+            echo "configuration=Debug" >> "$GITHUB_OUTPUT"
+            echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=stable" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15.6 移植 正式版" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-stable.ipa" >> "$GITHUB_OUTPUT"
+            echo "configuration=Release" >> "$GITHUB_OUTPUT"
+            echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Record runner hardware
         run: |
@@ -584,8 +619,8 @@ jobs:
           path: |
             wine/build-i386
             dxmt/build-pe-i386
-          key: wine-i386-build-v2-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-${{ hashFiles('build/wine-i386/build.sh', 'tools/ci/verify-wow64.py') }}
-          restore-keys: wine-i386-build-v2-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-
+          key: wine-i386-build-v3-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ hashFiles('build/wine-i386/build.sh', 'tools/ci/verify-wow64.py') }}
+          restore-keys: wine-i386-build-v3-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-
 
       - name: Build 32-bit Windows runtime (Wine i386 + DXMT i386)
         id: wow64
@@ -680,8 +715,28 @@ jobs:
           python3 build/dxmt-pe/verify-metallib.py app/Madeira/arm64ec-windows/d3d11.dll
           touch app/Madeira/arm64ec-windows/d3d11.dll
 
+      # dockhost.exe used to be a committed binary and nothing rebuilt it, so the
+      # console-window hide added to build/madeira-dock/console-quiet.c never
+      # reached a device and the Dock's console stayed on the guest desktop next
+      # to the game (BaldrSky 2026-10-28: a 1545x434 window over an 800x600
+      # desktop = the strip to the right of the picture).
+      - name: Madeira Dock host（dockhost.exe）
+        if: ${{ !cancelled() && env.APP_ONLY != '1' }}
+        run: bash build/madeira-dock/build.sh > >(tee ci-logs/dockhost.log) 2>&1
+
+      # A game that imports a Wine builtin the farm lacks cannot start at all:
+      # amehazu.exe imports dxva2.dll ("import_dll Library dxva2.dll ... not
+      # found", 2026-10-29). Wine's dxva2 is a small builtin; build it into the
+      # farm here. Add names to this list when another game names one.
+      - name: Wine builtins the farm needs（dxva2）
+        if: ${{ !cancelled() && env.APP_ONLY != '1' }}
+        run: bash build/wine-pe/build-modules.sh dxva2 > >(tee ci-logs/wine-modules.log) 2>&1
+
       - name: app（xcodebuild 编译冒烟）
         id: app
+        env:
+          MADEIRA_CONFIG: ${{ steps.channel.outputs.configuration }}
+          MADEIRA_DEBUG_DYLIB: ${{ steps.channel.outputs.debug_dylib }}
         run: tools/ci/build-all.sh app
 
       - name: Save App incremental build
@@ -702,7 +757,7 @@ jobs:
         if: success() && env.APP_ONLY != '1'
         run: |
           DD="$GITHUB_WORKSPACE/ci-DD/Madeira-DD"
-          APP="$DD/Build/Products/Debug-iphoneos/Madeira.app"
+          APP="$DD/Build/Products/${{ steps.channel.outputs.configuration }}-iphoneos/Madeira.app"
           if [ -x "$APP/Madeira" ]; then
             # Upstream v0.1.3 structure, read off the shipped IPA: `Madeira` is
             # a thin launcher that loads `@rpath/Madeira.debug.dylib`, and the
@@ -740,8 +795,8 @@ jobs:
           PY
             mkdir -p ipa/Payload
             ditto "$APP" ipa/Payload/Madeira.app
-            (cd ipa && zip -qry Madeira-port-nightly-unsigned.ipa Payload)
-            echo "IPA 大小: $(du -h ipa/Madeira-port-nightly-unsigned.ipa | cut -f1)"
+            (cd ipa && zip -qry "${{ steps.channel.outputs.file }}" Payload)
+            echo "IPA 大小: $(du -h "ipa/${{ steps.channel.outputs.file }}" | cut -f1)"
           else
             echo "::error::没有成功链接的 Madeira 主二进制"
             exit 1
@@ -752,17 +807,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Madeira-app-build
-          path: ipa/Madeira-port-nightly-unsigned.ipa
+          path: ipa/${{ steps.channel.outputs.file }}
           if-no-files-found: ignore
 
       # nightly 预发布: 照 Verviewer 的模式（删旧 nightly → 建新预发布）。
       # 仅完整流水线（APP_ONLY=0）发布——app-only 构建链接的是空桩原生库，
       # 产物不可运行，发出去会误导人。Phase 4 完成后自动生效。
-      - name: Delete old nightly release
+      - name: Delete the old release for this channel
         if: env.APP_ONLY != '1'
         uses: cb80/delrel@latest
         with:
-          tag: nightly
+          tag: ${{ steps.channel.outputs.tag }}
           token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
@@ -770,12 +825,12 @@ jobs:
         if: env.APP_ONLY != '1'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly
-          name: Madeira iOS 15 移植 Nightly（自动构建）
+          tag_name: ${{ steps.channel.outputs.tag }}
+          name: ${{ steps.channel.outputs.title }}
           body: |
             ## 📦 下载 / Download
 
-            - 👉 **[Madeira-port-nightly-unsigned.ipa](https://github.com/${{ github.repository }}/releases/download/nightly/Madeira-port-nightly-unsigned.ipa)**
+            - 👉 **[${{ steps.channel.outputs.file }}](https://github.com/${{ github.repository }}/releases/download/${{ steps.channel.outputs.tag }}/${{ steps.channel.outputs.file }})**
             - 🧾 **[对应源码（浏览）/ Corresponding source (tree)](https://github.com/${{ github.repository }}/tree/${{ github.sha }})**
             - ⬇️ **[对应源码（tar.gz） / Corresponding source (tar.gz)](https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz)**
 
@@ -801,9 +856,9 @@ jobs:
             | 📝 提交 / Commit | [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
 
             ⚠️ 自动构建的夜间预览版，可能不稳定 / Automated nightly preview build.
-          prerelease: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
           draft: false
-          files: ipa/Madeira-port-nightly-unsigned.ipa
+          files: ipa/${{ steps.channel.outputs.file }}
 
       - name: Collect native compiler diagnostics
         if: always()

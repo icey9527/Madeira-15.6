@@ -618,7 +618,7 @@ struct OnboardingView: View {
                     .font(.headline).foregroundStyle(.green)
                 primary("继续", symbol: "arrow.right") { model.next() }
             } else {
-                Text("从 Valve 更新服务器下载，大小约 73 MB，并使用固定的 SHA-256 校验值验证。此过程不会启动 Windows 会话。")
+                Text("从 Valve 更新服务器下载，大小约 84 MB（含 Steam 视频组件依赖的 FFmpeg 运行库），并使用固定的 SHA-256 校验值验证。此过程不会启动 Windows 会话。")
                     .font(.subheadline).foregroundStyle(.secondary)
                 if dock.preparing {
                     HStack(spacing: 12) { ProgressView(); Text(dock.progress).foregroundStyle(.secondary) }

@@ -506,11 +506,25 @@ final class SteamOwnedLibrary: ObservableObject {
     private func auditCloudSaves() async {
         guard !cloudAudited, !inSession, Self.cloudEnabled else { return }
         cloudAudited = true
-        let games = SteamGamesModel.shared.games.filter(\.installed).prefix(40)
+        let games = Array(SteamGamesModel.shared.games.filter(\.installed).prefix(40))
         SteamLog.event("[steam-cloud] sync games=\(games.count) automatic=\(Self.cloudAutomatic ? 1 : 0)")
-        for game in games {
-            guard !inSession else { break }
-            await syncCloud(game.id)
+        // Each game is several round trips (app info, the cloud listing, then the
+        // files), and running them one after another spent the first half minute
+        // of every launch on it (2026-10-29: five games, 12:50:58 -> 12:51:17).
+        // Three at a time keeps the request rate modest and still cuts the wait.
+        await withTaskGroup(of: Void.self) { group in
+            var index = 0
+            let limit = 3
+            func addNext() {
+                guard index < games.count else { return }
+                let id = games[index].id
+                index += 1
+                group.addTask { await self.syncCloud(id) }
+            }
+            for _ in 0..<limit { addNext() }
+            while await group.next() != nil {
+                if !inSession { addNext() }
+            }
         }
     }
 
@@ -552,6 +566,7 @@ final class SteamOwnedLibrary: ObservableObject {
     func checkCloud(_ appID: Int) async -> SteamCloudPlan? {
         guard Self.cloudEnabled, signedIn, !cloudBlocked else { return nil }
         var state = cloud[appID] ?? SteamCloudState()
+        let previousPhase = state.phase
         state.phase = .checking
         cloud[appID] = state
         do {
@@ -580,6 +595,17 @@ final class SteamOwnedLibrary: ObservableObject {
             if let elsewhere = result.1 { SteamLog.event("[steam-cloud] app=\(appID) saves-found-elsewhere=\(elsewhere == "(not found)" ? 0 : 1)") }
             return plan
         } catch {
+            // A cancelled sync is not a failure. Leaving the game's page,
+            // backgrounding, starting a session or the app going away cancels
+            // the task, and the sheet showed the raw
+            // "Swift.CancellationError error 1." in orange (2026-10-29). Put the
+            // previous phase back and stay quiet.
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                state.phase = previousPhase
+                cloud[appID] = state
+                SteamLog.trace("[steam-cloud] app=\(appID) cancelled")
+                return nil
+            }
             state.phase = .failed(SteamSignIn.message(error)); cloud[appID] = state
             SteamLog.event("[steam-cloud] app=\(appID) failed reason=\(Self.reason(error))")
             return nil

@@ -1515,6 +1515,27 @@ static void *wine_process_thread(void *arg) {
                     LOG("game config env: %{public}s=%{public}s", k.UTF8String, v.UTF8String);
                     fprintf(stderr, "[madeira-env] game %s=%s\n", k.UTF8String, v.UTF8String);
                 }
+                /* Chinese systems: Wine has no iOS system locale to read, and a
+                 * C locale leaves the Windows ANSI codepage at 1252, so legacy
+                 * Chinese games draw mojibake. Default both names when neither
+                 * was set above: setlocale(LC_ALL, "") fails on iOS (there are
+                 * no locale files), so ntdll's unix_to_win_locale falls back to
+                 * LC_ALL and both have to name the locale. An explicit
+                 * env.LANG/env.LC_ALL line in madeira.cfg or a library game's
+                 * own config still wins -- those were exported just above. */
+                if (!getenv("LANG") && !getenv("LC_ALL")) {
+                    static int system_is_chinese = -1;
+                    if (system_is_chinese < 0) {
+                        NSString *preferred = [NSLocale preferredLanguages].firstObject ?: @"";
+                        system_is_chinese = [preferred hasPrefix:@"zh"] ? 1 : 0;
+                    }
+                    if (system_is_chinese) {
+                        setenv("LANG", "zh_CN.GBK", 1);
+                        setenv("LC_ALL", "zh_CN.GBK", 1);
+                        fprintf(stderr, "[madeira-env] locale: LANG=LC_ALL=zh_CN.GBK "
+                                "(system language is Chinese)\n");
+                    }
+                }
                 /* Fastsync is the default sync engine: with neither inproc-sync nor
                  * env.MADEIRA_FASTSYNC in madeira.cfg, Wine gets MADEIRA_FASTSYNC=auto,
                  * the value Settings > Sync engine > Fastsync writes. Never overrides a

@@ -1,3 +1,13 @@
+"""SUPERSEDED 2026-10-29 -- do not run.
+
+Every patch this script used to apply is now committed inside dxmt/src (dxmt is
+vendored in-tree instead of a willfaust submodule we could not push to), and the
+unix and PE builds compile that tree directly. The file is kept as the record of
+WHY each change exists: each entry's comment names the game, the log line and
+the date that motivated it. Re-running it against the patched tree will abort on
+the first missing anchor, which is the intended outcome.
+
+"""
 import pathlib
 import shutil
 import sys
@@ -1326,6 +1336,204 @@ diag_files = (
          '      block.owns_mapped = false;\n'
          '    }\n'),
     ), ('d11-ring')),
+    # The swapchain-level counter never printed for BaldrSky even though the
+    # session renders and its Reset diagnostics do print, so the game's presents
+    # do not reach MTLD9SwapChain::Present through this path. Count at the device
+    # entry points instead -- Present and PresentEx are what the guest calls, and
+    # both forward to the chain only when they get that far.
+    ('d3d9/d3d9_device.cpp', (
+        ('  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_Present);\n',
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_Present);\n'
+         '  { static unsigned madeira_present_dev; unsigned n = madeira_present_dev++;\n'
+         '    if (n < 3 || (n % 300) == 0)\n'
+         '      Logger::warn(str::format("[d9-present] dev Present n=", n)); }\n'),
+        ('  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_PresentEx);\n',
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_PresentEx);\n'
+         '  { static unsigned madeira_presentex_dev; unsigned n = madeira_presentex_dev++;\n'
+         '    if (n < 3 || (n % 300) == 0)\n'
+         '      Logger::warn(str::format("[d9-present] dev PresentEx n=", n)); }\n'),
+    ), ('d9-present] dev Present')),
+    # Backgrounding invalidates the layer's drawables, and the presenter kept
+    # presenting into them: TheShell 2026-10-29 logged 45 "Invalid Resource"
+    # command-buffer failures between "resigned active" and "became active", and
+    # the picture stayed frozen after coming back. Returning nil here is the same
+    # frame-skip the RAW mode below already uses (no drawable touched, the PE side
+    # skips the blit), so nothing is presented into an invalid drawable while the
+    # app is not active; the app flips the flag from its lifecycle notifications.
+    ('winemetal/unix/winemetal_unix.c', (
+        ('static NTSTATUS\n_MetalLayer_nextDrawable(void *obj) {\n'
+         '  struct unixcall_generic_obj_obj_ret *params = obj;\n',
+         '/* Madeira-15.6: set from the app (madeira_set_app_active). */\n'
+         '_Atomic int madeira_app_active = 1;\n'
+         'void madeira_set_app_active(int active)\n'
+         '{\n'
+         '  atomic_store_explicit(&madeira_app_active, active ? 1 : 0, memory_order_relaxed);\n'
+         '}\n'
+         'int madeira_get_app_active(void)\n'
+         '{\n'
+         '  return atomic_load_explicit(&madeira_app_active, memory_order_relaxed);\n'
+         '}\n'
+         '\n'
+         'static NTSTATUS\n'
+         '_MetalLayer_nextDrawable(void *obj) {\n'
+         '  struct unixcall_generic_obj_obj_ret *params = obj;\n'
+         '  if (!atomic_load_explicit(&madeira_app_active, memory_order_relaxed)) {\n'
+         '    params->ret = 0;   /* backgrounded: skip this frame, touch no drawable */\n'
+         '    { static unsigned madeira_paused;\n'
+         '      if (madeira_paused++ < 8 || (madeira_paused % 256) == 0)\n'
+         '        dprintf(STDERR_FILENO, "[present-pause] backgrounded, frame skipped (n=%u)%c",\n'
+         '                madeira_paused, 10); }\n'
+         '    return STATUS_SUCCESS;\n'
+         '  }\n'),
+    ), ('madeira_set_app_active')),
+    # The two silent ways a draw disappears: the batched-draw resolver rejects it,
+    # or its pipeline object never linked. BaldrSky's title screen is a white
+    # background with black text on a PC, and the game issues no white clear at
+    # all (64 sampled clears: one opaque black, 63 pure black), so the white must
+    # be geometry -- and a silently skipped draw is exactly how a background
+    # layer goes missing while the text above it still renders.
+    ('d3d9/d3d9_device.cpp', (
+        ('          if (!this->ResolveBatchedDrawForChunk(bd, res, chunk_seq, chunk_coherent_id, const_cache, resolve_cache)) {\n'
+         '            continue;\n'
+         '          }\n',
+         '          if (!this->ResolveBatchedDrawForChunk(bd, res, chunk_seq, chunk_coherent_id, const_cache, resolve_cache)) {\n'
+         '            static unsigned madeira_skip_resolve;\n'
+         '            if (madeira_skip_resolve++ < 32)\n'
+         '              Logger::warn(str::format("[d9-skip] resolve-failed n=", madeira_skip_resolve));\n'
+         '            continue;\n'
+         '          }\n'),
+        ('          res.resolved_pso = res.resolved_pso_task->state().handle;\n'
+         '          if (res.resolved_pso == 0) {\n'
+         '            continue; // link failed: skip\n'
+         '          }\n',
+         '          res.resolved_pso = res.resolved_pso_task->state().handle;\n'
+         '          if (res.resolved_pso == 0) {\n'
+         '            static unsigned madeira_skip_pso;\n'
+         '            if (madeira_skip_pso++ < 32)\n'
+         '              Logger::warn(str::format("[d9-skip] pso-link-failed n=", madeira_skip_pso));\n'
+         '            continue; // link failed: skip\n'
+         '          }\n'),
+    ), ('d9-skip]')),
+    # Render-state trace for BaldrSky's missing white text box.  Chapter 1 opens
+    # with a text window on an opaque white quad; here the scene behind it shows
+    # through while the text itself still renders.  No clear is issued for that
+    # white ([d9-clear] shows one black clear and 63 colour=0 ones), [d9-skip]
+    # never fires, so the loss is in the box's own draw: a render state that
+    # makes a quad write nothing is the prime suspect (COLORWRITEENABLE 0, a
+    # blend that keeps the destination, clipping off with a zero-area scissor).
+    # Only the states that can do that are logged, only on change, first 600.
+    ('d3d9/d3d9_device.cpp', (
+        ('MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {\n'
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);\n',
+         'MTLD3D9Device::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {\n'
+         '  D3D9_CENSUS(D3D9_CENSUS_MTLD3D9Device_SetRenderState);\n'
+         '  if (State == D3DRS_ALPHATESTENABLE || State == D3DRS_ALPHABLENDENABLE ||\n'
+         '      State == D3DRS_SRCBLEND || State == D3DRS_DESTBLEND ||\n'
+         '      State == D3DRS_BLENDOP || State == D3DRS_COLORWRITEENABLE ||\n'
+         '      State == D3DRS_ZWRITEENABLE || State == D3DRS_CLIPPING) {\n'
+         '    static unsigned madeira_rs_logged;\n'
+         '    if (madeira_rs_logged++ < 600)\n'
+         '      Logger::warn(str::format("[d9-rs] n=", madeira_rs_logged,\n'
+         '          " state=", (uint32_t)State, " value=", Value));\n'
+         '  }\n'),
+    ), ('d9-rs]')),
+    # Which clears the game actually asks for, and with what colour. BaldrSky's
+    # title is a white screen with black text on a PC; here the previous scene
+    # shows through. The mismatched-size drop was NOT it ([d9-clear] never fired),
+    # so the question is whether a white clear is issued at all: no clear means
+    # the white is a drawn quad and something else eats it; a clear that is
+    # issued but never reaches the GPU points at the encoder/merge path.
+    ('d3d9/d3d9_device.cpp', (
+        ('  MTLD3D9Surface *ds = m_depthStencilSurface.ptr();\n'
+         '  // No DS bound + Z/Stencil flag -> INVALIDCALL (DXVK).\n',
+         '  { static unsigned madeira_clear_logged;\n'
+         '    if (madeira_clear_logged < 64)\n'
+         '    {\n'
+         '      MTLD3D9Surface *rt0_log = m_renderTargets[0].ptr();\n'
+         '      madeira_clear_logged++;\n'
+         '      Logger::warn(str::format("[d9-clear] flags=", Flags, " color=", (uint32_t)Color,\n'
+         '          " rects=", Count, " rt0=", rt0_log ? rt0_log->desc().Width : 0, "x",\n'
+         '          rt0_log ? rt0_log->desc().Height : 0, " vp=", m_viewport.Width, "x", m_viewport.Height));\n'
+         '    }\n'
+         '  }\n'
+         '  MTLD3D9Surface *ds = m_depthStencilSurface.ptr();\n'
+         '  // No DS bound + Z/Stencil flag -> INVALIDCALL (DXVK).\n'),
+    ), ('d9-clear] flags=')),
+    # wined3d drops a combined TARGET+Z/STENCIL clear when the bound DS is
+    # smaller than RT0. Native D3D9 does not: each attachment is cleared at its
+    # own size, which the code below already does. BaldrSky's title screen came
+    # up showing the previous scene instead of its white background, and a
+    # silently dropped clear is the shape of that (2026-10-28).
+    ('d3d9/d3d9_device.cpp', (
+        ('  if (ds && (Flags & D3DCLEAR_TARGET) && (Flags & (D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL))) {\n'
+         '    MTLD3D9Surface *rt0 = m_renderTargets[0].ptr();\n'
+         '    if (rt0 && (ds->desc().Width < rt0->desc().Width || ds->desc().Height < rt0->desc().Height))\n'
+         '      return D3D_OK;\n'
+         '  }\n',
+         '  if (ds && (Flags & D3DCLEAR_TARGET) && (Flags & (D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL))) {\n'
+         '    MTLD3D9Surface *rt0 = m_renderTargets[0].ptr();\n'
+         '    if (rt0 && (ds->desc().Width < rt0->desc().Width || ds->desc().Height < rt0->desc().Height)) {\n'
+         '      /* Madeira-15.6: wined3d drops this clear whole; native D3D9 clears each\n'
+         '       * attachment at its own size, and the paths below do exactly that. The\n'
+         '       * drop left BaldrSky showing the previous scene behind its title. */\n'
+         '      static unsigned madeira_clear_mismatch;\n'
+         '      if (madeira_clear_mismatch++ < 8)\n'
+         '        Logger::warn(str::format("[d9-clear] mismatched sizes, keeping the clear: ds=",\n'
+         '            ds->desc().Width, "x", ds->desc().Height, " rt0=", rt0->desc().Width, "x", rt0->desc().Height));\n'
+         '    }\n'
+         '  }\n'),
+    ), ('d9-clear] mismatched sizes')),
+    # A command buffer that never retires stops the finish thread, which stops
+    # every Present downstream -- silently. Poll instead of blocking, and name
+    # the frame that is stuck (TheShell: 4 Invalid Resource frames, then Present
+    # stopped at 10 and the picture froze with the app still alive).
+    ('dxmt/dxmt_command_queue.cpp', (
+        # <thread> for the poll above; the file already includes <chrono>.
+        ('#include <chrono>\n', '#include <chrono>\n#include <thread>\n'),
+        ('    if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
+         '      chunk.attached_cmdbuf.waitUntilCompleted();\n'
+         '    }\n',
+         '    if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
+         '      unsigned madeira_wait_ms = 0;\n'
+         '      while (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {\n'
+         '        std::this_thread::sleep_for(std::chrono::milliseconds(10));\n'
+         '        madeira_wait_ms += 10;\n'
+         '        if ((madeira_wait_ms % 2000) == 0) {\n'
+         '          static unsigned madeira_gpu_wait_said;\n'
+         '          if (madeira_gpu_wait_said++ < 20)\n'
+         '            ERR("[gpu-wait] frame=", chunk.frame_, " status=",\n'
+         '                (int)chunk.attached_cmdbuf.status(), " waited_ms=", madeira_wait_ms);\n'
+         '        }\n'
+         '      }\n'
+         '    }\n'),
+    ), ('gpu-wait] frame=')),
+    # Map must not hand out a NULL pointer with S_OK. Dead Cells (FNA, D3D11)
+    # writes through the mapped pointer at its own ring offset and faulted at
+    # 0x10004 -- 0x10000 (the 64 KB Windows allocation granularity) plus the 4-byte
+    # field, i.e. a NULL base plus an offset. A dynamic buffer whose Metal storage
+    # has no CPU mapping (allocation refused, or a storage mode without
+    # [buffer contents]) gives exactly that: pData NULL, pitches filled in, S_OK.
+    ('d3d11/d3d11_context_imm.cpp', (
+        ('        pMappedResource->DepthPitch = buffer_length;\n'
+         '        break;\n'
+         '      }\n'
+         '      }\n'
+         '      return S_OK;\n'
+         '    }\n',
+         '        pMappedResource->DepthPitch = buffer_length;\n'
+         '        break;\n'
+         '      }\n'
+         '      }\n'
+         '      if (!pMappedResource->pData) {\n'
+         '        static unsigned madeira_map_null;\n'
+         '        if (madeira_map_null++ < 20)\n'
+         '          Logger::warn(str::format("[d3d11-map] dynamic buffer has no CPU mapping: sub=",\n'
+         '              Subresource, " len=", buffer_length));\n'
+         '        return E_OUTOFMEMORY;\n'
+         '      }\n'
+         '      return S_OK;\n'
+         '    }\n'),
+    ), ('d3d11-map] dynamic buffer has no CPU mapping')),
     # Which kind each losable resource is. BaldrSky's fullscreen Reset is blocked
     # by exactly one 0-byte and one 32 KB entry, and the size cannot say whether
     # the 0-byte one is the implicit backbuffer/depth-stencil (which native D3D9
@@ -1360,6 +1568,35 @@ diag_files = (
          '    if (m_isImplicitLosable) {\n      m_device->madeiraLosableKind("implicit");\n'
          '      m_device->onLosableResourceCreated();\n    }\n'),
     ), ('madeiraLosableKind',)),
+    # TheShell froze on every background round-trip on 2026-10-29: the frame loop
+    # kept encoding and committing while iOS refuses background GPU work, 20
+    # commits failed with kIOGPUCommandBufferCallbackErrorBackgroundExecution
+    # NotPermitted (Code=7), and that error path then hit a BRK which killed the
+    # process with c0000023. The last frame stayed on screen and input kept
+    # working, so it read as "coming back from background froze it". Dropping the
+    # chunk costs nothing visible -- the drawable is gone anyway -- and keeps iOS
+    # out of it. The finish thread then sees the previous, already-completed
+    # buffer and advances without waiting.
+    ('dxmt/dxmt_command_queue.cpp', (
+        ('#include "util_win32_compat.h"\n',
+         '#include "util_win32_compat.h"\n'
+         '/* The arm64ec PE build compiles this file too and has no\n'
+         ' * winemetal_unix.c. A weak DEFINITION keeps that link happy (an EC\n'
+         ' * undefined function becomes a .refptr that cannot stay unresolved);\n'
+         ' * the unix build\'s strong one in winemetal_unix.c wins. */\n'
+         'extern "C" __attribute__((weak)) int madeira_get_app_active(void) { return 1; }\n'),
+        ('  auto cmdbuf = commandQueue.commandBuffer();\n',
+         '  if (!madeira_get_app_active()) {\n'
+         '    static unsigned madeira_bg_dropped;\n'
+         '    if (madeira_bg_dropped++ < 8 || (madeira_bg_dropped % 256) == 0)\n'
+         '      WARN("[bg-commit] dropped frame=", chunk.frame_, " n=", madeira_bg_dropped);\n'
+         '    ready_for_commit.fetch_add(1, std::memory_order_release);\n'
+         '    dxmt::atomic_notify_one(ready_for_commit);\n'
+         '    return;\n'
+         '  }\n'
+         '  auto cmdbuf = commandQueue.commandBuffer();\n'
+),
+    ), ('bg-commit] dropped')),
 )
 for relative, pairs, markers in diag_files:
     out = output_root / relative

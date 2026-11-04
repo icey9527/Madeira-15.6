@@ -126,6 +126,8 @@ enum StikJITHelper {
     private static let attachCheck = MadeiraConfig.flag("MADEIRA_JIT_ATTACH_CHECK")
 
     static var usesTrollStore: Bool { jit_trollstore_mode() }
+    static var trollStoreMarkerPresent: Bool { jit_trollstore_available() }
+    static var lastJITError: String { String(cString: jit_last_error()) }
 
     /// JIT can serve a launch: CS_DEBUGGED is set, and either a debugger is
     /// attached to answer the pool request or this run's pool exists already.
@@ -487,8 +489,9 @@ enum StikJITHelper {
                 let message = requestUnanswered
                     ? "TrollStore could not allocate executable memory. Close Madeira, use Open with JIT in TrollStore, and try again."
                     : "TrollStore's JIT memory landed at an address Madeira cannot use. Close Madeira and try again."
-                poolFailure = message
-                LogStore.shared.log(message, level: .error)
+                let detail = lastJITError
+                poolFailure = detail.isEmpty ? message : "TrollStore JIT failed: " + detail
+                LogStore.shared.log(poolFailure ?? message, level: .error)
                 return nil
             }
             if requestUnanswered && !debuggerAttached {

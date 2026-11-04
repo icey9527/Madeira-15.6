@@ -242,8 +242,8 @@ stage_native() {
     tic; git submodule update --init --depth 1 --jobs "$NPROC" -- FEX; toc "native:fex-clone"
   else
     # 主仓库子模块: pinned SHA 均为各分支 HEAD（2026-10-11 核实），--depth 1 可用。
-    tic; git submodule update --init --depth 1 --jobs "$NPROC" -- FEX wine dxmt; toc "native:submodule-clone"
-    tic; git -C dxmt submodule update --init --depth 1 --jobs "$NPROC"; toc "native:dxmt-submodule-clone"
+    # dxmt 现在是仓库内的普通目录（2026-10-29 从子模块改 vendored），只剩 FEX/wine 两个子模块。
+    tic; git submodule update --init --depth 1 --jobs "$NPROC" -- FEX wine; toc "native:submodule-clone"
     for header in d3d9.h d3d11.h d3dcommon.h dxgi.h; do
       [ -s "dxmt/include/native/directx/$header" ] || die "DXMT 子模块缺失头文件: $header"
     done
@@ -264,7 +264,8 @@ stage_native() {
 
   if [ "$APP_ONLY" != 1 ]; then
     step "子模块 SHA 校验（gitlink 必须与实际检出一致）"
-    for sub in FEX wine dxmt; do
+    # dxmt 2026-10-29 起是仓库内目录（vendored），没有 gitlink 可校验。
+    for sub in FEX wine; do
       expected="$(git ls-tree HEAD "$sub" | awk '{print $3}')"
       actual="$(git -C "$sub" rev-parse HEAD)"
       printf '  %-14s expected=%s actual=%s\n' "$sub" "${expected:-MISSING}" "$actual"
@@ -987,14 +988,19 @@ stage_app() {
   fi
 
   DD="$R/ci-DD/Madeira-DD"
+  # Debug for the test channel (symbols, assertions, readable crash logs),
+  # Release for a shipped build. Same DerivedData path either way: Xcode keeps
+  # the two configurations side by side and the app cache expects that path.
+  CONFIG="${MADEIRA_CONFIG:-Debug}"
+  DEBUG_DYLIB="${MADEIRA_DEBUG_DYLIB:-YES}"
   step "xcodebuild 编译冒烟 (Debug, 未签名, DerivedData=$DD)"
   rc=0
   tic
   xcodebuild -project app/Madeira.xcodeproj -scheme Madeira \
-    -configuration Debug -destination 'generic/platform=iOS' \
+    -configuration "$CONFIG" -destination 'generic/platform=iOS' \
     -derivedDataPath "$DD" \
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-    ENABLE_DEBUG_DYLIB=YES \
+    ENABLE_DEBUG_DYLIB="$DEBUG_DYLIB" \
     COMPILER_INDEX_STORE_ENABLE=NO \
     OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -warn-long-expression-type-checking=500 -Xfrontend -warn-long-function-bodies=1000' \
     -showBuildTimingSummary \
@@ -1059,6 +1065,12 @@ summary_fail() {
     done
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}" 2>/dev/null || true
   echo "======== 失败: stage $STAGE （ci-logs/$STAGE.log 末 80 行如下） ========"
+  # The tail below is build-system noise; the compiler diagnostics sit far above
+  # it. Print them first so a Swift/C failure is readable in the job log without
+  # downloading the whole run archive (2026-10-29: a DepotDownloader.swift
+  # compile error took three 25-minute rounds to reach me).
+  grep -a -m 40 -E "error:|error :|FAILED:|undefined symbol" "$LOGDIR/$STAGE.log" 2>/dev/null | head -80 || true
+  echo "-------- 末尾 --------"
   tail -n 80 "$LOGDIR/$STAGE.log" 2>/dev/null || true
 }
 
