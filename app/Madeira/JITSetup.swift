@@ -257,25 +257,15 @@ final class JITCoordinator: ObservableObject {
             }
             error = nil
             status = "正在检查 TrollStore Lite 本地 JIT 映射…"
-            guard jit_trollstore_probe() else {
+            // The probe makes Mach calls; never let one of them block the main
+            // thread (that froze Play with no timeout to recover it).
+            DispatchQueue.global(qos: .userInitiated).async {
+                let passed = jit_trollstore_probe()
                 let detail = StikJITHelper.lastJITError
-                let message = detail.isEmpty ? "TrollStore Lite 本地 JIT 映射检查失败，未启用 JIT。" : detail
-                error = message
-                status = nil
-                completion(.failure(NSError(domain: "MadeiraJIT", code: 15,
-                                            userInfo: [NSLocalizedDescriptionKey: message])))
-                return
+                Task { @MainActor in
+                    self.finishLiteProbe(passed: passed, detail: detail, completion: completion)
+                }
             }
-            guard StikJITHelper.liteCanExecuteCode else {
-                error = StikJITHelper.liteExecutionMessage
-                status = nil
-                completion(.failure(NSError(domain: "MadeiraJIT", code: 16,
-                                            userInfo: [NSLocalizedDescriptionKey: StikJITHelper.liteExecutionMessage])))
-                return
-            }
-            status = "映射检查通过"
-            error = nil
-            completion(.success(()))
             return
         }
         if method == .trollStore && !StikJITHelper.trollStoreMarkerPresent {
@@ -325,6 +315,29 @@ final class JITCoordinator: ObservableObject {
             completion(.failure(NSError(domain: "MadeiraJIT", code: 14,
                                         userInfo: [NSLocalizedDescriptionKey: message])))
         })
+    }
+
+    /// Applies a TrollStore Lite probe result back on the main actor.
+    private func finishLiteProbe(passed: Bool, detail: String,
+                                 completion: @escaping (Result<Void, Error>) -> Void) {
+        guard passed else {
+            let message = detail.isEmpty ? "TrollStore Lite 本地 JIT 映射检查失败，未启用 JIT。" : detail
+            error = message
+            status = nil
+            completion(.failure(NSError(domain: "MadeiraJIT", code: 15,
+                                        userInfo: [NSLocalizedDescriptionKey: message])))
+            return
+        }
+        guard StikJITHelper.liteCanExecuteCode else {
+            error = StikJITHelper.liteExecutionMessage
+            status = nil
+            completion(.failure(NSError(domain: "MadeiraJIT", code: 16,
+                                        userInfo: [NSLocalizedDescriptionKey: StikJITHelper.liteExecutionMessage])))
+            return
+        }
+        status = "映射检查通过"
+        error = nil
+        completion(.success(()))
     }
 
     /// LocalDevVPN's loopback first (milliseconds when it already works). When it does

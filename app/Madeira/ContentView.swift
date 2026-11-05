@@ -1309,6 +1309,9 @@ struct ContentView: View {
     @StateObject private var logStore = LogStore.shared
     @StateObject private var jitCoordinator = JITCoordinator.shared
     @State private var jitStatus: JITStatus = .unknown
+    /// Identifies the current enable request so a late callback or the watchdog
+    /// cannot overwrite a newer result.
+    @State private var jitEnableToken = UUID()
     /// Play without JIT: the start that waits for Enable JIT (jitReadyForLaunch).
     @State private var launchAfterJIT: (() -> Void)?
     @State private var entitlements: EntitlementStatus?
@@ -2571,28 +2574,50 @@ struct ContentView: View {
             return
         }
         jitStatus = .testing
+        let token = UUID()
+        jitEnableToken = token
         logStore.log("Requesting JIT with \(jitCoordinator.resolvedMethod.title)...")
+        // A coordinator callback that never arrives used to leave Play on
+        // "Starting JIT…" forever (iPadOS 18, TrollStore Lite): no error, no
+        // launch, just the spinner. Turn the stall into a result the user can act on.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [self] in
+            guard jitStatus == .testing, jitEnableToken == token else { return }
+            jitStatus = .unavailable
+            launchAfterJIT = nil
+            library.startingJIT = nil
+            let message = "JIT 启用超时：15 秒内没有收到结果。请重新启用 JIT；若反复超时，请改用 StikDebug 或内置辅助工具。"
+            logStore.log("[jit] enable timed out after 15 s, method=\(jitCoordinator.resolvedMethod.title), "
+                         + "installation=\(StikJITHelper.installationDescription); see the signing: line above",
+                         level: .error)
+            if library.enabled { library.error = message }
+        }
 
         jitCoordinator.enable { result in
-            switch result {
-            case .success:
-                jitStatus = .available
-                if StikJITHelper.isTrollStoreLite {
-                    logStore.log("映射检查通过，JIT代码执行仍未验证", level: .success)
-                } else {
-                    logStore.log("JIT enabled! Debugger attached.", level: .success)
+            // The coordinator may answer from a probe thread; UI state is main-only.
+            DispatchQueue.main.async { [self] in
+                guard jitEnableToken == token else { return }
+                switch result {
+                case .success:
+                    jitStatus = .available
+                    if StikJITHelper.isTrollStoreLite {
+                        logStore.log("映射检查通过；dynamic-codesigning=\(checkAppEntitlement("dynamic-codesigning") ? 1 : 0) "
+                                     + "debugger=\(isDebuggerAttached() ? 1 : 0) executable=\(StikJITHelper.liteCanExecuteCode ? 1 : 0)",
+                                     level: .success)
+                    } else {
+                        logStore.log("JIT enabled! Debugger attached.", level: .success)
+                    }
+                    launchAfterJITEnded(started: true)
+                case .failure(let failure):
+                    launchAfterJITEnded(started: false)
+                    if let coordinatorError = failure as? JITCoordinator.CoordinatorError,
+                       case .setupRequired = coordinatorError {
+                        jitStatus = .unknown
+                        return
+                    }
+                    jitStatus = .unavailable
+                    logStore.log("Failed to enable JIT: \(failure.localizedDescription)", level: .error)
+                    if library.enabled { library.error = failure.localizedDescription }
                 }
-                launchAfterJITEnded(started: true)
-            case .failure(let failure):
-                launchAfterJITEnded(started: false)
-                if let coordinatorError = failure as? JITCoordinator.CoordinatorError,
-                   case .setupRequired = coordinatorError {
-                    jitStatus = .unknown
-                    return
-                }
-                jitStatus = .unavailable
-                logStore.log("Failed to enable JIT: \(failure.localizedDescription)", level: .error)
-                if library.enabled { library.error = failure.localizedDescription }
             }
         }
     }
