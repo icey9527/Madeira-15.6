@@ -25,7 +25,12 @@ def extract_function(text, signature):
 def main():
     if "__builtin_available(iOS 16" in source:
         raise AssertionError("the iOS 16 TrollStore gate is still present")
+    if 'jit_marker_exists("/_TrollStore")' not in source:
+        raise AssertionError("the standard TrollStore marker is not checked")
+    if 'jit_marker_exists("/_TrollStoreLite")' not in source:
+        raise AssertionError("the TrollStore Lite marker is not checked")
 
+    classifier = extract_function(source, "static jit_installation_t jit_classify_markers(")
     resolver = extract_function(source, "static int jit_resolve_mode(")
     compiler = shutil.which("clang++") or shutil.which("g++")
     if not compiler:
@@ -38,16 +43,28 @@ typedef enum {
     JIT_MODE_TROLLSTORE = 1,
     JIT_MODE_STIKDEBUG = 2,
 } jit_memory_mode_t;
+typedef enum {
+    JIT_INSTALL_NONE = 0,
+    JIT_INSTALL_TROLLSTORE = 1,
+    JIT_INSTALL_TROLLSTORE_LITE = 2,
+    JIT_INSTALL_CONFLICT = 3,
+} jit_installation_t;
 
-""" + resolver + """
+""" + classifier + "\n" + resolver + """
 
 int main() {
-    assert(jit_resolve_mode(0, true) == 1);
-    assert(jit_resolve_mode(0, false) == 2);
-    assert(jit_resolve_mode(1, false) == 1);
-    assert(jit_resolve_mode(1, true) == 1);
-    assert(jit_resolve_mode(2, true) == 2);
-    assert(jit_resolve_mode(2, false) == 2);
+    assert(jit_classify_markers(false, false) == JIT_INSTALL_NONE);
+    assert(jit_classify_markers(true, false) == JIT_INSTALL_TROLLSTORE);
+    assert(jit_classify_markers(false, true) == JIT_INSTALL_TROLLSTORE_LITE);
+    assert(jit_classify_markers(true, true) == JIT_INSTALL_CONFLICT);
+
+    assert(jit_resolve_mode(0, JIT_INSTALL_TROLLSTORE) == JIT_MODE_TROLLSTORE);
+    assert(jit_resolve_mode(0, JIT_INSTALL_TROLLSTORE_LITE) == JIT_MODE_TROLLSTORE);
+    assert(jit_resolve_mode(0, JIT_INSTALL_NONE) == JIT_MODE_STIKDEBUG);
+    assert(jit_resolve_mode(0, JIT_INSTALL_CONFLICT) == JIT_MODE_STIKDEBUG);
+    assert(jit_resolve_mode(1, JIT_INSTALL_NONE) == JIT_MODE_TROLLSTORE);
+    assert(jit_resolve_mode(2, JIT_INSTALL_TROLLSTORE) == JIT_MODE_STIKDEBUG);
+    assert(jit_resolve_mode(2, JIT_INSTALL_TROLLSTORE_LITE) == JIT_MODE_TROLLSTORE);
 }
 """
 
