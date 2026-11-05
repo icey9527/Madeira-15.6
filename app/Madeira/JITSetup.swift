@@ -266,7 +266,14 @@ final class JITCoordinator: ObservableObject {
                                             userInfo: [NSLocalizedDescriptionKey: message])))
                 return
             }
-            status = "映射检查通过，JIT代码执行仍未验证"
+            guard StikJITHelper.liteCanExecuteCode else {
+                error = StikJITHelper.liteExecutionMessage
+                status = nil
+                completion(.failure(NSError(domain: "MadeiraJIT", code: 16,
+                                            userInfo: [NSLocalizedDescriptionKey: StikJITHelper.liteExecutionMessage])))
+                return
+            }
+            status = "映射检查通过"
             error = nil
             completion(.success(()))
             return
@@ -715,11 +722,15 @@ struct JITSetupView: View {
                         Button("检查本地 JIT 映射") {
                             let passed = jit_trollstore_probe()
                             let detail = StikJITHelper.lastJITError
-                            trollStoreProbeResult = passed
-                                ? (StikJITHelper.isTrollStoreLite
-                                   ? "映射检查通过，JIT代码执行仍未验证"
-                                   : "TrollStore RX allocation probe passed.")
-                                : (detail.isEmpty ? "本地 JIT 检查失败。" : detail)
+                            if passed && StikJITHelper.isTrollStoreLite && !StikJITHelper.liteCanExecuteCode {
+                                trollStoreProbeResult = StikJITHelper.liteExecutionMessage
+                            } else {
+                                trollStoreProbeResult = passed
+                                    ? (StikJITHelper.isTrollStoreLite
+                                       ? "映射检查通过，JIT 代码可执行"
+                                       : "TrollStore RX allocation probe passed.")
+                                    : (detail.isEmpty ? "本地 JIT 检查失败。" : detail)
+                            }
                         }
                         if let trollStoreProbeResult {
                             Text(trollStoreProbeResult)

@@ -35,12 +35,17 @@ struct EntitlementStatus {
     let jitAllowed: Bool
     let increasedMemory: Bool
     let extendedVA: Bool
+    /// TrollStore installs carry this; it is what lets the kernel run generated
+    /// code without a debugger attached (iOS 18 no longer accepts CS_DEBUGGED
+    /// left behind by a debugger that already detached).
+    let dynamicCodesigning: Bool
 
     static func check() -> EntitlementStatus {
         EntitlementStatus(
             jitAllowed: checkAppEntitlement("com.apple.security.cs.allow-jit"),
             increasedMemory: checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit"),
-            extendedVA: checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing")
+            extendedVA: checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing"),
+            dynamicCodesigning: checkAppEntitlement("dynamic-codesigning")
         )
     }
 }
@@ -137,8 +142,9 @@ enum DeviceDiagnostics {
     private static func signing() -> String {
         let status = SigningStatus.current
         guard status.known else { return "cs-flags=unknown debugger-attached=\(isDebuggerAttached() ? 1 : 0)" }
-        return String(format: "cs-flags=0x%x get-task-allow=%d cs-debugged=%d debugger-attached=%d",
-                      status.flags, status.debuggable ? 1 : 0, status.debugged ? 1 : 0, isDebuggerAttached() ? 1 : 0)
+        return String(format: "cs-flags=0x%x get-task-allow=%d cs-debugged=%d debugger-attached=%d dynamic-codesigning=%d",
+                      status.flags, status.debuggable ? 1 : 0, status.debugged ? 1 : 0, isDebuggerAttached() ? 1 : 0,
+                      checkAppEntitlement("dynamic-codesigning") ? 1 : 0)
     }
     private static func power() -> String {
         "low-power=\(ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0) thermal=\(thermal())"

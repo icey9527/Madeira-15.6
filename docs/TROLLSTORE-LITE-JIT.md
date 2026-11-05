@@ -15,7 +15,9 @@ TrollStore 官方代码将 Lite 定义为切换 active marker；官方 RootHelpe
 
 启用时先检查 `CS_DEBUGGED`，然后用现有本地 RX allocator 创建一页 RX。探测通过 `vm_remap(copy=false)` 建立 RW alias、设置 RW 权限，并用 `vm_region` 读取两边权限：RX 必须可读可执行且不可写，RW 必须可读可写且不可执行。最后使用 `mach_vm_write` 写入测试值并用 `mach_vm_read_overwrite` 从 RX 读回验证共享 backing。探测不调用页面内容，也不执行生成代码。
 
-任一阶段失败都会记录阶段和 `kr`，并释放本次 RW、RX 映射；RX allocator 在自身失败时释放 memory entry。通过结果只缓存到 `CS_DEBUGGED` 清除或安装类型变化，轮询 `ready` 不重复分配。池分配和 `jit26_prepare_region` 直接入口再次检查缓存状态；Lite 不会回落到 StikDebug BRK。成功状态严格显示“映射检查通过，JIT代码执行仍未验证”。
+任一阶段失败都会记录阶段和 `kr`，并释放本次 RW、RX 映射；RX allocator 在自身失败时释放 memory entry。通过结果只缓存到 `CS_DEBUGGED` 清除或安装类型变化，轮询 `ready` 不重复分配。池分配和 `jit26_prepare_region` 直接入口再次检查缓存状态；Lite 不会回落到 StikDebug BRK。
+
+**iOS 18 及以上的执行门控**：映射检查和代码执行是两件事。iOS 18 起，`CS_DEBUGGED` 在调试器 detach 之后仍然保留，但内核只对持有 `dynamic-codesigning` 权限（TrollStore 安装）或当前仍被调试器 attach 的进程执行生成代码。因此 Lite 在 iOS 18+ 上除映射检查外，还要求 `dynamic-codesigning` 或 `isDebuggerAttached()`；两者都没有时 `ready` 为 false，启用与开游戏都会直接报错并提示改用 StikDebug / 内置辅助工具，不再让游戏停在加载中。启动诊断日志的 `signing:` 行会记录 `dynamic-codesigning=0/1`，便于区分这两种状态。iOS 17 及更早保持原有行为。
 
 标准 TrollStore 保留原 RX 分配路径和系统调用参数。此改动没有调整现有池大小、RX 布局或 RW alias 搜索参数。标准路径仍需按设备实测，不能从源码参数未变推断兼容性已验证。
 
