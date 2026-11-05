@@ -126,18 +126,27 @@ enum StikJITHelper {
     private static let attachCheck = MadeiraConfig.flag("MADEIRA_JIT_ATTACH_CHECK")
 
     static var usesTrollStore: Bool { jit_trollstore_mode() }
+    static var installationType: Int32 { Int32(jit_installation_type()) }
+    static var installationDescription: String {
+        switch installationType {
+        case 1: return "TrollStore"
+        case 2: return "TrollStore Lite"
+        case 3: return "标记冲突"
+        default: return "未检测到标记"
+        }
+    }
     static var trollStoreMarkerPresent: Bool { jit_trollstore_available() }
+    static var hasMarkerConflict: Bool { installationType == 3 }
+    static var isTrollStoreLite: Bool { installationType == 2 }
     static var lastJITError: String { String(cString: jit_last_error()) }
 
-    /// JIT can serve a launch: CS_DEBUGGED is set, and either a debugger is
-    /// attached to answer the pool request or this run's pool exists already.
-    /// CS_DEBUGGED alone is not enough: it stays set after a debugger leaves, which
-    /// is the state StikDebug's own app list (attach, then detach) leaves behind.
-    /// ml1235: the flag is read without jit_check_debugged's log line; the library
-    /// polls this every 2 s for the whole app run (and waitForDebugger every 0.5 s).
+    /// JIT can serve a launch only after its installation-specific gate passes.
+    /// Lite uses a cached one-page mapping check; polling never allocates memory.
     static var ready: Bool {
-        guard SigningStatus.current.debugged else { return false }
-        return usesTrollStore || !attachCheck || poolTaken || isDebuggerAttached()
+        guard SigningStatus.current.debugged, !hasMarkerConflict else { return false }
+        if isTrollStoreLite { return jit_trollstore_lite_ready() }
+        if installationType == 1 && usesTrollStore { return true }
+        return !usesTrollStore && (!attachCheck || poolTaken || isDebuggerAttached())
     }
 
     /// CS_DEBUGGED is set but nothing can answer a pool request: JIT has to be
@@ -155,6 +164,16 @@ enum StikJITHelper {
     static func allocatePool(poolSize requestedPoolSize: Int = 128 * 1024 * 1024) -> (rx: UnsafeMutableRawPointer, rw: UnsafeMutableRawPointer, size: Int)? {
         var poolSize = requestedPoolSize      // ml1036: may shrink to fit, see the hole census below
         poolFailure = nil
+        if hasMarkerConflict {
+            poolFailure = "冲突：同时发现 _TrollStore 与 _TrollStoreLite 标记；无法安全选择 JIT 后端"
+            return nil
+        }
+        if isTrollStoreLite && !jit_trollstore_lite_ready() {
+            poolFailure = lastJITError.isEmpty
+                ? "TrollStore Lite 映射检查尚未通过；请先重新启用并检查 JIT"
+                : lastJITError
+            return nil
+        }
         LogStore.shared.log("Allocating \(poolSize / 1024 / 1024)MB JIT pool via \(usesTrollStore ? "TrollStore" : "debugger")...")
 
         if usesTrollStore && !SigningStatus.current.debugged {

@@ -59,6 +59,10 @@ extern kern_return_t mach_vm_region(vm_map_t, mach_vm_address_t *, mach_vm_size_
                                     mach_msg_type_number_t *, mach_port_t *);
 extern kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t,
                                      boolean_t, vm_prot_t);
+extern kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
+                                   mach_msg_type_number_t);
+extern kern_return_t mach_vm_read_overwrite(vm_map_t, mach_vm_address_t, mach_vm_size_t,
+                                            mach_vm_address_t, mach_vm_size_t *);
 
 // Page size on iOS is 16KB
 #define JIT_PAGE_SIZE 0x4000
@@ -464,16 +468,22 @@ static void jit_set_last_error(const char *fmt, ...) {
     va_end(args);
 }
 
-static int jit_resolve_mode(int requested, bool marker) {
-    if (requested == JIT_MODE_TROLLSTORE) return JIT_MODE_TROLLSTORE;
-    if (requested == JIT_MODE_STIKDEBUG)  return JIT_MODE_STIKDEBUG;
-    return marker ? JIT_MODE_TROLLSTORE : JIT_MODE_STIKDEBUG;
+static jit_installation_t jit_classify_markers(bool trollstore, bool lite) {
+    if (trollstore && lite) return JIT_INSTALL_CONFLICT;
+    if (trollstore) return JIT_INSTALL_TROLLSTORE;
+    if (lite) return JIT_INSTALL_TROLLSTORE_LITE;
+    return JIT_INSTALL_NONE;
 }
 
-/* The old OS gate made every iOS 16+ install take StikDebug even when TrollStore
- * was present. TrollStore 1 and 2 use the same marker layout; a future layout
- * change surfaces as marker=0 rather than a crash. */
-static bool jit_trollstore_marker(void) {
+static int jit_resolve_mode(int requested, jit_installation_t installation) {
+    if (installation == JIT_INSTALL_TROLLSTORE_LITE) return JIT_MODE_TROLLSTORE;
+    if (requested == JIT_MODE_TROLLSTORE) return JIT_MODE_TROLLSTORE;
+    if (requested == JIT_MODE_STIKDEBUG) return JIT_MODE_STIKDEBUG;
+    return installation == JIT_INSTALL_TROLLSTORE ? JIT_MODE_TROLLSTORE : JIT_MODE_STIKDEBUG;
+}
+
+/* 官方标记位于应用容器根目录，与 .app 同级。 */
+static bool jit_marker_exists(const char *marker) {
     char path[4096];
     uint32_t length = sizeof(path);
     if (_NSGetExecutablePath(path, &length) != 0) return false;
@@ -482,9 +492,16 @@ static bool jit_trollstore_marker(void) {
     *separator = '\0';
     separator = strrchr(path, '/');
     if (!separator) return false;
-    if ((size_t)(separator - path) + sizeof("/_TrollStore") > sizeof(path)) return false;
-    memcpy(separator, "/_TrollStore", sizeof("/_TrollStore"));
+    size_t prefix = (size_t)(separator - path);
+    size_t marker_size = strlen(marker) + 1;
+    if (prefix + marker_size > sizeof(path)) return false;
+    memcpy(separator, marker, marker_size);
     return access(path, F_OK) == 0;
+}
+
+static jit_installation_t jit_detect_installation(void) {
+    return jit_classify_markers(jit_marker_exists("/_TrollStore"),
+                                jit_marker_exists("/_TrollStoreLite"));
 }
 
 void jit_set_requested_mode(int mode) {
@@ -496,12 +513,17 @@ int jit_requested_mode(void) {
     return g_requested_mode;
 }
 
+int jit_installation_type(void) {
+    return (int)jit_detect_installation();
+}
+
 int jit_effective_mode(void) {
-    return jit_resolve_mode(g_requested_mode, jit_trollstore_marker());
+    return jit_resolve_mode(g_requested_mode, jit_detect_installation());
 }
 
 bool jit_trollstore_available(void) {
-    return jit_trollstore_marker();
+    jit_installation_t installation = jit_detect_installation();
+    return installation == JIT_INSTALL_TROLLSTORE || installation == JIT_INSTALL_TROLLSTORE_LITE;
 }
 
 bool jit_trollstore_mode(void) {
@@ -513,17 +535,24 @@ const char *jit_last_error(void) {
 }
 
 static void jit_set_marker_error(void) {
-    char path[4096];
-    uint32_t length = sizeof(path);
-    if (_NSGetExecutablePath(path, &length) != 0) {
-        jit_set_last_error("cannot resolve the executable path");
-    } else {
-        jit_set_last_error("TrollStore environment not detected: no _TrollStore marker next to the app");
+    switch (jit_detect_installation()) {
+        case JIT_INSTALL_CONFLICT:
+            jit_set_last_error("冲突：同时发现 _TrollStore 与 _TrollStoreLite 标记；请移除其中一个标记后重试");
+            break;
+        case JIT_INSTALL_TROLLSTORE_LITE:
+            jit_set_last_error("TrollStore Lite 本地 JIT 验证未通过");
+            break;
+        default:
+            jit_set_last_error("未检测到 TrollStore 安装标记（_TrollStore 或 _TrollStoreLite）");
+            break;
     }
 }
 
 static void *jit_trollstore_allocate_rx(size_t size) {
-    if (!size || size > SIZE_MAX - (JIT_PAGE_SIZE - 1)) return NULL;
+    if (!size || size > SIZE_MAX - (JIT_PAGE_SIZE - 1)) {
+        jit_set_last_error("RX 分配阶段失败：区域大小无效");
+        return NULL;
+    }
     size = align_to_page(size);
     mach_port_t task = mach_task_self();
     mach_port_t entry = MACH_PORT_NULL;
@@ -533,7 +562,7 @@ static void *jit_trollstore_allocate_rx(size_t size) {
         MAP_MEM_NAMED_CREATE | VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE,
         &entry, MACH_PORT_NULL);
     if (result != KERN_SUCCESS) {
-        jit_set_last_error("mach_make_memory_entry_64 failed (kr=%d: %s)", result, mach_error_string(result));
+        jit_set_last_error("RX entry 阶段失败 kr=%d (%s)", result, mach_error_string(result));
         jit_log("[trollstore] memory entry failed: %d", result);
         return NULL;
     }
@@ -543,7 +572,7 @@ static void *jit_trollstore_allocate_rx(size_t size) {
                     VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE, VM_INHERIT_DEFAULT);
     mach_port_deallocate(task, entry);
     if (result != KERN_SUCCESS) {
-        jit_set_last_error("vm_map RX failed (kr=%d: %s)", result, mach_error_string(result));
+        jit_set_last_error("RX 映射阶段失败 kr=%d (%s)", result, mach_error_string(result));
         jit_log("[trollstore] RX mapping failed: %d", result);
         return NULL;
     }
@@ -551,16 +580,123 @@ static void *jit_trollstore_allocate_rx(size_t size) {
     return (void *)address;
 }
 
+static volatile int g_lite_probe_passed;
+
+static bool jit_region_has_protection(void *address, size_t size, vm_prot_t required, vm_prot_t forbidden,
+                                      const char *label) {
+    vm_address_t query = (vm_address_t)address;
+    vm_size_t region_size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    kern_return_t kr = vm_region_64(mach_task_self(), &query, &region_size,
+                                    VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                                    &count, &object);
+    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+    if (kr != KERN_SUCCESS) {
+        jit_set_last_error("%s vm_region 阶段失败 kr=%d (%s)", label, kr, mach_error_string(kr));
+        return false;
+    }
+    vm_address_t begin = (vm_address_t)address;
+    if (query > begin || region_size < size || begin - query > region_size - size) {
+        jit_set_last_error("%s vm_region 阶段失败：查询结果未覆盖完整单页 (kr=%d)", label, kr);
+        return false;
+    }
+    if ((info.protection & required) != required || (info.protection & forbidden) != 0) {
+        jit_set_last_error("%s 权限阶段失败：prot=0x%x max=0x%x (kr=%d)",
+                           label, info.protection, info.max_protection, kr);
+        return false;
+    }
+    return true;
+}
+
+static bool jit_trollstore_lite_probe(void) {
+    const size_t size = JIT_PAGE_SIZE;
+    mach_port_t task = mach_task_self();
+    void *rx = NULL;
+    vm_address_t rw = 0;
+    vm_prot_t current = 0, maximum = 0;
+    kern_return_t kr;
+    uint32_t expected = 0x4c495445u;
+    uint32_t actual = 0;
+    mach_vm_size_t copied = 0;
+    g_lite_probe_passed = 0;
+
+    rx = jit_trollstore_allocate_rx(size);
+    if (!rx) goto failed;
+
+    kr = vm_remap(task, &rw, size, 0, VM_FLAGS_ANYWHERE, task,
+                  (vm_address_t)rx, FALSE, &current, &maximum, VM_INHERIT_NONE);
+    if (kr != KERN_SUCCESS) {
+        jit_set_last_error("RW alias vm_remap 阶段失败 kr=%d (%s)", kr, mach_error_string(kr));
+        goto failed;
+    }
+
+    kr = vm_protect(task, rw, size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+    if (kr != KERN_SUCCESS) {
+        jit_set_last_error("RW alias vm_protect 阶段失败 kr=%d (%s)", kr, mach_error_string(kr));
+        goto failed;
+    }
+
+    if (!jit_region_has_protection(rx, size, VM_PROT_READ | VM_PROT_EXECUTE, VM_PROT_WRITE, "RX")) goto failed;
+    if (!jit_region_has_protection((void *)rw, size, VM_PROT_READ | VM_PROT_WRITE, VM_PROT_EXECUTE, "RW")) goto failed;
+
+    kr = mach_vm_write(task, (mach_vm_address_t)rw,
+                       (vm_offset_t)(uintptr_t)&expected, (mach_msg_type_number_t)sizeof(expected));
+    if (kr != KERN_SUCCESS) {
+        jit_set_last_error("RW 安全写入阶段失败 kr=%d (%s)", kr, mach_error_string(kr));
+        goto failed;
+    }
+    kr = mach_vm_read_overwrite(task, (mach_vm_address_t)rx, sizeof(actual),
+                                (mach_vm_address_t)(uintptr_t)&actual, &copied);
+    if (kr != KERN_SUCCESS || copied != sizeof(actual)) {
+        jit_set_last_error("RX 安全读回阶段失败 kr=%d (%s), bytes=%llu", kr,
+                           kr == KERN_SUCCESS ? "success" : mach_error_string(kr),
+                           (unsigned long long)copied);
+        goto failed;
+    }
+    if (actual != expected) {
+        jit_set_last_error("共享性阶段失败：RW 写入 0x%x，RX 读回 0x%x (kr=%d)", expected, actual, kr);
+        goto failed;
+    }
+
+    vm_deallocate(task, rw, size);
+    vm_deallocate(task, (vm_address_t)rx, size);
+    g_lite_probe_passed = 1;
+    jit_log("[trollstore-lite] 映射检查通过；JIT 代码执行仍未验证");
+    return true;
+
+failed:
+    if (rw) vm_deallocate(task, rw, size);
+    if (rx) vm_deallocate(task, (vm_address_t)rx, size);
+    jit_log("[trollstore-lite] 映射检查失败：%s", g_last_error);
+    return false;
+}
+
+bool jit_trollstore_lite_ready(void) {
+    uint32_t flags = 0;
+    if (jit_detect_installation() != JIT_INSTALL_TROLLSTORE_LITE ||
+        !jit_cs_status(&flags) || !(flags & CS_DEBUGGED)) {
+        g_lite_probe_passed = 0;
+        return false;
+    }
+    return g_lite_probe_passed != 0;
+}
+
 bool jit_trollstore_probe(void) {
     g_last_error[0] = '\0';
-    if (!jit_trollstore_marker()) {
+    jit_installation_t installation = jit_detect_installation();
+    if (installation != JIT_INSTALL_TROLLSTORE_LITE || !jit_trollstore_lite_ready()) g_lite_probe_passed = 0;
+    if (installation == JIT_INSTALL_CONFLICT || installation == JIT_INSTALL_NONE) {
         jit_set_marker_error();
         return false;
     }
     if (!jit_check_debugged()) {
-        jit_set_last_error("CS_DEBUGGED is not set: open Madeira with JIT from TrollStore");
+        jit_set_last_error("CS_DEBUGGED 未设置：请通过 TrollStore 的 Open with JIT 启动 Madeira");
         return false;
     }
+    if (installation == JIT_INSTALL_TROLLSTORE_LITE) return jit_trollstore_lite_probe();
+
     void *address = jit_trollstore_allocate_rx(JIT_PAGE_SIZE);
     if (!address) return false;
     vm_deallocate(mach_task_self(), (vm_address_t)address, JIT_PAGE_SIZE);
@@ -590,17 +726,26 @@ uint64_t jit_available_memory(void) {
 __attribute__((noinline, optnone))
 void *jit26_prepare_region(void *addr, size_t len) {
     g_last_error[0] = '\0';
+    jit_installation_t installation = jit_detect_installation();
+    if (installation == JIT_INSTALL_CONFLICT) {
+        jit_set_marker_error();
+        return NULL;
+    }
+    if (installation == JIT_INSTALL_TROLLSTORE_LITE && !jit_trollstore_lite_ready()) {
+        jit_set_last_error("TrollStore Lite 映射检查未通过或 CS_DEBUGGED 已清除；请从设置重新检查");
+        return NULL;
+    }
     if (jit_trollstore_mode()) {
-        if (g_requested_mode == JIT_MODE_TROLLSTORE && !jit_trollstore_marker()) {
+        if (installation == JIT_INSTALL_NONE) {
             jit_set_marker_error();
             return NULL;
         }
         if (!len) {
-            jit_set_last_error("invalid region size");
+            jit_set_last_error("区域大小无效");
             return NULL;
         }
         if (!jit_check_debugged()) {
-            jit_set_last_error("CS_DEBUGGED is not set: open Madeira with JIT from TrollStore");
+            jit_set_last_error("CS_DEBUGGED 未设置：请通过 TrollStore 的 Open with JIT 启动 Madeira");
             return NULL;
         }
         if (!addr) return jit_trollstore_allocate_rx(len);
@@ -627,7 +772,7 @@ void *jit26_prepare_region(void *addr, size_t len) {
 
 __attribute__((noinline, optnone))
 void jit26_detach(void) {
-    if (jit_trollstore_mode()) return;
+    if (jit_trollstore_mode() || jit_detect_installation() == JIT_INSTALL_CONFLICT) return;
     __asm__ volatile(
         "mov x16, #0\n"
         "brk #0xf00d\n"

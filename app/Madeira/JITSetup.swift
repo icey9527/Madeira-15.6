@@ -217,18 +217,25 @@ final class JITCoordinator: ObservableObject {
     }
 
     var resolvedMethod: JITMethod {
+        if StikJITHelper.hasMarkerConflict || StikJITHelper.isTrollStoreLite { return .trollStore }
         guard method == .automatic else { return method }
         if StikJITHelper.trollStoreMarkerPresent { return .trollStore }
         return StikJITHelper.isAvailable ? .stikDebug : .builtIn
     }
 
     var automaticDescription: String {
-        if StikJITHelper.trollStoreMarkerPresent {
-            return "TrollStore is detected, so Madeira will use TrollStore JIT."
+        if StikJITHelper.hasMarkerConflict {
+            return "同时发现 _TrollStore 与 _TrollStoreLite 标记，无法安全选择 JIT 后端。"
+        }
+        if StikJITHelper.isTrollStoreLite {
+            return "检测到 TrollStore Lite；启用前会检查本地双映射能力，检查通过也不代表代码执行已验证。"
+        }
+        if StikJITHelper.installationType == 1 {
+            return "检测到 TrollStore；Madeira 使用本地 TrollStore JIT。"
         }
         return StikJITHelper.isAvailable
-            ? "StikDebug is installed, so Madeira will open it directly."
-            : "StikDebug was not detected, so Madeira will use its built-in helper."
+            ? "检测到 StikDebug；Madeira 会直接打开它。"
+            : "未检测到 StikDebug；Madeira 会使用内置辅助工具。"
     }
 
     func refreshPairingStatus() {
@@ -237,8 +244,35 @@ final class JITCoordinator: ObservableObject {
     }
 
     func enable(completion: @escaping (Result<Void, Error>) -> Void) {
+        if StikJITHelper.hasMarkerConflict {
+            let message = "冲突：同时发现 _TrollStore 与 _TrollStoreLite 标记；请移除其中一个标记后重试。"
+            error = message
+            completion(.failure(CoordinatorError.setupRequired(message)))
+            return
+        }
+        if StikJITHelper.isTrollStoreLite {
+            if StikJITHelper.ready {
+                completion(.success(()))
+                return
+            }
+            error = nil
+            status = "正在检查 TrollStore Lite 本地 JIT 映射…"
+            guard jit_trollstore_probe() else {
+                let detail = StikJITHelper.lastJITError
+                let message = detail.isEmpty ? "TrollStore Lite 本地 JIT 映射检查失败，未启用 JIT。" : detail
+                error = message
+                status = nil
+                completion(.failure(NSError(domain: "MadeiraJIT", code: 15,
+                                            userInfo: [NSLocalizedDescriptionKey: message])))
+                return
+            }
+            status = "映射检查通过，JIT代码执行仍未验证"
+            error = nil
+            completion(.success(()))
+            return
+        }
         if method == .trollStore && !StikJITHelper.trollStoreMarkerPresent {
-            let message = "没检测到 TrollStore 安装（缺 _TrollStore 标记），请选 Automatic 或 StikDebug"
+            let message = "没检测到 TrollStore 安装（缺少 _TrollStore 或 _TrollStoreLite 标记），请选 Automatic 或 StikDebug"
             error = message
             completion(.failure(CoordinatorError.setupRequired(message)))
             return
@@ -659,6 +693,7 @@ struct JITSetupView: View {
                         }
                     }
                     LabeledContent15("当前生效", value: coordinator.resolvedMethod.title)
+                    LabeledContent15("TrollStore 安装类型", value: StikJITHelper.installationDescription)
                     if coordinator.method == .automatic {
                         Text(coordinator.automaticDescription)
                             .font(.caption).foregroundStyle(.secondary)
@@ -675,16 +710,16 @@ struct JITSetupView: View {
 
                 if coordinator.resolvedMethod == .trollStore {
                     Section {
-                        LabeledContent15("TrollStore 标记",
-                                         value: StikJITHelper.trollStoreMarkerPresent ? "Detected" : "Missing")
                         LabeledContent15("CS_DEBUGGED",
                                          value: SigningStatus.current.debugged ? "Set" : "Not set")
-                        Button("检查 TrollStore JIT") {
+                        Button("检查本地 JIT 映射") {
                             let passed = jit_trollstore_probe()
                             let detail = StikJITHelper.lastJITError
                             trollStoreProbeResult = passed
-                                ? "TrollStore JIT probe passed."
-                                : (detail.isEmpty ? "TrollStore JIT probe failed." : detail)
+                                ? (StikJITHelper.isTrollStoreLite
+                                   ? "映射检查通过，JIT代码执行仍未验证"
+                                   : "TrollStore RX allocation probe passed.")
+                                : (detail.isEmpty ? "本地 JIT 检查失败。" : detail)
                         }
                         if let trollStoreProbeResult {
                             Text(trollStoreProbeResult)
@@ -692,7 +727,7 @@ struct JITSetupView: View {
                     } header: {
                         Text("TrollStore")
                     } footer: {
-                        Text("iOS 17 上若失败会显示具体失败阶段。")
+                        Text("TrollStore Lite 需要本地双映射检查通过；该检查不会执行生成的代码，iOS 17 设备兼容性仍需实机验证。")
                     }
                 }
 

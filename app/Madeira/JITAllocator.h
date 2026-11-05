@@ -72,15 +72,24 @@ typedef enum {
     JIT_MODE_STIKDEBUG = 2,
 } jit_memory_mode_t;
 
+typedef enum {
+    JIT_INSTALL_NONE = 0,
+    JIT_INSTALL_TROLLSTORE = 1,
+    JIT_INSTALL_TROLLSTORE_LITE = 2,
+    JIT_INSTALL_CONFLICT = 3,
+} jit_installation_t;
+
 void jit_set_requested_mode(int mode);   /* 0/1/2, out-of-range ignored */
 int  jit_requested_mode(void);
 int  jit_effective_mode(void);           /* JIT_MODE_TROLLSTORE or JIT_MODE_STIKDEBUG */
-bool jit_trollstore_available(void);     /* the _TrollStore marker exists */
+int  jit_installation_type(void);        /* jit_installation_t */
+bool jit_trollstore_available(void);     /* exactly one TrollStore marker exists */
 /* Last failure from the TrollStore allocation path, "" when none. For the UI. */
 const char *jit_last_error(void);
-/* One-page self-test of the TrollStore path (entry -> RX map -> free). */
+/* One-page self-test; Lite checks dual-map sharing and W^X protections. */
 bool jit_trollstore_probe(void);
-bool jit_trollstore_mode(void);          /* effective mode == TrollStore */
+bool jit_trollstore_lite_ready(void);    /* cached probe, invalidated when CS_DEBUGGED clears */
+bool jit_trollstore_mode(void);          /* effective mode == local TrollStore backend */
 
 // The user address map [min, max) from TASK_VM_INFO: max is 0xfc0000000 (63 GB)
 // on a standard map and 0x8000000000 (512 GB) on an extended one. Returns false
