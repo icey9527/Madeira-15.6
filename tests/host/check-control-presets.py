@@ -321,7 +321,7 @@ overlay = function(content, 'struct TouchControlsOverlay: View {')
 assert overlay.index('Color.clear.contentShape(editorCanvas(geo.size))') < overlay.index('GestureZonesLayer('), 'dismissal stays behind editable controls'
 assert panel.index('.onTapGesture { }') < panel.index('.position(layout.center)'), 'only the panel consumes its background taps'
 assert 'ControlPresetsModel.enabled && m.visible && !m.editing' in overlay, 'menu only while touch controls are shown'
-assert 'if m.editing && Self.editorDone {' in overlay and 'Text("Done")' in overlay
+assert 'if m.editing && Self.editorDone {' in overlay and ('Text("Done")' in overlay or 'Text("完成")' in overlay)
 assert 'TouchControlsOverlay.showsLayoutMenu(self) ? 3 : 2' in model, 'the menu button is hit-testable'
 window = function(content, 'final class ControlsWindow: UIWindow {')
 assert window.index('if m.editing {') < window.index('!hit.isDescendant(of: root)') \
