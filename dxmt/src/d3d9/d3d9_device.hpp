@@ -1094,11 +1094,7 @@ private:
   // currentOffset snapshot at queue time).
   // Ref-counted state travels via setters to D9EncodingState on encode thread;
   // override_* args are per-call, not device state.
-  // [ib_begin, ib_end) is the byte range of the bound index buffer the draw
-  // reads (MTLD3D9IndexBuffer::refreshRange): an empty range for a draw that
-  // reads none (non-indexed, or with an index buffer of its own); the default
-  // refreshes the whole buffer, as every draw did before.
-  D3D9DrawCapture BuildDrawCapture(UINT ib_begin = 0, UINT ib_end = UINT_MAX);
+  D3D9DrawCapture BuildDrawCapture();
 
   // Op-stream queue helpers. QueueBatchedDraw appends to m_pendingDraws
   // *and* records its position in m_pendingOps; QueueBlitOp does the

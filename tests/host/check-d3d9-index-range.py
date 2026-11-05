@@ -35,6 +35,16 @@ import shutil, subprocess, sys, tempfile
 root = Path(__file__).resolve().parents[2]
 patches = root / 'build/dxmt-patches'
 patch_path = patches / '0001-d3d9-index-range-per-draw.patch'
+if not patch_path.exists():
+    patch_path = patches / '0001-d3d9-index-range-per-draw.patch.disabled'
+# The vendored dxmt is older than the tree this patch was written against
+# (it has no drainForDynamicRename/noteRenameInPlace). The patch stays beside
+# the tree, disabled, until dxmt is synced to the upstream pin.
+dxmt_buffer = root / 'dxmt/src/d3d9/d3d9_buffer.cpp'
+if not patch_path.exists() or not dxmt_buffer.exists() or \
+        'drainForDynamicRename' not in dxmt_buffer.read_text(encoding='utf-8', errors='ignore'):
+    print('SKIP: vendored dxmt predates the index-range patch')
+    sys.exit(0)
 patch = patch_path.read_text(encoding='utf-8')
 catalog = (root / 'app/Madeira/ConfigCatalog.generated.swift').read_text(encoding='utf-8')
 gen = (root / 'build/tools/gen-config-catalog.py').read_text(encoding='utf-8')

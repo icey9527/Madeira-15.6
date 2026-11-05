@@ -7426,7 +7426,7 @@ MTLD3D9Device::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, U
     if (ib_handle == 0)
       return D3D_OK;
     BatchedDraw draw{};
-    draw.cap = BuildDrawCapture(0, 0);
+    draw.cap = BuildDrawCapture();
     draw.type = BatchedDraw::kIndexed;
     draw.primitive_type = D3DPT_TRIANGLELIST;
     draw.vertex_or_index_count = PrimitiveCount * 3;
@@ -7440,7 +7440,7 @@ MTLD3D9Device::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, U
   }
   UINT vertex_count = prim_to_vertex_count(PrimitiveType, PrimitiveCount);
   BatchedDraw draw{};
-  draw.cap = BuildDrawCapture(0, 0);
+  draw.cap = BuildDrawCapture();
   draw.type = BatchedDraw::kNonIndexed;
   draw.primitive_type = PrimitiveType;
   draw.vertex_or_index_count = vertex_count;
@@ -7504,7 +7504,7 @@ MTLD3D9Device::DrawIndexedPrimitive(
     if (ib_handle == 0)
       return D3D_OK;
     BatchedDraw draw{};
-    draw.cap = BuildDrawCapture(0, 0);
+    draw.cap = BuildDrawCapture();
     draw.type = BatchedDraw::kIndexed;
     draw.primitive_type = D3DPT_TRIANGLELIST;
     draw.vertex_or_index_count = fan_prim_count * 3;
@@ -7550,7 +7550,7 @@ MTLD3D9Device::DrawIndexedPrimitive(
         if (ib_handle == 0)
           return D3D_OK;
         BatchedDraw draw{};
-        draw.cap = BuildDrawCapture(0, 0);
+        draw.cap = BuildDrawCapture();
         draw.type = BatchedDraw::kIndexed;
         draw.primitive_type = PrimitiveType;
         draw.vertex_or_index_count = strip_count;
@@ -7564,14 +7564,8 @@ MTLD3D9Device::DrawIndexedPrimitive(
     }
   }
   UINT index_count = prim_to_vertex_count(PrimitiveType, PrimitiveCount);
-  // The bytes of the bound index buffer this draw reads, clamped to the buffer
-  // (MTLD3D9IndexBuffer::refreshRange); the GPU reads nothing else of it.
-  const uint64_t ib_index_size = m_indexBuffer->indexFormat() == D3DFMT_INDEX32 ? 4u : 2u;
-  const uint64_t ib_size = m_indexBuffer->size();
-  const uint64_t ib_begin = std::min<uint64_t>(uint64_t(StartIndex) * ib_index_size, ib_size);
-  const uint64_t ib_end = std::min<uint64_t>(ib_begin + uint64_t(index_count) * ib_index_size, ib_size);
   BatchedDraw draw{};
-  draw.cap = BuildDrawCapture(static_cast<UINT>(ib_begin), static_cast<UINT>(ib_end));
+  draw.cap = BuildDrawCapture();
   draw.type = BatchedDraw::kIndexed;
   draw.primitive_type = PrimitiveType;
   draw.vertex_or_index_count = index_count;
@@ -7586,7 +7580,7 @@ MTLD3D9Device::DrawIndexedPrimitive(
 // Validation gate reads from capture (caller-provided or UP-built at queue time).
 // UP build at queue time ensures validation sees shader/RT bindings from draw thread, not FlushDrawBatch thread.
 MTLD3D9Device::D3D9DrawCapture
-MTLD3D9Device::BuildDrawCapture(UINT ib_begin, UINT ib_end) {
+MTLD3D9Device::BuildDrawCapture() {
   // Bring every bound buffer's device copy up to date before the record timer
   // starts. The refresh charges itself to the staging axis, so timing it here as
   // well would count it on two axes that the frontend total adds together, and
@@ -7598,14 +7592,8 @@ MTLD3D9Device::BuildDrawCapture(UINT ib_begin, UINT ib_end) {
     if (auto *vb = m_vertexBuffers[s].ptr())
       vb->refreshWholeMirror();
   }
-  // The index buffer stores only the bytes the draw reads, nothing for a draw
-  // that reads none of it (the declaration's comment).
-  if (m_indexBuffer.ptr() != nullptr) {
-    if (ib_begin == 0 && ib_end == UINT_MAX)
-      m_indexBuffer->refreshWholeMirror();
-    else
-      m_indexBuffer->refreshRange(ib_begin, ib_end);
-  }
+  if (m_indexBuffer.ptr() != nullptr)
+    m_indexBuffer->refreshWholeMirror();
 
   // POD state read by Resolve from D9EncodingState; setter-flush invariant ensures batch shares one snapshot.
   // Ref-counted state via setter ops into m_encodeSideRefs.
@@ -11458,7 +11446,7 @@ MTLD3D9Device::DrawPrimitiveUP(
     if (ib_handle == 0)
       return D3D_OK;
     BatchedDraw draw{};
-    draw.cap = BuildDrawCapture(0, 0);
+    draw.cap = BuildDrawCapture();
     draw.type = BatchedDraw::kIndexed;
     draw.primitive_type = D3DPT_TRIANGLELIST;
     draw.vertex_or_index_count = PrimitiveCount * 3;
@@ -11476,7 +11464,7 @@ MTLD3D9Device::DrawPrimitiveUP(
   }
 
   BatchedDraw draw{};
-  draw.cap = BuildDrawCapture(0, 0);
+  draw.cap = BuildDrawCapture();
   draw.type = BatchedDraw::kNonIndexed;
   draw.primitive_type = PrimitiveType;
   draw.vertex_or_index_count = vertex_count;
@@ -11575,7 +11563,7 @@ MTLD3D9Device::DrawIndexedPrimitiveUP(
     if (ib_handle == 0)
       return D3D_OK;
     BatchedDraw draw{};
-    draw.cap = BuildDrawCapture(0, 0);
+    draw.cap = BuildDrawCapture();
     draw.type = BatchedDraw::kIndexed;
     draw.primitive_type = D3DPT_TRIANGLELIST;
     draw.vertex_or_index_count = PrimitiveCount * 3;
@@ -11619,7 +11607,7 @@ MTLD3D9Device::DrawIndexedPrimitiveUP(
   }
 
   BatchedDraw draw{};
-  draw.cap = BuildDrawCapture(0, 0);
+  draw.cap = BuildDrawCapture();
   draw.type = BatchedDraw::kIndexed;
   draw.primitive_type = PrimitiveType;
   draw.vertex_or_index_count = index_count;
