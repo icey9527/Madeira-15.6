@@ -231,10 +231,25 @@ enum StikJITHelper {
     /// Lite uses a cached one-page mapping check; polling never allocates memory.
     static var ready: Bool {
         guard SigningStatus.current.debugged, !hasMarkerConflict else { return false }
-        if isTrollStoreLite { return jit_trollstore_lite_ready() }
+        if isTrollStoreLite { return jit_trollstore_lite_ready() && liteCanExecuteCode }
         if installationType == 1 && usesTrollStore { return true }
         return !usesTrollStore && (!attachCheck || poolTaken || isDebuggerAttached())
     }
+
+    /// iOS 18 and later run generated code only for a process that holds
+    /// dynamic-codesigning (a TrollStore install) or has a debugger attached.
+    /// CS_DEBUGGED alone is not enough: it stays set after the debugger that
+    /// granted it detaches (StikDebug's app list does exactly that), and the
+    /// Lite mapping probe cannot see the difference — it maps pages but never
+    /// runs them. Treating that state as ready left the game stuck loading.
+    static var liteCanExecuteCode: Bool {
+        if #available(iOS 18.0, *) {
+            return checkAppEntitlement("dynamic-codesigning") || isDebuggerAttached()
+        }
+        return true
+    }
+    static let liteExecutionMessage = "TrollStore Lite 在 iOS 18 及以上只有 CS_DEBUGGED 标记，JIT 代码无法执行"
+        + "（映射检查通过不等于能运行）。请在 Madeira 里重新启用 JIT，或改用 StikDebug / 内置辅助工具。"
 
     /// CS_DEBUGGED is set but nothing can answer a pool request: JIT has to be
     /// enabled again, through Madeira, before a game can start.
@@ -305,10 +320,14 @@ enum StikJITHelper {
             poolFailure = "冲突：同时发现 _TrollStore 与 _TrollStoreLite 标记；无法安全选择 JIT 后端"
             return nil
         }
-        if isTrollStoreLite && !jit_trollstore_lite_ready() {
-            poolFailure = lastJITError.isEmpty
-                ? "TrollStore Lite 映射检查尚未通过；请先重新启用并检查 JIT"
-                : lastJITError
+        if isTrollStoreLite && !ready {
+            if jit_trollstore_lite_ready() && !liteCanExecuteCode {
+                poolFailure = liteExecutionMessage
+            } else {
+                poolFailure = lastJITError.isEmpty
+                    ? "TrollStore Lite 映射检查尚未通过；请先重新启用并检查 JIT"
+                    : lastJITError
+            }
             return nil
         }
         if usesTrollStore {
