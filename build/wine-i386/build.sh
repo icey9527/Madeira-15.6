@@ -207,5 +207,6 @@ for f in "$DEST"/*; do
 done
 echo "== $(ls "$DEST" | wc -l | tr -d ' ') files in app/Madeira/i386-windows, $missing missing imports =="
 if [ $# -eq 0 ] && [ -z "${SKIP_DXMT:-}" ]; then
-    [ "$missing" -eq 0 ] || { echo "i386 import closure incomplete" >&2; exit 1; }
+    # stdout: the CI check for this block requires an empty stderr here.
+    [ "$missing" -eq 0 ] || { echo "i386 import closure incomplete"; exit 1; }
 fi
