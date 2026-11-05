@@ -80,6 +80,9 @@ static BOOL WINAPI on_control(DWORD control)
  */
 #define SH_CEG_WAIT_MS (5ULL * 60 * 1000)
 #define SH_CEG_BUSY_RETRY_MS 10000
+#define SH_CEG_REMOTE_CALL_FAILED 55
+#define SH_CEG_REMOTE_RETRIES 3
+#define SH_CEG_REMOTE_RETRY_MS 1500
 typedef int32_t (__thiscall *ceg_request_fn)(void *, uint32_t, bool, bool, uint32_t *);
 
 static bool wide_flag(const wchar_t *name, wchar_t expected)
@@ -88,8 +91,9 @@ static bool wide_flag(const wchar_t *name, wchar_t expected)
     return GetEnvironmentVariableW(name, value, 4) == 1 && value[0] == expected;
 }
 
-/* Returns 0 once every started job reported success, otherwise 49 (or 12
- * for a malformed callback). Only numeric results are reported: no paths.
+/* Returns 0 once every started job reported success, or at once when the
+ * first request started none (already prepared), otherwise 49 (or 12 for a
+ * malformed callback). Only numeric results are reported: no paths.
  */
 static int prepare_custom_binaries(HMODULE module, void *client_user,
                                    const struct sh_api *api, const struct sh_observer *o,
@@ -104,7 +108,7 @@ static int prepare_custom_binaries(HMODULE module, void *client_user,
     struct sh_ceg_progress progress = {0};
     uint64_t begin = o->now_ms(), retry_at = begin;
     bool waiting = false;
-    unsigned busy = 0, logged_jobs = 0;
+    unsigned busy = 0, logged_jobs = 0, remote_retries = 0;
     int32_t logged_reply = INT32_MIN;
     while (!InterlockedCompareExchange(&interrupted, 0, 0)) {
         uint64_t now = o->now_ms();
@@ -124,6 +128,14 @@ static int prepare_custom_binaries(HMODULE module, void *client_user,
             } else {
                 o->event("ceg-request-result", status);
                 o->event("ceg-request", jobs == UINT32_MAX ? -1 : (int32_t)jobs);
+                /* Already prepared (OK, no job started). Trusted only from a
+                 * first request: after a failed job (the retry below) the
+                 * files were not prepared, so no job then still fails. */
+                if (step == SH_CEG_DONE && !remote_retries) {
+                    o->event("ceg-already-prepared", 1);
+                    o->event("ceg-result", 1);
+                    return 0;
+                }
                 if (step != SH_CEG_WAIT) {
                     o->event("ceg-result", progress.failure);
                     return 49;
@@ -153,6 +165,19 @@ static int prepare_custom_binaries(HMODULE module, void *client_user,
             if (step == SH_CEG_DONE) {
                 o->event("ceg-result", 1);
                 return 0;
+            }
+            if (step == SH_CEG_FAIL && progress.failure == SH_CEG_REMOTE_CALL_FAILED &&
+                remote_retries < SH_CEG_REMOTE_RETRIES) {
+                /* 55 (RemoteCallFailed): Valve's client found no running
+                 * service, demand-started it and failed this request before
+                 * the emulated service was up; the service may also have
+                 * ended between an earlier start and the request. Its next
+                 * request finds it running. */
+                o->event("ceg-request-retry", ++remote_retries);
+                progress = (struct sh_ceg_progress){0};
+                waiting = false;
+                retry_at = o->now_ms() + SH_CEG_REMOTE_RETRY_MS;
+                continue;
             }
             if (step == SH_CEG_FAIL) {
                 o->event("ceg-finished-jobs", (int32_t)progress.finished);

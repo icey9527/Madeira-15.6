@@ -513,11 +513,14 @@ static int ios_safe_read( uint64_t addr, void *buf, unsigned int size )
  * the timing this changes. Failures are always reported (capped). */
 int ios_real_suspend_enabled(void)
 {
-    static int env = -1;
-    if (env < 0)
+    /* Read on every call: the app sets it per session (a game's "Pause threads
+     * fully" switch, BCDLaunch.realSuspend), and this server runs again in the
+     * same process for the next session of the app run. Logged when it changes. */
+    static int logged = -1;
+    const char *e = getenv( "MADEIRA_REAL_SUSPEND" );
+    int env = (e && e[0] == '1') ? 1 : 0;
+    if (env != __atomic_exchange_n( &logged, env, __ATOMIC_RELAXED ))
     {
-        const char *e = getenv( "MADEIRA_REAL_SUSPEND" );
-        env = (e && e[0] == '1') ? 1 : 0;
         fprintf( stderr, "[real-susp] ml730 MADEIRA_REAL_SUSPEND=%d\n", env );
     }
     return env;
@@ -1190,6 +1193,16 @@ int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t
     kern_return_t ret;
     mach_port_t process_port = get_process_port( process );
     mach_vm_offset_t data;
+
+#ifdef WINE_IOS
+    /* Keep local writes disabled by default: enabling them globally regressed
+     * Steam. Explicitly opt in only for pseudo-processes in this Unix task.
+     * The request handler has already checked PROCESS_VM_WRITE rights. */
+    const char *local_write = getenv( "MADEIRA_LOCAL_PROCESS_WRITE" );
+    if (!process_port && process->unix_pid == getpid() && local_write &&
+        !strcmp( local_write, "1" ))
+        process_port = mach_task_self();
+#endif
 
     if (written) *written = 0;
 

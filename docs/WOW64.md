@@ -76,6 +76,13 @@ Nothing is reserved for 32-bit support until a 32-bit program needs it.
   pseudo-process's threads, so the teardown cannot run on the dying thread.
 - `MADEIRA_WOW_PLACEHOLDERS=1` restores ahead-of-time placeholders for every
   slot, for a 64-bit launcher that starts 32-bit children on a crowded map.
+- **Under address pressure** the idle placeholders go back: every ~10 s while
+  one exists, when the band has less than `MADEIRA_WOW_PRESSURE_RELEASE_MB`
+  (256) free, exited windows whose threads are gone are torn down and every
+  unadopted placeholder is handed back to the kernel (`[wow-window] ml2030`).
+  A 64-bit game holding a placeholder for a 32-bit program in its folder
+  otherwise ran the band dry and lost its Metal and Wine allocations. A
+  32-bit program started later takes a fresh slot if the band still has one.
 
 Inside a window, TEB/PEB pairs, 32-bit stacks, images (relocated to their
 guest base) and `KUSER_SHARED_DATA` at guest `0x7ffe0000` are placed by the
@@ -171,9 +178,23 @@ exported as `d3d9shim.dll` whatever file name it is installed under):
   window is replaced with `PROT_NONE`. The hook is weak in `virtual_ios.c`;
   DXMT's definition replaces the default, which only reports that it is
   missing.
+- With `d3d9 = wined3d` the shim is not loaded at all: the session links
+  `syswow64\d3d9.dll` (and the x64 `system32`/`sysx64` one) to
+  `d3d9-wined3d.dll`, Wine's own frontend on wined3d's OpenGL renderer
+  (`WineProcessBridge.m`, `madeira_link_d3d9_wined3d`). See
+  docs/BUILDING.md, "wined3d (Direct3D 8/9 and DirectDraw on OpenGL)".
 
-`build/wine-i386/build.sh` installs the shim as `d3d9.dll` and `d3d9shim.dll`
-and the emulated frontend as `d3d9-emulated.dll`.
+`build/wine-i386/build.sh` installs the shim as `d3d9.dll` and `d3d9shim.dll`,
+the emulated frontend as `d3d9-emulated.dll` and Wine's d3d9 as
+`d3d9-wined3d.dll`.
+
+The ARM64EC `d3d9.dll` that x64 programs load is DXMT's frontend too, built for
+ARM64EC from the same source (`ninja -C build-pe-arm64ec src/d3d9/d3d9.dll` in the
+DXMT tree, stripped). It replaces Wine's, which goes through wined3d's OpenGL
+backend and so always returned NULL from `Direct3DCreate9` here.
+`MADEIRA_D3D9_X64=0` makes `Direct3DCreate9` / `Direct3DCreate9Ex` fail the same
+way again. Not exported, unlike Wine's: `Direct3DCreate9On12`, `PSGPError`,
+`PSGPSampleTexture` (the i386 frontend lacks them as well).
 `tests/x86/build-d3d9-cube.sh` builds the acceptance test, a spinning
 cube through a real device with a dynamic vertex buffer the guest locks every
 frame.
@@ -238,6 +259,7 @@ the switch is only consulted for a WoW64 process, window or thread.
 | `MADEIRA_WOW_EXTRA_WINDOW` | on | 32-bit | Allow a window carved from the `[cage]` holdback tail for a second process |
 | `MADEIRA_WOW_SPILL_CEF` | on | 32-bit | Allow a spill window below the FEX host band when the band is full |
 | `MADEIRA_WOW_LIVE_WINDOW_GUARD` | on | 32-bit | Keep an exited process's window while its worker threads still exist |
+| `MADEIRA_WOW_PRESSURE_RELEASE_MB` | 256 | session | Hand idle window placeholders back when the band has less free space than this (MB); 0: keep them |
 | `MADEIRA_WOW_STRICT_LIMITS` | on | 32-bit | Treat an allocation as a guest request only when both bounds are in the caller's window |
 | `MADEIRA_LAA` | on | 32-bit | A 32-bit main image that is not large-address-aware still gets a 4 GB guest ceiling (0: 2 GB) |
 | `MADEIRA_LAA_LOWFIRST` | on | 32-bit | With a raised ceiling, place below 2 GB first and spill above only when the low half cannot serve |
@@ -258,7 +280,8 @@ the switch is only consulted for a WoW64 process, window or thread.
 | `MADEIRA_CPU_COUNT` | unset | per launch | Overrides the `cpu-count` key for one program (unset: unchanged) |
 | `MADEIRA_STRICT_SPLITLOCK` | on | FEX WOW64 | `StrictInProcessSplitLocks` default for 32-bit guests (an explicit FEX setting wins) |
 | `MADEIRA_WOW_SYSCALL_SWEEP` | on | FEX WOW64 | Let the code-buffer sweeper move threads parked in a system call |
-| `MADEIRA_D3D9` | unset (emulated) | i386 `d3d9.dll` | `native`: the D3D9 shim uses the native ARM64 frontend. Also set by the `d3d9` key of `madeira.cfg` |
+| `MADEIRA_D3D9` | unset (emulated) | i386 `d3d9.dll` | `native`: the D3D9 shim uses the native ARM64 frontend; `wined3d`: Wine's d3d9 on wined3d/OpenGL replaces DXMT's for 32- and 64-bit programs. Also set by the `d3d9` key of `madeira.cfg` |
+| `MADEIRA_D3D9_X64` | on | x64 `d3d9.dll` | `0`: Direct3D 9 creation fails for x64 programs, as it did with Wine's wined3d frontend |
 | `MADEIRA_WOW_RWX_PLAIN` | unset (automatic) | 32-bit | Anonymous RWX memory in a window is plain read/write to the host once Wine Mono's `libmono-2.0-x86.dll` is mapped there; 1: in every window, 0: never (stores go through the JIT pool's alias, as before; also keeps FEX's Mono bridge off) |
 | `MADEIRA_WINEMONO_BRIDGE` | automatic for `libmono-2.0-x86.dll` | FEX WOW64 | FEX's Mono backpatcher bridge (ml712) and, once it finds the backpatcher, SMC detection off for the process (ml1280); 0 keeps both off. The 64-bit runtime still needs 1 |
 | `MADEIRA_MONO_DEFAULTS` | on | Wine Mono | mscoree sets `MONO_THREADS_SUSPEND=coop` and adds `keep-delegates` to `MONO_DEBUG` before Mono loads; values already set win; 0 sets nothing |
