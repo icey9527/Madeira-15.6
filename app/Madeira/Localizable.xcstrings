@@ -28792,6 +28792,86 @@
           }
         }
       }
+    },
+    "Both _TrollStore and _TrollStoreLite markers are present, so no JIT backend can be chosen.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同时发现 _TrollStore 与 _TrollStoreLite 标记，无法安全选择 JIT 后端。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Marker _TrollStore und _TrollStoreLite sind beide vorhanden; es kann kein JIT-Backend gewählt werden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Están presentes los marcadores _TrollStore y _TrollStoreLite, así que no se puede elegir un backend de JIT."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "_TrollStore와 _TrollStoreLite 마커가 모두 있어 JIT 백엔드를 선택할 수 없습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os marcadores _TrollStore e _TrollStoreLite estão ambos presentes, então nenhum backend de JIT pode ser escolhido."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Присутствуют оба маркера — _TrollStore и _TrollStoreLite, поэтому выбрать серверную часть JIT нельзя."
+          }
+        }
+      }
+    },
+    "TrollStore Lite is detected; its local mapping check runs before enabling, and passing it does not prove code execution.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检测到 TrollStore Lite；启用前会检查本地映射能力，检查通过也不代表代码执行可用。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TrollStore Lite wurde erkannt; vor dem Aktivieren läuft die lokale Mapping-Prüfung, und ihr Bestehen beweist nicht, dass Code ausgeführt werden kann."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se detectó TrollStore Lite; la comprobación local de mapeo se ejecuta antes de activarlo, y superarla no demuestra que se pueda ejecutar código."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TrollStore Lite가 감지되었습니다. 활성화 전에 로컬 매핑 검사를 실행하며, 검사를 통과해도 코드 실행이 가능하다는 뜻은 아닙니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TrollStore Lite foi detectado; a verificação local de mapeamento roda antes de ativar, e passá-la não prova que o código possa ser executado."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Обнаружен TrollStore Lite; перед включением выполняется локальная проверка отображения, и её успех не доказывает возможность выполнения кода."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
