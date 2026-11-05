@@ -114,7 +114,14 @@ for marker in [
     "Frameworks/StikJIT.xcframework/ios-arm64",
 ]:
     require(marker in project, f"Xcode project contains {marker}")
-require(project.count('"OTHER_LDFLAGS[sdk=iphoneos*]"') == 2
+device_link_flags = re.findall(r'"OTHER_LDFLAGS\[sdk=iphoneos\*\]"\s*=\s*\((.*?)\);', project, re.S)
+stik_link_flags = [flags for flags in device_link_flags if re.search(r"\bStikJIT\b", flags)]
+# Other optional device libraries may have their own qualified settings. Keep
+# StikJIT's framework flags in exactly the two helper configurations.
+helper_configs = re.findall(r'B800000[12] /\* (?:Debug|Release) \*/ = \{(.*?)name = (?:Debug|Release);', project, re.S)
+require(len(stik_link_flags) == 2 and len(helper_configs) == 2
+        and all('"-framework"' in flags for flags in stik_link_flags)
+        and all('StikJIT,' in config for config in helper_configs)
         and re.search(r"(?m)^\s*OTHER_LDFLAGS\s*=", project) is None
         and "#if targetEnvironment(simulator)" in helper,
         "StikJIT links on device only, with a simulator-safe helper stub")
@@ -154,7 +161,7 @@ require("if let jitProblem { jitConnectionActions(jitProblem, retry: enableJIT) 
 # (an alert inside the Library page waited until that tab came back).
 body = library_source[library_source.index('struct LibraryView: View {'):]
 body = body[body.index('    var body: some View {'):body.index('    @ToolbarContentBuilder private var libraryToolbar')]
-require('.alert(jitProblem == nil ? "Library" : "Couldn\'t Enable JIT"' in body,
+require('.alert(jitProblem == nil ? L("Library") : L("Couldn\'t Enable JIT")' in body,
         "the library's error alert is on the tab view, shown on the Settings tab as well")
 require('URL(string: "localdevvpn://enable?scheme=madeira")' in setup
         and "localdevvpn" in app_plist["LSApplicationQueriesSchemes"]

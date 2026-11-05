@@ -182,6 +182,45 @@ when the app resigns active, everything the mode holds is released.
 `MADEIRA_PAD_KBM=0` removes the choice; `[pad-kbm]` logs the mode switching on
 and off and its releases.
 
+## Gyro aim and turbo
+
+Game details › Controls › **Gyro aim & turbo**, and the same page in the
+in-game Session menu, where a change applies at once (`PadAssist.swift`). Both
+are per game, off until turned on, and apply to player 1 only.
+
+**Gyro aim** adds the controller's rotation to the right stick, so the camera
+follows the pad while the stick still works on top of it.
+
+- *Gyro*: **Controller** (any pad GameController reports motion for:
+  DualSense, DualShock 4, Switch Pro, Joy-Con), **This device** (the iPhone or
+  iPad's own gyro, for touch play with the screen held upright), or
+  **Automatic**, the controller's when it has one and the device's otherwise.
+  Pads whose sensors are off until asked have them switched on only while a
+  session uses gyro aim.
+- *Active*: always, or only while holding LT, LB or RB.
+- *Moves*: the **Right stick**, the **Mouse** (8 pixels a degree at 1×), or
+  **Automatic**: the mouse while the game sees no controller from the pad (no
+  controller and no touch controller, or keyboard-and-mouse mode) and the
+  right stick otherwise. With no controller there is nothing to hold, so only
+  *Always* moves the mouse.
+- *Turn with*: twisting the pad flat (yaw) or tilting it like a wheel (roll).
+- *Sensitivity* 0.25× to 4×; 1× is full deflection at 150 degrees a second.
+- *Anti-dead zone* (default 25%, XInput's standard right-stick dead zone):
+  the least deflection any gyro movement gives, so slow aim passes the game's
+  own dead zone. Rotation under 2 degrees a second is ignored, so a still pad
+  does not drift.
+- *Invert* up and down, left and right.
+
+**Turbo** repeats chosen buttons (A, B, X, Y, LB, RB, LT, RT) 5 to 30 times a
+second while they are held, starting pressed. It applies to touch buttons too.
+
+Player 1's sample passes through both after the touch merge, so XInput and the
+HID controller see the result; in keyboard-and-mouse mode it passes through
+before the key feed. Neither applies
+while the library or the Session menu has the pad. Touch play with either on
+keeps the 4 ms poll running without a physical pad. `[pad-assist]` log lines
+record each session's choices and the sensors switching on and off.
+
 ## Player 1 as a HID controller (DualSense, DirectInput)
 
 XInput stays the default and is unchanged. A game can instead see player 1 as
@@ -207,7 +246,10 @@ What the game gets, with `hid`:
   others read as zeros. Sony's libScePad (God of War, other Sony PC ports)
   and SDL's HIDAPI driver see a PS5 pad; DirectInput shows it as Windows does
   (X/Y left stick, Z/Rz right stick, Rx/Ry the triggers, a hat, 15 buttons).
-- Any other pad: a **generic HID gamepad**, pid.codes 1209:4D47, with the
+- Any other pad: stays on **XInput** (`[hid-pad] ... is not a PlayStation pad`),
+  since an XInput game that does not also enumerate DirectInput never sees the
+  generic HID gamepad. `generic` (or `env.MADEIRA_HIDPAD_AUTO_GENERIC = 1` with
+  `hid`) makes it a **generic HID gamepad**, pid.codes 1209:4D47, with the
   object set of the opt-in DirectInput pad below: X/Y and Rx/Ry sticks, Z =
   LT - RT, an 8-way hat, buttons A B X Y LB RB Back Start L3 R3 Guide.
 
@@ -344,6 +386,11 @@ user sees are opt-in (only `1` enables); the others are on unless set to `0`:
 | `MADEIRA_PAD_MODE` | XInput | `hid` / `dualsense` / `generic`: player 1 as a HID controller (see above) |
 | `MADEIRA_HIDPAD_XINPUT` | **off** | `1`: in HID mode, player 1 stays an XInput pad as well |
 | `MADEIRA_PAD_OUTPUT` | on | `0`: no rumble/trigger/lightbar output to the pad; `hid` / `xinput`: only that half |
+| `MADEIRA_XINPUT_BATTERY` | on | `0`: XInput reports an unknown battery and no wireless flag (ml2170) |
+| `MADEIRA_WGI_HOST_PADS` | on | `0`: Windows.Gaming.Input lists no controllers (ml2171) |
+| `MADEIRA_XINPUT_ENABLE_FOREGROUND` | on | `0`: a game's XInputEnable(FALSE) zeroes the pad even while its window is in front (ml2115) |
+| `MADEIRA_XINPUT_SLOT0_RECONNECT` | on | `0`: a reconnected player 1 stays in the slot it landed in (ml2172) |
+| `MADEIRA_CLICK_FOCUS` | on | `0`: a tap or click on an already active window leaves its keyboard focus as it is (ml2181, "Keyboard focus" below) |
 
 `[controls-layout] ml1970` logs layout loads, saves, creation and deletion
 (never layout names); `[xinput] ml1990` logs the session slot reservation.
@@ -358,12 +405,60 @@ state trace.
 
 XInput vibration (ml2106): XInputSetState's two motors play on the pad in
 that slot through CoreHaptics, and XInputGetCapabilities reports motors, when
-`MADEIRA_PAD_OUTPUT` allows it. It needs the companion Wine xinput change
-(XInputSetState, XInputEnable and process detach forward the motors through
-`NtUserGamepadOp_SetVibration`) and rebuilt xinput1_1-1_4 DLLs; with the
-current prebuilt xinput the motors are not forwarded.
+`MADEIRA_PAD_OUTPUT` allows it. XInputSetState, XInputEnable and process
+detach forward the motors through `NtUserGamepadOp_SetVibration`; the shipped
+arm64ec xinput1_1-1_4 and xinputuap carry it.
 
-Battery telemetry, controller-driven navigation of the app itself,
+XInput battery (ml2170): XInputGetBatteryInformation reports each pad's
+GameController battery (GCDeviceBattery, read once a second): on its battery,
+`BATTERY_TYPE_NIMH` with EMPTY/LOW/MEDIUM/FULL at 5/20/70 %; charging or full,
+`BATTERY_TYPE_WIRED`/FULL, as Windows shows a pad on a cable; no battery
+information, `BATTERY_TYPE_UNKNOWN`/FULL; the touch controller alone,
+WIRED/FULL. Headset queries answer `BATTERY_TYPE_DISCONNECTED`, and
+XInputGetCapabilities sets `XINPUT_CAPS_WIRELESS` while the pad runs on its
+battery. Before this every host pad read as an unknown battery at EMPTY, which
+some games take for a low battery. `env.MADEIRA_XINPUT_BATTERY = 0` restores
+that. Changes are logged as `[xinput] ml2170 slot=N battery type=T level=L`
+(XInput's numbers: type 1 wired, 3 NiMH, 255 unknown; level 0-3).
+
+Windows.Gaming.Input (ml2171): Wine's windows.gaming.input only lists devices
+that winebus.sys creates, which a Madeira session never runs, so a game that
+reads controllers only through that API (`Gamepad.Gamepads`,
+`RawGameController.RawGameControllers`) saw none. Each connected XInput slot is
+now also a Gamepad there (and a RawGameController: six axes, ten buttons, one
+switch, 045E:028E like XInputGetCapabilitiesEx), read straight from the host
+slot (so a game's XInputEnable does not affect it) and rescanned once a second
+for pads that come and go. Gamepad.Vibration's two motors go to the slot's
+rumble; the trigger motors have no path on iOS and are dropped. Logged as
+`[wgi] ml2171 host pad N listed as a Gamepad` / `removed` (16 lines per
+process, only in games that use the API). `env.MADEIRA_WGI_HOST_PADS = 0` turns it
+off.
+
+A stale XInputEnable(FALSE) (ml2115): many games call XInputEnable(FALSE) when
+their window loses activation and XInputEnable(TRUE) when it comes back. The
+activation messages a window gets while the port restores it and brings it to
+the front at startup can arrive unbalanced, and the game then reads a
+connected pad at rest for the whole session. While XInput is disabled, xinput
+asks win32u (`NtUserGamepadOp_Foreground`, op 3) whether the calling process
+owns the foreground window; if it does, the disable is taken as stale and the
+live state is returned. `env.MADEIRA_XINPUT_ENABLE_FOREGROUND = 0` keeps the
+pad at rest while disabled. Logged (ERR, capped): `[xinput] ml2114
+XInputEnable(0|1) slot0=... foreground=...`, `[xinput] ml2114 first state query
+index=N: connected (host slot)|not connected, XInput enabled|disabled`, and
+once either `ml2115 ... live state` or `ml2114 ... host pad state zeroed
+(reason)`. The op keeps the number and ABI of the pre-2026-10-01 fork's query,
+whose 32-bit xinput builds are still in use; the battery op is 4.
+
+Player 1 after a reconnect (ml2172): GameController can report a pad that
+reconnects as a new controller before the old one leaves. The new one then
+lands in slot 1 while slot 0 is still taken, slot 0 empties a moment later,
+and a game that reads only player 1 sees nothing. When slot 0 has just
+emptied and exactly one controller joined another slot within the last 5 s,
+it is moved to slot 0 (`[xinput] ml2172 slot=N moved to slot 0`); a second
+player's pad that has been connected longer keeps its slot.
+`env.MADEIRA_XINPUT_SLOT0_RECONNECT = 0` leaves it where it landed.
+
+Controller-driven navigation of the app itself,
 shaped (non-round) controls, a layout-wide size slider and a movable top bar
 remain outside this contribution. Binding physical buttons to keyboard/mouse
 controls is the keyboard-and-mouse mode above.
@@ -379,7 +474,44 @@ top-level window foreground and active, checking at most once a second; a
 window of the same process already in front is left alone. `[fg]` logs the first
 activations. `env.MADEIRA_FOREGROUND_FIX = 0` turns this off.
 
-A game that reads no XInput is not covered by that rule, and Windows sends raw
+Keyboard focus (ml2181). In front is not always enough: some engines start
+their per-frame input with `GetFocus() == their window` and drop polled input
+(XInput, DirectInput) otherwise, while keyboard messages still reach the
+window. Wine moves the keyboard focus into a top-level window only while it
+activates it, so a window that is already its thread's active window keeps
+whatever focus the thread has, possibly none: a click on it sends no
+`WM_MOUSEACTIVATE`, and `SetForegroundWindow` on the window already in front
+does nothing. On the window's own thread, after a mouse button press
+(win32u `process_mouse_message`, also while the program holds the capture), a
+born-minimized restore (`winios_drv_foreground_if_owner`)
+and the once-a-second foreground check above, `winios_click_focus` focuses the
+top-level window when it is the thread's active window and the focus is
+nowhere inside it, which is what `DefWindowProc` does for `WM_ACTIVATE` on
+Windows. Focus already inside the window (a child control), menu and move/size
+modes, and minimized or disabled windows are left alone. Logged (stderr, 24
+lines): `[winios] ml2181 focus → hwnd H (click|tap|activate) was F now N`.
+`env.MADEIRA_CLICK_FOCUS = 0` turns it off.
+
+The `[xinput] ml2180 state read …` line (win32u, the first 16 input/rest
+transitions per slot) also carries the reading thread's GUI state since ml2181:
+`fg=H(pid P) active=A focus=F capture=C focus-in-fg=0|1 fg-focus=G` (the
+foreground window and its process, the reading thread's own active, focus and
+capture windows, whether that focus lies inside the foreground window, and the
+foreground thread's focus). `focus=0x0` with `active` equal to the game's
+window is the state ml2181 repairs.
+
+What reads a slot: XInputGetState and DirectInput's host joystick
+(`MADEIRA_DINPUT_PAD`) both sample through the same win32u query, so an
+`ml2180 state read index=0` line alone does not show that the game reads
+XInput. xinput prints `[xinput] ml2114 first state query index=N` the first
+time a game calls XInputGetState(Ex) for slot N; when that line exists for
+slots 1-3 but not 0 while `[dinput] ml2116 enumeration: slot0=connected,
+listed` is in the log, the game took the DirectInput joystick as its slot-0
+controller and polls XInput only for the other slots. A game written for
+both APIs tells an XInput pad apart from a DirectInput one by its PnP id
+(the `IG_` marker it looks up through WMI's `Win32_PnPEntity`); the host
+DirectInput joystick has no such entry, so such a game treats it as a generic
+joystick. Choose **XInput** (not "XInput and DirectInput") for such a game.A game that reads no XInput is not covered by that rule, and Windows sends raw
 keyboard and mouse input only to the process in front. Horizon Zero Dawn
 (madeira-bcd build 471) showed its window with `SWP_NOACTIVATE` only, reads its
 pad through Windows.Gaming.Input, and nothing was in front at all
@@ -393,7 +525,6 @@ the first activations. Madeira-15.6 also activates a clicked window
 internally when the foreground lock refuses it, instead of eating the
 button-down (`MADEIRA_CLICK_FOREGROUND = 0` restores Wine's behaviour;
 `[fg-click]` logs it).
-
 ## Windows.Gaming.Input
 
 Wine's windows.gaming.input lists HID devices only, and counts one as a Gamepad
@@ -432,7 +563,14 @@ python3 tests/host/check-touch-gamepad.py
 python3 tests/host/check-control-presets.py
 python3 tests/host/check-hidpad.py      # needs the wine submodule or WINE_SRC
 python3 tests/host/check-pad-output.py
+python3 tests/host/check-pad-assist.py
 ```
+
+`wine/tools/tests/xinput-host.c` and `wine/tools/tests/wgi-host-pads.c` are
+native Windows tests of the PE side (XInput, Windows.Gaming.Input) against a
+synthetic host query; `wine/tools/tests/xinput-host.md` has the build lines.
+`docs/CONTROLLERS_ANALYSIS.md` is the audit of the whole path and its
+remaining gaps.
 
 The first compiles production snapshot/query code and checks packets, ranges,
 slots, invalid queries, disconnect/reconnect and concurrent readers/writers.

@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Default-on (Madeira-15.6) foreground for a process when no window is foreground (MADEIRA_INPUT_FOREGROUND); no Wine runs.
-
 Horizon Zero Dawn (build 471, 2026-10-09 15:01) showed its window with
 SWP_NOACTIVATE only and reads no XInput, so GetForegroundWindow() stayed NULL
 and the wineserver queued none of the injected keys or taps for it as raw
 input. build/win32u-unix/driver_ios.c ios_foreground_if_none makes the polling
 or posting process's main window foreground while no window is foreground.
 Compiles the production function with stubs and checks:
-  - on unless MADEIRA_INPUT_FOREGROUND is exactly "0" (Madeira-15.6 default);
-  - never while any window is foreground;
+  - on unless MADEIRA_INPUT_FOREGROUND is exactly "0" (Madeira-15.6 default);  - never while any window is foreground;
   - the process's main window is made foreground through the internal path;
   - nothing without a main window; at most once per 250 ms;
 and textually that injected keys and mouse events, and every message poll,
@@ -78,8 +76,7 @@ int main(void)
     main_window = game;
     ios_foreground_if_none( "test" );
     if (set_calls) FAIL( "acted without MADEIRA_INPUT_FOREGROUND\n" );
-    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );
-    return 0;
+    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );    return 0;
 }
 '''
 
@@ -88,8 +85,7 @@ on_harness = harness.replace(r'''int main(void)
 {
     if (getenv( "SECOND" )) goto second;''').replace(r'''    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );
     return 0;
-}''', r'''    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );
-    return 0;
+}''', r'''    printf( "PASS: nothing happens with MADEIRA_INPUT_FOREGROUND=0\n" );    return 0;
 second:
     clock_ns = 5000000000LL;
     main_window = (HWND)0x20038;

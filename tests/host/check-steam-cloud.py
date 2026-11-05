@@ -6,7 +6,8 @@ save synced before that is now missing on this device is a choice whose mark kee
 that name from going up over the cloud's copy unasked (the reset-prefix case), and runs the
 production comparison (SteamCloudPaths, SteamCloudAudit) over a synthetic prefix: a save folder
 named with {64BitSteamID} gets a cloud name with the ID filled in, the name the cloud lists for
-that file. Source checks: Steam Cloud is on unless turned off, a game not checked yet syncs before
+that file. Source checks: Steam Cloud is on unless Settings › Steam turns it off, and off stops every
+check, transfer and Play prompt; turning it back on starts clean; a game not checked yet syncs before
 Play, every upload that replaces a cloud file backs up the cloud's copy first, and backups are in
 Documents.
 """
@@ -29,11 +30,37 @@ def require(condition, label):
 cloud = (app / 'SteamCloud.swift').read_text()
 owned = (app / 'SteamOwnedLibrary.swift').read_text()
 compare = cloud[cloud.index('// MARK: - Where a cloud path lives in the Wine prefix'):cloud.index('// MARK: - Download')]
+compare = compare[:compare.index('// MARK: - One Windows profile per prefix')] + compare[compare.index('// MARK: - Comparison'):]
 plan = cloud[cloud.index('// MARK: - What to do with a comparison'):cloud.index('// MARK: - Upload')]
+state = cloud[cloud.index('// MARK: - State the interface shows'):]
 
 # ------------------------------------------------------------------ static
 require('SteamSignIn.flag("MADEIRA_STEAM_CLOUD", default: true)' in owned,
         'Steam Cloud is on unless turned off (env.MADEIRA_STEAM_CLOUD = 0)')
+onboarding = (app / 'Onboarding.swift').read_text()
+games = (app / 'SteamGames.swift').read_text()
+steam_settings = onboarding[onboarding.index('struct SteamSettingsSection'):onboarding.index('// MARK: - Madeira Dock in the library')]
+require('Toggle("Steam Cloud saves", isOn: $cloud.on)' in steam_settings and 'SteamCloudSetting.shared' in steam_settings,
+        'Settings › Steam has the Steam Cloud saves switch')
+require('MadeiraConfig.set("env.MADEIRA_STEAM_CLOUD", on ? nil : "0")' in games
+        and 'SteamOwnedLibrary.shared.cloudTurnedOff()' in games,
+        'the switch is kept in madeira.cfg and turning it off reaches the library')
+hold = owned[owned.index('func cloudHold('):owned.index('// MARK: Upload and quit')]
+require('guard Self.cloudEnabled else { noteCloudOff(); return nil }' in hold
+        and 'guard Self.cloudPlayCheck else { return nil }' in hold,
+        'off: Play neither waits nor asks')
+require('static var cloudQuitEnabled: Bool { cloudEnabled &&' in owned and 'if SteamOwnedLibrary.cloudEnabled {' in games
+        and 'if SteamOwnedLibrary.cloudEnabled, !steam.cloudUndecided.isEmpty {' in games,
+        "off: the game page's section, the library's note and the upload button are hidden")
+require(owned.count('Self.cloudEnabled else { throw CancellationError() }') == 3
+        and 'guard Self.cloudEnabled, !cloudBusy.contains(appID)' in owned,
+        'off: a running transfer stops between files and no choice is applied')
+turned_on = owned[owned.index('func cloudTurnedOn()'):owned.index('func cloudTurnedOff()')]
+require('cloud.removeAll()' in turned_on and 'cloudAudited = false' in turned_on
+        and turned_on.index('cloudBusy.isEmpty') < turned_on.index('cloud.removeAll()'),
+        'turning it back on drops earlier results and syncs again once running transfers ended')
+require(owned.count('"[steam-cloud] off (setting)"') == 1 and 'private var cloudOffLogged = false' in owned,
+        'off is logged once per app run')
 require('guard let state = cloud[appID] else { return .stale }' in owned,
         'Play on a game not checked yet in this app run syncs it first, without asking')
 upload = owned[owned.index('private func upload(_ appID: Int'):owned.index('// MARK: Before Play')]
@@ -59,6 +86,21 @@ struct SteamCloudListing { var changeNumber: UInt64 = 0; var files: [SteamCloudF
 
 var failed = 0
 func check(_ ok: Bool, _ label: String) { print((ok ? "PASS: " : "FAIL: ") + label); if !ok { failed += 1 } }
+
+var reconnected = SteamCloudState()
+reconnected.phase = .failed("storage unavailable")
+reconnected.checked = Date()
+reconnected.problem = "old provider error"
+reconnected.conflicts = [SteamCloudEntry(path: "save.dat", kind: .cloudOnly)]
+let savedConflicts = reconnected.conflicts
+reconnected.retryFailedCheck()
+check(reconnected.phase == .ready && reconnected.checked == nil && reconnected.problem == nil,
+      "reconnected storage requires a fresh cloud audit instead of retaining its failed check")
+check(reconnected.conflicts == savedConflicts, "reconnect preserves unresolved save decisions")
+reconnected.phase = .uploading(done: 1, of: 2)
+let uploading = reconnected
+reconnected.retryFailedCheck()
+check(reconnected == uploading, "reconnect does not disturb an active cloud transfer")
 
 func sha(_ byte: UInt8) -> Data { Data(repeating: byte, count: 20) }
 func hex(_ byte: UInt8) -> String { SteamCloudPlan.hex(sha(byte)) }
@@ -106,6 +148,11 @@ check(only(plan(e(.differ, cloud: 1, local: 9), SteamCloudPlan.missingMark + hex
       "a save that reappears after it went missing: a choice, never uploaded unasked")
 check(only(plan(e(.differ, cloud: 2, local: 9), SteamCloudPlan.missingMark + hex(1))) == "ask", "  also when the cloud moved on")
 
+// No complete local hash is not evidence of a local edit. Do not transfer automatically.
+check(only(plan(e(.differ, cloud: 1), hex(1))) == "ask", "unreadable local save with unchanged cloud: no automatic upload")
+check(only(plan(e(.differ, cloud: 2), hex(1))) == "ask", "unreadable local save with changed cloud: no automatic download")
+check(only(plan(e(.localOnly), nil)) == "nothing", "unreadable local-only save: no upload")
+
 // The user chose to leave it missing.
 let deleted = SteamCloudPlan.deletedMark + hex(1)
 check(only(plan(e(.cloudOnly, cloud: 1), deleted)) == "nothing", "left missing by choice: not asked again")
@@ -128,24 +175,117 @@ let paths = SteamCloudPaths(drive: drive, userFolder: drive.appendingPathCompone
                             steamID: steamID, overrides: [])
 let ufs = [SteamAppInfo.SaveFile(root: "gameinstall", path: "savedata/{64BitSteamID}", pattern: "*", recursive: false, platforms: [])]
 let name = "%GameInstall%savedata/\(steamID)/data_0.sav"
-let local = SteamCloudAudit.run(listing: SteamCloudListing(), saveFiles: ufs, paths: paths)
+let local = try! SteamCloudAudit.run(listing: SteamCloudListing(), saveFiles: ufs, paths: paths)
 check(local.entries.count == 1 && local.entries[0].kind == .localOnly, "a device-only save in a {64BitSteamID} folder is found")
 check(local.entries.first?.path == name, "  its cloud name has the ID filled in (\(local.entries.first?.path ?? "-"))")
+// Rules as some games write them: platform "all" (Psychonauts, Dark Souls PTDE), the
+// placeholder in lower case (Sifu) and a path ending in "/." (100% Orange Juice).
+for (label, rule) in [("platform \"all\"", SteamAppInfo.SaveFile(root: "gameinstall", path: "savedata/{64BitSteamID}", pattern: "*", recursive: false, platforms: ["all"])),
+                      ("a lower-case {64bitsteamid}", SteamAppInfo.SaveFile(root: "gameinstall", path: "savedata/{64bitsteamid}", pattern: "*", recursive: false, platforms: [])),
+                      ("a path ending in /.", SteamAppInfo.SaveFile(root: "gameinstall", path: "savedata/{64BitSteamID}/.", pattern: "*", recursive: false, platforms: ["windows"]))] {
+    let found = try! SteamCloudAudit.run(listing: SteamCloudListing(), saveFiles: [rule], paths: paths)
+    check(found.entries.count == 1 && found.entries.first?.path == name, "  a rule with \(label) finds it under the same name")
+}
+let macOnly = [SteamAppInfo.SaveFile(root: "gameinstall", path: "savedata/{64BitSteamID}", pattern: "*", recursive: false, platforms: ["macos"])]
+check(try! SteamCloudAudit.run(listing: SteamCloudListing(), saveFiles: macOnly, paths: paths).entries.isEmpty, "  a macOS-only rule is still left out")
 let listed = SteamCloudFile(prefix: "%GameInstall%savedata/\(steamID)/", name: "data_0.sav",
                             sha: SteamCloudAudit.sha1(of: saves.appendingPathComponent("data_0.sav"))!,
                             timestamp: 1, size: UInt64(bytes.count), persistState: 0)
-let both = SteamCloudAudit.run(listing: SteamCloudListing(files: [listed]), saveFiles: ufs, paths: paths)
+let both = try! SteamCloudAudit.run(listing: SteamCloudListing(files: [listed]), saveFiles: ufs, paths: paths)
 check(both.entries.count == 1 && both.entries[0].kind == .same, "  and once the cloud lists it under that name, the two are the same file")
+// Directory/missing inputs must not become digests; the empty regular file is distinct.
+check(SteamCloudAudit.sha1(of: saves) == nil, "directory input returns no digest")
+check(SteamCloudAudit.sha1(of: saves.appendingPathComponent("absent")) == nil, "open error returns no digest")
+let empty = saves.appendingPathComponent("empty.sav")
+try! Data().write(to: empty)
+check(SteamCloudAudit.sha1(of: empty) == Data(Insecure.SHA1.hash(data: Data())), "empty regular file still has its valid SHA-1")
+let largeBytes = Data((0..<(2 * 1024 * 1024 + 37)).map { UInt8(truncatingIfNeeded: $0) })
+let large = saves.appendingPathComponent("large.sav")
+try! largeBytes.write(to: large)
+check(SteamCloudAudit.sha1(of: large) == Data(Insecure.SHA1.hash(data: largeBytes)), "multi-chunk file hash includes the final short read")
+// An external GameInstall folder must not follow a nested link outside its library.
+let externalRoot = tmp.appendingPathComponent("external")
+let externalInstall = externalRoot.appendingPathComponent("steamapps/common/External Game")
+let outside = tmp.appendingPathComponent("outside")
+try! FileManager.default.createDirectory(at: externalInstall, withIntermediateDirectories: true)
+try! FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+try! bytes.write(to: outside.appendingPathComponent("save.dat"))
+try! FileManager.default.createSymbolicLink(at: externalInstall.appendingPathComponent("saves"), withDestinationURL: outside)
+var externalPaths = paths
+externalPaths.installFolder = externalInstall
+externalPaths.externalLibraryRoot = externalRoot
+let externalListed = SteamCloudFile(prefix: "%GameInstall%saves/", name: "save.dat",
+                                   sha: SteamCloudAudit.sha1(of: outside.appendingPathComponent("save.dat"))!,
+                                   timestamp: 1, size: UInt64(bytes.count), persistState: 0)
+do {
+    _ = try SteamCloudAudit.run(listing: SteamCloudListing(files: [externalListed]), saveFiles: [], paths: externalPaths)
+    check(false, "external cloud: linked ancestor must fail the audit")
+} catch { check(true, "external cloud: linked ancestor fails before reading an outside save") }
+let externalPattern = [SteamAppInfo.SaveFile(root: "GameInstall", path: "saves", pattern: "*", recursive: true, platforms: [])]
+do {
+    _ = try SteamCloudAudit.run(listing: SteamCloudListing(), saveFiles: externalPattern, paths: externalPaths)
+    check(false, "external cloud: linked local-only save folder must fail the audit")
+} catch { check(true, "external cloud: linked local-only save folder fails before enumeration") }
+try! FileManager.default.removeItem(at: externalInstall.appendingPathComponent("saves"))
+try! FileManager.default.createDirectory(at: externalInstall.appendingPathComponent("Saves"), withIntermediateDirectories: true)
+try! bytes.write(to: externalInstall.appendingPathComponent("Saves/save.dat"))
+let externalSafe = try! SteamCloudAudit.run(listing: SteamCloudListing(files: [externalListed]), saveFiles: [], paths: externalPaths)
+check(externalSafe.entries.count == 1 && externalSafe.entries[0].kind == .same,
+      "external cloud: ordinary SSD save uses case-insensitive resolution and compares normally")
+try! FileManager.default.createSymbolicLink(at: externalInstall.appendingPathComponent("Saves/linked.dat"), withDestinationURL: outside.appendingPathComponent("save.dat"))
+do {
+    _ = try SteamCloudAudit.run(listing: SteamCloudListing(), saveFiles: externalPattern, paths: externalPaths)
+    check(false, "external cloud: linked file must fail local-only enumeration")
+} catch { check(true, "external cloud: linked file fails before being offered for upload") }
+try! FileManager.default.createSymbolicLink(at: externalInstall.appendingPathComponent("dangling"), withDestinationURL: outside.appendingPathComponent("missing"))
+do {
+    _ = try externalPaths.resolve(base: externalInstall, parts: ["dangling", "new.sav"])
+    check(false, "external cloud: a download must not create a file through a dangling link")
+} catch { check(true, "external cloud: destination validation rejects dangling links") }
+externalPaths.externalLibraryID = try! ExternalStorageIdentity.register(root: externalRoot)
+try! FileManager.default.removeItem(at: externalRoot.appendingPathComponent(ExternalStorageIdentity.marker))
+do {
+    _ = try externalPaths.resolve(base: paths.userFolder, parts: ["Documents", "save.dat"])
+    check(false, "external cloud: missing identity must fail even for an internal save")
+} catch { check(true, "external cloud: missing identity prevents use of a replacement drive") }
+externalPaths.externalLibraryID = nil
+try! FileManager.default.moveItem(at: externalRoot, to: tmp.appendingPathComponent("unplugged"))
+do {
+    _ = try SteamCloudAudit.run(listing: SteamCloudListing(), saveFiles: [], paths: externalPaths)
+    check(false, "external cloud: missing drive must not look like an empty library")
+} catch { check(true, "external cloud: a disconnected drive fails an empty audit") }
 try? FileManager.default.removeItem(at: tmp)
 
 exit(failed == 0 ? 0 : 1)
 '''
 
+# Inject a read error after one successful chunk into a second copy of the
+# production hash routine. Normal filesystem checks above use Foundation.FileHandle.
+hash_code = compare[compare.index('    static func sha1('):compare.index('    private static func attributes(')]
+fault_probe = r'''
+final class FaultHandle {
+    static var reads = 0
+    init(forReadingFrom url: URL) throws {}
+    func close() throws {}
+    func read(upToCount count: Int) throws -> Data? {
+        Self.reads += 1
+        if Self.reads == 1 { return Data("partial save bytes".utf8) }
+        throw CocoaError(.fileReadUnknown)
+    }
+}
+enum ReadFailureProbe {
+''' + hash_code.replace('FileHandle(forReadingFrom:', 'FaultHandle(forReadingFrom:') + r'''
+}
+'''
+main = main.replace('exit(failed == 0 ? 0 : 1)', '''check(ReadFailureProbe.sha1(of: saves) == nil && FaultHandle.reads == 2,
+      "read failure after a successful chunk discards the partial digest")
+exit(failed == 0 ? 0 : 1)''')
+
 with tempfile.TemporaryDirectory() as tmp:
     src = Path(tmp) / 'main.swift'
-    src.write_text('import Foundation\nimport CryptoKit\n' + compare + '\n' + plan + '\n' + main.replace('import Foundation\n', '', 1))
+    src.write_text('import Foundation\nimport CryptoKit\n' + compare + '\n' + plan + '\n' + state + '\n' + fault_probe + '\n' + main.replace('import Foundation\n', '', 1))
     out = Path(tmp) / 'cloud'
-    build = subprocess.run([SWIFTC, '-O', str(src), '-o', str(out)], capture_output=True, text=True)
+    build = subprocess.run([SWIFTC, '-O', str(src), str(app / 'ExternalStorage.swift'), str(app / 'SteamKeyValues.swift'), '-o', str(out)], capture_output=True, text=True)
     if build.returncode != 0:
         print(build.stderr[-3000:])
         require(False, 'the production comparison and SteamCloudPlan compile on the host')

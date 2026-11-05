@@ -11,10 +11,19 @@ APP_LIB="$REPO_ROOT/app/Madeira/libntdll_unix.a"
 
 mkdir -p "$OBJ_DIR"
 
-PAGE_WAIT_FLAG=""
-if printf '#include <sys/resource.h>\nvoid check(struct rusage_info_v6 *usage) { (void)usage->ri_page_wait_time_mach; }\n' \
-    | xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK" -x c -fsyntax-only - 2>/dev/null; then
-    PAGE_WAIT_FLAG="-DMADEIRA_HAS_PAGE_WAIT_TIME_MACH=1"
+# Optional Vulkan route; do not change the normal native build.
+VULKAN_FLAGS=()
+if [ "${MADEIRA_MOLTENVK:-0}" = 1 ]; then
+    VULKAN_FLAGS=(-DMADEIRA_MOLTENVK=1)
+fi
+
+# Detect optional diagnostic fields in the SDK used for this target build.
+# Keep SDK versions without this member buildable; it is not a runtime requirement.
+RUSAGE_PAGE_WAIT_FLAGS=()
+if printf '#include <sys/resource.h>\nvoid probe(struct rusage_info_v6 *r) { (void)r->ri_page_wait_time_mach; }\n' | \
+    xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK" \
+        -miphoneos-version-min="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}" -x c -fsyntax-only - >/dev/null 2>&1; then
+    RUSAGE_PAGE_WAIT_FLAGS=(-DMADEIRA_HAVE_RUSAGE_PAGE_WAIT_TIME_MACH=1)
 fi
 
 SUCCEEDED=0
@@ -24,24 +33,28 @@ FAILED_FILES=""
 compile_one() {
     local src=$1
     local name=$2
+    shift 2   # anything after src and name: extra flags for this file only
     echo -n "  $name... "
 
     if xcrun -sdk iphoneos clang \
         -arch arm64 -isysroot "$SDK" -miphoneos-version-min="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}" \
         -O2 -fPIC -fvisibility=hidden -fno-stack-protector -fno-strict-aliasing \
+        "${VULKAN_FLAGS[@]}" \
         -Wno-implicit-function-declaration -Wno-int-conversion \
         -include "$WINE_BUILD/include/config.h" \
         -include "$BUILD_DIR/shims/wine_ios_exit.h" \
         -I"$BUILD_DIR/shims" -I"$BUILD_DIR/../madsync" -DHAVE_LINUX_NTSYNC_H=1 \
         -I"$WINE_BUILD/dlls/ntdll" -I"$WINE_SRC/dlls/ntdll" -I"$WINE_SRC/dlls/ntdll/unix" \
         -I"$WINE_BUILD/include" -I"$WINE_SRC/include" \
-        $PAGE_WAIT_FLAG -D__WINESRC__ -DLTC_NO_PROTOTYPES -DLTC_SOURCE -D_NTSYSTEM_ \
+        -D__WINESRC__ -DLTC_NO_PROTOTYPES -DLTC_SOURCE -D_NTSYSTEM_ \
         -D_ACRTIMP= -DWINBASEAPI= \
         -DBINDIR=\"/usr/local/bin\" -DLIBDIR=\"/usr/local/lib\" \
         -DDATADIR=\"/usr/local/share\" -DSYSTEMDLLPATH=\"\" \
         -DWINE_UNIX_LIB -DWINE_IOS=1 \
+        "${RUSAGE_PAGE_WAIT_FLAGS[@]}" \
         -Dget_thread_context=ntdll_get_thread_context \
         -Dset_thread_context=ntdll_set_thread_context \
+        "$@" \
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"
         SUCCEEDED=$((SUCCEEDED + 1))
@@ -67,6 +80,7 @@ compile_unixlib() {
     if xcrun -sdk iphoneos clang \
         -arch arm64 -isysroot "$SDK" -miphoneos-version-min="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}" \
         -O2 -fPIC -fvisibility=hidden -fno-stack-protector -fno-strict-aliasing \
+        "${VULKAN_FLAGS[@]}" \
         -Wno-implicit-function-declaration -Wno-int-conversion \
         -include "$WINE_BUILD/include/config.h" \
         -include "$BUILD_DIR/shims/wine_ios_exit.h" \
@@ -101,12 +115,34 @@ echo "=== Building crypto/network unixlibs ==="
 compile_one "$CRYPTO_DIR/gnutls_symtab_ios.c" "gnutls_symtab_ios"
 compile_unixlib "$WINE_SRC/dlls/ws2_32/unixlib.c" "ws2_32_unixlib" "ws2_32" \
     -I"$WINE_SRC/dlls/ws2_32"
+# madeira-gnutls-unixlibs: the host configure cannot detect an iOS arm64 static
+# archive, so config.h leaves HAVE_GNUTLS_CIPHER_INIT and SONAME_LIBGNUTLS
+# undefined and all three sources below compile to empty objects. The iOS chain
+# links GnuTLS statically regardless (see ios_gnutls_shim.h), so define them
+# here -- on these three translation units only, because the host build really
+# does not have GnuTLS and config.h should keep saying so.
+#
+# Warns rather than fails when the prefix is absent, so a tree that has never
+# run build/gnutls-ios/build.sh still builds exactly as it does today -- it
+# just keeps getting the empty objects, and now says so instead of leaving it
+# to be discovered by a program whose HTTPS request goes nowhere.
+GNUTLS_DEFS=()
+if [ -f "$GNUTLS_PREFIX/lib/libgnutls.a" ]; then
+    GNUTLS_DEFS=(-DHAVE_GNUTLS_CIPHER_INIT '-DSONAME_LIBGNUTLS="libgnutls.so.30"')
+else
+    echo "WARNING: $GNUTLS_PREFIX/lib/libgnutls.a is missing, so bcrypt," >&2
+    echo "         secur32 and crypt32 compile to empty objects and guest-side" >&2
+    echo "         TLS will not work. Run build/gnutls-ios/build.sh to fix." >&2
+fi
+
 compile_unixlib "$WINE_SRC/dlls/bcrypt/gnutls.c" "bcrypt_unixlib" "bcrypt" \
     -I"$WINE_SRC/dlls/bcrypt" -I"$GNUTLS_PREFIX/include" \
-    -include "$CRYPTO_DIR/ios_gnutls_shim.h"
+    -include "$CRYPTO_DIR/ios_gnutls_shim.h" \
+    "${GNUTLS_DEFS[@]}"
 compile_unixlib "$WINE_SRC/dlls/secur32/schannel_gnutls.c" "secur32_unixlib" "secur32" \
     -I"$WINE_SRC/dlls/secur32" -I"$GNUTLS_PREFIX/include" \
-    -include "$CRYPTO_DIR/ios_gnutls_shim.h"
+    -include "$CRYPTO_DIR/ios_gnutls_shim.h" \
+    "${GNUTLS_DEFS[@]}"
 # iOS-Madeira ml494 (#61 text wall): dwrite had NO unixlib, so every
 # __wine_unix_call from dwrite.dll failed and get_glyph_bbox never ran —
 # every glyph run reported an EMPTY bbox and Chromium drew no text at all.
@@ -118,7 +154,34 @@ compile_unixlib "$BUILD_DIR/dwrite_freetype_ios.c" "dwrite_unixlib" "dwrite" \
     -I"$REPO_ROOT/wine/build-arm64ec/include"
 compile_unixlib "$CRYPTO_DIR/crypt32_unixlib_ios.c" "crypt32_unixlib" "crypt32" \
     -I"$WINE_SRC/dlls/crypt32" -I"$GNUTLS_PREFIX/include" \
-    -include "$CRYPTO_DIR/ios_gnutls_shim.h"
+    -include "$CRYPTO_DIR/ios_gnutls_shim.h" \
+    "${GNUTLS_DEFS[@]}"
+if [ ${#GNUTLS_DEFS[@]} -gt 0 ]; then
+    for module in bcrypt secur32 crypt32; do
+        for table in unix_call_funcs unix_call_wow64_funcs; do
+            xcrun nm -gU "$OBJ_DIR/${module}_unixlib.o" | grep -Eq "[[:space:]]_${module}_${table}$" || {
+                echo "ERROR: $module did not build its $table table" >&2
+                exit 1
+            }
+        done
+    done
+fi
+# OpenGL: opengl32's unix side (wrappers + generated thunks). It dispatches to
+# win32u's WGL layer, whose iOS driver is build/win32u-unix/opengl_ios.c.
+compile_unixlib "$WINE_SRC/dlls/opengl32/unix_wgl.c" "opengl32_wgl" "opengl32" \
+    -I"$WINE_SRC/dlls/opengl32"
+compile_unixlib "$WINE_SRC/dlls/opengl32/unix_thunks.c" "opengl32_thunks" "opengl32" \
+    -I"$WINE_SRC/dlls/opengl32"
+# Vulkan: winevulkan's unix side (instance/device wrappers + generated thunks).
+# It dispatches to win32u's Vulkan layer (build/win32u-unix/vulkan_ios.c), which
+# loads the session's Vulkan library (MADEIRA_VULKAN_LIBRARY; off by default).
+# Bound for 64-bit callers only (virtual_ios.c): the wow64 thunks pass 32-bit
+# guest pointers through UlongToPtr, without the window base a 32-bit program
+# here needs (ios_wow_host_ptr), like opengl32's before its regenerated thunks.
+compile_unixlib "$WINE_SRC/dlls/winevulkan/vulkan.c" "winevulkan_vulkan" "winevulkan" \
+    -I"$WINE_SRC/dlls/winevulkan"
+compile_unixlib "$WINE_SRC/dlls/winevulkan/vulkan_thunks.c" "winevulkan_thunks" "winevulkan" \
+    -I"$WINE_SRC/dlls/winevulkan"
 # iOS-Madeira 2026-08-03 (#79 transport): in-process NSI TCP connection
 # tables (nsiproxy.sys is not shipped; PE nsi.dll falls back to this).
 compile_one "$BUILD_DIR/nsi_unixlib_ios.c" "nsi_unixlib_ios"
@@ -205,8 +268,18 @@ for src in $WINE_SRC/dlls/ntdll/unix/*.c; do
             compile_one "$BUILD_DIR/thread_ios.c" "thread"
             ;;
         sync)
-            # prepare-sync.py rewrote the two os_sync availability checks
-            compile_one "$OBJ_DIR/sync.c" "sync"
+            # prepare-sync.py already rewrote os_sync checks in sync.c above.
+            # madeira-bcd: resolve NULL keyed-event handles against the current
+            # guest process, then make the copied source's config include absolute.
+            perl -0pe 's/(NTSTATUS WINAPI NtWaitForKeyedEvent\()/HANDLE ios_default_keyed_event(void);\n$1/;
+                       s/if \(!handle\) handle = keyed_event;/if (!handle) handle = ios_default_keyed_event();/g;
+                       s{"\.\./\.\./\.\./\.\./build/madeira_cfg\.h"}{"'"$REPO_ROOT"'/build/madeira_cfg.h"}' \
+                "$OBJ_DIR/sync.c" > "$OBJ_DIR/sync_ios.c"
+            if [ "$(grep -c 'handle = ios_default_keyed_event()' "$OBJ_DIR/sync_ios.c")" != 2 ]; then
+                echo "  sync: keyed-event patch did not apply"; exit 1
+            fi
+            # MADEIRA_THREAD_QOS: the wrapper selects the named guest-thread QoS.
+            compile_one "$OBJ_DIR/sync_ios.c" "sync" -Dpthread_set_qos_class_self_np=madeira_guest_qos_self
             ;;
         file)
             # ml2108: build-time NtWriteFile source probe (write-src), added
@@ -234,7 +307,8 @@ ar rcs "$OBJ_DIR/libntdll_unix.a" \
     "$OBJ_DIR/nsi_network_ios.o" "$OBJ_DIR/nsi_ndis.o" "$OBJ_DIR/nsi_ip.o" \
     "$OBJ_DIR/gnutls_symtab_ios.o" "$OBJ_DIR/ws2_32_unixlib.o" \
     "$OBJ_DIR/bcrypt_unixlib.o" "$OBJ_DIR/secur32_unixlib.o" "$OBJ_DIR/crypt32_unixlib.o" \
-    "$OBJ_DIR/dwrite_unixlib.o" "$OBJ_DIR/dnsapi_unixlib.o" \
+    "$OBJ_DIR/dwrite_unixlib.o" "$OBJ_DIR/dnsapi_unixlib.o" "$OBJ_DIR/opengl32_wgl.o" "$OBJ_DIR/opengl32_thunks.o" \
+    "$OBJ_DIR/winevulkan_vulkan.o" "$OBJ_DIR/winevulkan_thunks.o" \
     "$OBJ_DIR/winegstreamer_unixlib.o" "$OBJ_DIR/wg_parser_apple_ios.o" \
     "$OBJ_DIR/cdrom.o" "$OBJ_DIR/debug.o" "$OBJ_DIR/env.o" "$OBJ_DIR/file.o" \
     "$OBJ_DIR/loader.o" "$OBJ_DIR/loadorder.o" "$OBJ_DIR/process.o" "$OBJ_DIR/registry.o" \

@@ -41,6 +41,24 @@ seconds for both the `CS_DEBUGGED` flag and a live debugger connection. Enabling
 Madeira from StikDebug's own app list is not equivalent because that flow can
 detach before Madeira creates its JIT pool.
 
+## Apple Vision Pro (compatible iPad app)
+
+[Issue #336](https://github.com/willfaust/Madeira/issues/336) reports that on
+visionOS 27.0.1, in-app pairing offers no **Pair with Madeira** row, and
+Built-in StikJIT cannot find its helper even when the extension is bundled
+and signed. Reinstalling did not resolve the helper lookup failure in that
+report.
+
+The reporter enabled JIT with StikDebug 3.1.14 and LocalDevVPN, using a remote
+pairing file created for the headset from a Mac. Import the headset's pairing
+file into StikDebug, choose **StikDebug** under **Settings → JIT** in Madeira,
+connect LocalDevVPN, then tap **Enable JIT** in Madeira. The usual iPhone
+in-app pairing steps below do not describe the headset's Settings UI.
+
+This is a reported workaround for the compatible iPad app, not native visionOS
+support or a fix for Built-in StikJIT. Other visionOS versions and signing
+methods still need testing.
+
 ## Built-in StikJIT
 
 Built-in JIT requires iOS 26 or later and a normal sideloaded installation. It
@@ -100,7 +118,11 @@ for the iPhone itself, so it is never stored in `Documents`, where the Files app
 and every Windows program in Madeira could read it. Madeira sends its bytes only
 to its bundled helper process for the current request. A copy an earlier build
 left at `Documents/StikJIT/pairingFile.plist` is moved into the Keychain and
-deleted the first time Madeira reads it.
+deleted the first time Madeira reads it. An installer that already holds this
+iPhone's pairing file hands it over the same way:
+[SideInstaller](https://github.com/FrizzleM/SideInstaller) writes it there when
+it installs Madeira, and Madeira takes it in, as an imported file, the next time
+it looks for one.
 
 The helper is a classic app extension (`PlugIns/MadeiraJITHelper.appex`, on
 the `com.apple.ar.viewer` extension point, as LiveContainer's LiveProcess is). A
@@ -257,6 +279,100 @@ JIT also requires Madeira's executable to be signed as debuggable. Madeira
 reports a signing error before attempting either method when that entitlement
 is missing.
 
+### Refreshing the signing
+
+Off by default: refresh the signing with the installer that signed Madeira
+(SideStore, AltStore, SideInstaller, a computer). A refresh asks Apple's
+developer portal for a profile on the same Apple ID other sideloaded apps are
+signed with, so Madeira leaves that to the installer. With it off, Settings has
+no Signing section, nothing runs over the library and Madeira takes in no
+sign-in an installer left. `env.MADEIRA_SIGNING_REFRESH = 1` in madeira.cfg
+turns all of what follows back on.
+
+A copy signed with a free Apple ID opens for seven days: that is how long its
+provisioning profile lasts. **Settings → Signing** shows when it runs out, for
+such a week-long profile only (a paid account's lasts a year). A new profile for
+the same App ID, installed on the device, gives it seven more days, and Madeira
+is not installed again. Madeira does that itself when it holds a sign-in to
+Apple's developer portal: a token, never a password. It gets one from the
+installer, or from an Apple ID sign-in in Settings.
+
+[SideInstaller](https://github.com/FrizzleM/SideInstaller) leaves that sign-in
+when it installs Madeira: the developer-portal token it signed in with
+(`com.apple.gs.xcode.auth`), the team, the anisette identity the token was
+issued to and the anisette servers SideInstaller uses. There is no password in
+it, and the token only reaches the developer portal. SideInstaller writes it to
+`Library/Application Support/SigningAccount.plist`, and only into a build whose
+Info.plist names the version of the file it reads
+(`MadeiraSigningAccountVersion`). Madeira moves the file into the Keychain when
+it starts, before any Windows program runs, and deletes it. Apple states when
+the token expires, which Settings shows; **Forget Apple sign-in** removes it.
+
+A copy installed another way (SideStore, AltStore, Sideloadly, iloader, Xcode)
+has no such file. **Settings → Signing → Sign in with Apple ID** makes the same
+sign-in from the Apple ID that installed it (`app/Madeira/AppleSignIn.swift`):
+
+- The sign-in is [isideload](https://github.com/nab138/isideload)'s, the
+  library SideInstaller and iloader use (`madeira_apple_sign_in` in
+  `build/rppairing-ios/src/apple_id.rs`): Apple's SRP exchange, in which the
+  password does not leave the device, then the second factor when Apple asks
+  for one (a code from a trusted device or by text).
+- Madeira tells Apple it is iTunes on a Windows PC. The anisette servers make
+  their data with Apple's library for Android. Since October 2026 Apple refuses
+  a Mac on them ("This action cannot be completed at this time", error -80045),
+  and since 2026-10-15 it answers the Android phone Madeira said it was in
+  between with HTTP 503; the Windows PC gets through. Signed in as the Android
+  phone, Apple sent the code to the trusted devices without being asked and did
+  not say that it did, so when that happens Madeira asks for the code itself. A
+  text cannot be asked for on this path.
+- What Madeira keeps, in the Keychain, is what an installer hands over: the
+  token, the team and the anisette identity, and the Apple ID's address to show
+  in Settings. The password is not kept, so when Apple no longer accepts the
+  token Madeira asks to sign in again; the identity is signed in as again, and
+  Apple seldom asks for the code twice.
+- An anisette server supplies the device data Apple asks for: `ani.sidestore.io`
+  first, then five more from the list SideStore and SideInstaller read, when
+  one gives nothing Apple takes. It sees neither the Apple ID nor the password.
+  The list's two servers on Apple's library for Windows (`win.ani.sidestore.io`,
+  `ani.jkcoxson.com`) are left out: Apple asks a new machine of theirs to be
+  resynced first (error -22421), which isideload 0.4.4 cannot do. A server that
+  gets that answer counts as one that gave nothing Apple takes.
+- The Apple ID has to be the one this copy was signed with: Madeira takes the
+  team from its own provisioning profile, and keeps no sign-in for another.
+
+A refresh (`app/Madeira/SigningRefresh.swift`):
+
+1. asks an anisette server for the identity's one-time headers: the one the
+   sign-in was made through, then the others it holds;
+2. finds Madeira's App ID in the portal, or registers it again when it has run
+   out (a free Apple ID's lasts a week), with Increased Memory Limit enabled on
+   the new one, and in the app group its installer signed it into, if any
+   (iloader does, and SideStore and AltStore for an app that asks for one);
+3. downloads the team provisioning profile, and checks that it grants what the
+   installed copy is signed with and lists one of its certificates;
+4. installs it on this device through LocalDevVPN, with the Built-in StikJIT
+   pairing file (`madeira_rppairing_install_profile` in `build/rppairing-ios`:
+   idevice's misagent client over the remote-pairing tunnel StikJIT uses too).
+
+An extension an installer gave an App ID and a profile of its own (SideStore,
+AltStore and Xcode do; SideInstaller and iloader sign the JIT helper with the
+app's profile) is renewed the same way, in the same refresh.
+
+It runs by itself when the library is on screen, LocalDevVPN is connected and
+five days or fewer are left, and not while JIT is being enabled or a debugger
+is attached. In the last two days, when that has not worked, the library says so
+once a day and offers **Connect LocalDevVPN** or **Refresh Now**. The profile in
+the bundle stays the one Madeira was installed with, so the new date is kept in
+UserDefaults, for this installation.
+
+When Apple no longer accepts the token (it has expired, or the Apple ID's
+password changed), Madeira says so and offers **Sign In**; installing it again
+with SideInstaller hands over a new one too. Without a sign-in, refresh Madeira
+from the app that installed it; after one that renews the profile without
+Madeira knowing (SideStore, AltStore), Settings shows no date once its own has
+passed, until Madeira refreshes it itself. SideInstaller signs Madeira without
+an app group, so that an App ID Madeira registers again needs none.
+
 ## Licensing
 
 The bundled StikJIT 1.9.0 XCFramework is from
@@ -268,7 +384,10 @@ and is licensed under MPL-2.0. It includes the
 Corresponding source and license links are recorded in
 [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).
 
-In-app pairing links idevice 0.1.68 and its Rust dependencies (MIT,
-Apache-2.0, BSD-3-Clause or ISC) into the app from crates.io, pinned by
-`build/rppairing-ios/Cargo.lock`; their notices are bundled as
-`legal/LICENSES-rppairing-crates.txt`.
+In-app pairing, the signing refresh and the Apple ID sign-in link idevice
+0.1.68, [isideload](https://github.com/nab138/isideload) 0.4.4 (MIT) and their
+Rust dependencies into the app from crates.io, pinned by
+`build/rppairing-ios/Cargo.lock`. Those are under MIT, Apache-2.0, BSD, ISC,
+Zlib, Unicode-3.0 or CDLA-Permissive-2.0, but for apple-codesign-quick
+(LGPL-2.1-or-later), which isideload signs apps with and Madeira does not call.
+Their notices are bundled as `legal/LICENSES-rppairing-crates.txt`.

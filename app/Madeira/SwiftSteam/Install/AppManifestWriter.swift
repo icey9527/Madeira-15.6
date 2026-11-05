@@ -40,7 +40,8 @@ struct AppManifestWriter {
         installedDepots: [InstalledDepot]? = nil,
         sharedDepots: [(depotID: Int, ownerAppID: Int)] = [],
         customExecutables: [String] = [],
-        language: String = "english"
+        language: String = "english",
+        betaKey: String = "public"
     ) throws {
         let manifestPath = (steamAppsPath as NSString).appendingPathComponent("appmanifest_\(appID).acf")
 
@@ -130,15 +131,17 @@ struct AppManifestWriter {
         // writes; Steam uses them to select language-pack depots and reports
         // the language to the game. The downloader passes the language it
         // installed (SteamAppInfo.gameLanguage).
+        // A beta install names its branch in both config sections, as Valve's
+        // client writes it. Public installs omit BetaKey.
         let language = escapeVDFString(language)
-        lines.append("\t\"UserConfig\"")
-        lines.append("\t{")
-        lines.append("\t\t\"language\"\t\t\"\(language)\"")
-        lines.append("\t}")
-        lines.append("\t\"MountedConfig\"")
-        lines.append("\t{")
-        lines.append("\t\t\"language\"\t\t\"\(language)\"")
-        lines.append("\t}")
+        let beta = betaKey == "public" || betaKey.isEmpty ? nil : escapeVDFString(betaKey)
+        for section in ["UserConfig", "MountedConfig"] {
+            lines.append("\t\"\(section)\"")
+            lines.append("\t{")
+            lines.append("\t\t\"language\"\t\t\"\(language)\"")
+            if let beta { lines.append("\t\t\"BetaKey\"\t\t\"\(beta)\"") }
+            lines.append("\t}")
+        }
 
         lines.append("}")
 

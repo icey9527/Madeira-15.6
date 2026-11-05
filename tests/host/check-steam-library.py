@@ -85,7 +85,7 @@ library_swift = [
     'SwiftSteam/Core/CMServerList.swift', 'SwiftSteam/Core/LicenseListBox.swift', 'SwiftSteam/Core/SteamCMSession.swift',
     'SwiftSteam/Core/SteamConnection.swift', 'SwiftSteam/Core/SteamMessageCodec.swift', 'SwiftSteam/Core/SteamProtocol.swift',
     'SwiftSteam/Core/SteamSession.swift', 'SwiftSteam/Content/ContentDecryptor.swift', 'SwiftSteam/Content/DepotDownloader.swift',
-    'SwiftSteam/Content/DepotManifest.swift', 'SwiftSteam/Library/SteamAppInfo.swift',
+    'SwiftSteam/Content/DepotManifest.swift', 'SwiftSteam/Content/SteamLANPeer.swift', 'SwiftSteam/Library/SteamAppInfo.swift',
     'SwiftSteam/Library/SteamLibraryFetcher.swift', 'SwiftSteam/Install/AppManifestWriter.swift']
 c_files = ['SwiftSteam/chunk_zip.c', 'SwiftSteam/chunk_zip.h', 'SwiftSteam/lzma_shim.c', 'SwiftSteam/lzma_shim.h',
            'SwiftSteam/zstd_edu.c', 'SwiftSteam/zstd_edu.h']
@@ -122,6 +122,13 @@ for path in ['SteamOwnedLibrary.swift', 'SteamGames.swift', 'SteamInstall.swift'
             continue  # it logs on with the token SteamSignIn hands out
         if path in ('SteamGames.swift', 'SwiftSteam/Content/DepotDownloader.swift') and word == 'UserDefaults':
             continue  # SteamServerChoice 只保存下载地区，不保存认证凭据
+        if path == 'SteamOwnedLibrary.swift' and word == 'UserDefaults':
+            uses = [line.strip() for line in text.splitlines() if 'UserDefaults' in line]
+            require(uses == [
+                'private var targets: [Int: String] = (UserDefaults.standard.dictionary(forKey: "steam-install-targets") as? [String: String] ?? [:])',
+                'UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: targets.map { (String($0.key), $0.value) }), forKey: Self.targetsKey)'],
+                'UserDefaults holds only install destinations, never sign-in tokens')
+            continue
         require(word not in text, f'{path}: no {word} (sign-in tokens stay in SteamSignIn)')
 require('SteamSignIn.credentialsForDock()' in sources['SwiftSteam/Core/SteamSession.swift'],
         "the connection logs on with SteamSignIn's stored sign-in")
@@ -150,7 +157,7 @@ require(len(permitted) == 1 and re.findall(r'<string>([^<]*)</string>', permitte
         "Info.plist permits only the bundle's own .download.* (background downloads) and .pairing.* (JIT pairing) tasks")
 require('UIBackgroundModes' not in info, 'Info.plist asks for no background mode')
 background = sources['SteamDownloadBackground.swift']
-require('hasSuffix(".download.*")' in background and '+ "queue"' in background and 'BGContinuedProcessingTaskRequest(identifier: identifier' in background,
+require('hasSuffix(".download.*")' in background and '+ suffix' in background and 'suffix: String = "queue"' in background and 'BGContinuedProcessingTaskRequest(identifier: identifier' in background,
         'the continued-processing task uses the permitted identifier, made concrete')
 require('SteamSignIn.flag("MADEIRA_BACKGROUND_DOWNLOADS", default: true)' in background and
         'SteamSignIn.flag("MADEIRA_DOWNLOAD_NOTIFICATIONS", default: true)' in background,
@@ -199,6 +206,8 @@ require(sources['SteamInstall.swift'].count(f'"{relative_root}/steamapps"') == 1
 downloader = sources['SwiftSteam/Content/DepotDownloader.swift']
 require('SteamLog.event("[steam-depot] install begin' in downloader and 'depot-key refused' in downloader, 'the download logs App IDs and depot IDs')
 require(not re.search(r'LibraryFlags|MADEIRA_STEAM_[A-Z_]+', downloader), 'the downloader has no switches of its own')
+require('app.installDepots(ownedDLC: ownedDLC)' in downloader and 'dlcAppID: dlcApps[plan.depotID]' in downloader,
+        "installs take the account's owned DLC depots and record their DLC app")
 dock = (app / 'MadeiraDock.swift').read_text()
 require('static func validate(_ game: DockGame' in dock and 'game.installed' in dock, "Dock's validation reads the install record (StateFlags)")
 
@@ -393,6 +402,9 @@ class State:
         self.chunk_requests = []  # sha hex, every request
         self.manifest_requests = []
         self.denied = 0
+        self.refuse_manifests = False       # every manifest request answers 401
+        self.refuse_first_manifest = False  # the first manifest request of each depot answers 401
+        self.refused_once = set()
 
     def reset_counters(self):
         with self.lock:
@@ -419,7 +431,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             depot = int(parts[1])
             if parts[2] == 'manifest':
                 gid, code = int(parts[3]), parts[5] if len(parts) > 5 else ''
-                with state.lock: state.manifest_requests.append((depot, gid))
+                with state.lock:
+                    state.manifest_requests.append((depot, gid))
+                    if state.refuse_manifests:
+                        return self.reply(401)
+                    if state.refuse_first_manifest and depot not in state.refused_once:
+                        state.refused_once.add(depot)
+                        return self.reply(401)
                 if parts[4] != '5' or code != str(state.request_code) or (depot, gid) not in state.manifests:
                     return self.reply(404)
                 return self.reply(200, state.manifests[(depot, gid)])
@@ -514,6 +532,7 @@ size_t compression_decode_buffer(uint8_t *dst, size_t dst_size, const uint8_t *s
 DECODERS_H = '#include "{app}/SwiftSteam/lzma_shim.h"\n'
 
 STUBS = r'''
+enum ExternalDrives { static var steamLibraries: [String] { [] } }
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -577,6 +596,11 @@ func le(_ v: UInt32) -> [UInt8] { [UInt8(v & 0xff), UInt8(v >> 8 & 0xff), UInt8(
     var authRequests: [(depot: UInt32, host: String, app: UInt32)] = []
     var picsAppRequests: [[UInt32]] = []
     var connects = 0
+    /// Beta codes Steam accepts: code -> (branch, hex key) entries; private
+    /// depot sections by "branch hexkey"; the branch each request code named.
+    var betaCodes: [String: [(String, String)]] = [:]
+    var privateSections: [String: Data] = [:]
+    var branchRequests: [String] = []
 
     func ensureConnected() async throws { connects += 1 }
     func awaitLicenseList(timeout: TimeInterval) async throws -> [UInt32] { licenses }
@@ -622,6 +646,29 @@ func le(_ v: UInt32) -> [UInt8] { [UInt8(v & 0xff), UInt8(v >> 8 & 0xff), UInt8(
             } else {
                 out.writeInt32(fieldNumber: 1, value: 15); out.writeUInt32(fieldNumber: 2, value: depot)
             }
+        case .clientCheckAppBetaPassword:
+            var d = ProtobufDecoder(body); var code = ""
+            while let tag = try d.readTag() {
+                if tag.fieldNumber == 2 { code = try d.readString() } else { try d.skip(wireType: tag.wireType) }
+            }
+            out.writeInt32(fieldNumber: 1, value: 1)
+            for (name, hex) in betaCodes[code] ?? [] {
+                var entry = ProtobufEncoder(); entry.writeString(fieldNumber: 1, value: name); entry.writeString(fieldNumber: 2, value: hex)
+                out.writeSubmessage(fieldNumber: 4, value: entry.data)
+            }
+        case .clientPICSPrivateBetaRequest:
+            var d = ProtobufDecoder(body); var name = "", key = Data(), token: UInt64 = 0
+            while let tag = try d.readTag() {
+                if tag.fieldNumber == 2 { token = try d.readVarint() }
+                else if tag.fieldNumber == 3 { name = try d.readString() }
+                else if tag.fieldNumber == 4 { key = try d.readBytes() }
+                else { try d.skip(wireType: tag.wireType) }
+            }
+            if token > 0, let section = privateSections[name + " " + key.map { String(format: "%02x", $0) }.joined()] {
+                out.writeInt32(fieldNumber: 1, value: 1); out.writeBytes(fieldNumber: 2, value: section)
+            } else {
+                out.writeInt32(fieldNumber: 1, value: 15)
+            }
         default: throw SteamError.invalidMessage
         }
         return message(out.data)
@@ -651,6 +698,7 @@ func le(_ v: UInt32) -> [UInt8] { [UInt8(v & 0xff), UInt8(v >> 8 & 0xff), UInt8(
                 if tag.fieldNumber == 1 { app = UInt32(truncatingIfNeeded: try d.readVarint()) }
                 else if tag.fieldNumber == 2 { depot = UInt32(truncatingIfNeeded: try d.readVarint()) }
                 else if tag.fieldNumber == 3 { gid = try d.readVarint() }
+                else if tag.fieldNumber == 4 { branchRequests.append(try d.readString()) }
                 else { try d.skip(wireType: tag.wireType) }
             }
             codeRequests.append((app, depot, gid))
@@ -802,7 +850,9 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
     require(info.buildID == 4242 && info.installableOnWindows && info.installDir == "Fixture Game", "build id, install folder and Windows installability")
     require(info.libraryCapsule == "cap/1.jpg" && info.parentID == nil, "artwork name; a parent equal to itself is not kept")
     require(info.depotSelectionSummary().contains("103[-]lang") && info.depotSelectionSummary().contains("107[-]dlc"), "the selection log names the rule that left a depot out")
-
+    require(info.installDepots(ownedDLC: [107]).map(\.depotID) == [101, 102, 105, 107] && info.installDepots(ownedDLC: [999]).map(\.depotID) == [101, 102, 105],
+            "owned DLC depots are installed with the game (New Vegas's Courier's Stash); DLC the account lacks is not")
+    require(info.depotSelectionSummary(ownedDLC: [107]).contains("107[-]sel"), "the selection log shows owned DLC as selected")
     // ---- download language (SteamLanguage): the setting, a game's own choice, the English fallback
     let languaged = SteamAppInfo.parse(appID: 11, from: appVDF(#"""
     "common" { "name" "Lang" "type" "game" "oslist" "windows" "supported_languages" { "english" { "supported" "true" } "german" { "supported" "true" "full_audio" "true" } "japanese" { "supported" "true" } "french" { "supported" "false" } } }
@@ -853,6 +903,90 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
     require(sharing.depots.first { $0.depotID == 7109 }?.fromApp == 7100 && sharing.installDepots().map(\.depotID) == [7201], "a depot from another app has no manifest of its own")
     require(sharing.inheritDepots(from: owners) == 1 && sharing.installDepots().map(\.depotID) == [7109, 7201], "it inherits the owner's manifest")
 
+    // ---- beta branches (SteamBranch): the list, a public beta, a password-protected one, the record
+    var beta = SteamAppInfo.parse(appID: 9200, from: appVDF(#"""
+    "common" { "name" "Beta" "type" "Game" "oslist" "windows" }
+    "depots" {
+      "9201" { "config" { "oslist" "windows" } "manifests" { "public" { "gid" "11" } "preview" { "gid" "12" } } }
+      "9202" { "config" { "oslist" "windows" } "manifests" { "public" { "gid" "21" } } }
+      "branches" { "public" { "buildid" "100" } "preview" { "buildid" "105" "description" "Next update" "timeupdated" "1700000000" }
+                   "secret" { "buildid" "107" "pwdrequired" "1" } "bad name" { "buildid" "1" } }
+    }
+    """#))!
+    let branchNames: [String] = beta.branches.map(\.name)
+    let previewEntry: SteamAppInfo.Branch = beta.branches[1]
+    require(branchNames == ["public", "preview", "secret"] && previewEntry.description == "Next update" && previewEntry.updated == 1_700_000_000,
+            "branches: public first, the betas by name, a name Madeira cannot keep left out")
+    require(beta.branches[2].passwordRequired && !previewEntry.passwordRequired, "a password-protected branch is marked")
+    func gids(_ app: SteamAppInfo) -> [UInt64] { app.installDepots().compactMap { $0.manifestID(app.branch) } }
+    require(beta.branch == "public" && gids(beta) == [11, 21] && beta.branchBuildID == 100, "public by default")
+    beta.branch = "preview"
+    require(gids(beta) == [12, 21] && beta.branchBuildID == 105, "a beta takes its own manifests, and the public one of a depot it does not change")
+    require(beta.depots.first { $0.depotID == 9201 }!.hasOwnManifest("preview") && !beta.depots.first { $0.depotID == 9202 }!.hasOwnManifest("preview")
+            && !beta.depots.first { $0.depotID == 9201 }!.hasOwnManifest("public"), "only a beta's own manifest is requested under its branch")
+    // depots { 9201 { manifests { secret { gid "77" } } } 9203 { config { oslist "windows" } manifests { secret { gid <uint64 88> } } } }
+    func kvKey(_ type: UInt8, _ name: String) -> [UInt8] { [type] + Array(name.utf8) + [0] }
+    var section: [UInt8] = kvKey(0, "depots")
+    for part: [UInt8] in [kvKey(0, "9201"), kvKey(0, "manifests"), kvKey(0, "secret"), kvKey(1, "gid"), Array("77".utf8), [0, 8, 8, 8],
+                          kvKey(0, "9203"), kvKey(0, "config"), kvKey(1, "oslist"), Array("windows".utf8), [0, 8],
+                          kvKey(0, "manifests"), kvKey(0, "secret"), kvKey(7, "gid"), [88, 0, 0, 0, 0, 0, 0, 0], [8, 8, 8], [8, 8]] {
+        section += part
+    }
+    let parsed = VDFParser.parseBinaryVDF(from: Data(section))
+    require(((((parsed["depots"] as? [String: Any])?["9203"] as? [String: Any])?["manifests"] as? [String: Any])?["secret"] as? [String: Any])?["gid"] as? String == "88",
+            "binary KeyValues: sections, strings and 64-bit numbers as decimal text")
+    for cut in [1, 5, 9, 20, section.count - 3] { _ = VDFParser.parseBinaryVDF(from: Data(section.prefix(cut))) }
+    _ = VDFParser.parseBinaryVDF(from: Data(repeating: 0, count: 4096))
+    require(true, "a cut or hostile binary KeyValues blob is read without trapping")
+    let betaSession = ScriptedSession()
+    betaSession.betaCodes["letmein"] = [("secret", "00ff10"), ("bad name", "01")]
+    betaSession.privateSections["secret 00ff10"] = Data(section)
+    let betaFetcher = SteamLibraryFetcher(session: betaSession)
+    let opened = try await betaFetcher.checkBetaCode(appID: 9200, code: "letmein")
+    let refusedCode = try await betaFetcher.checkBetaCode(appID: 9200, code: "nope")
+    require(opened == ["secret": Data([0, 0xff, 0x10])] && refusedCode.isEmpty, "a beta code opens its private branches; a wrong one opens none")
+    var locked = beta
+    for code in [nil, "nope"] as [String?] {
+        do {
+            try await betaFetcher.applyBranch(&locked, branch: "secret", code: code)
+            require(false, "a password-protected branch without an accepted code stops the install")
+        } catch {
+            require((error as? SteamError) == .betaCodeNeeded("secret"), "a password-protected branch without an accepted code stops the install")
+        }
+    }
+    try await betaFetcher.applyBranch(&locked, branch: "secret", code: "letmein")
+    require(locked.branch == "secret" && gids(locked) == [77, 21, 88] && locked.branchBuildID == 107,
+            "the code's private depot section gives the branch's manifests, a depot only the branch has included")
+    var gone = beta
+    try await betaFetcher.applyBranch(&gone, branch: "removed", code: nil)
+    require(gone.branch == "public" && gids(gone) == [11, 21], "a branch Steam no longer lists falls back to public")
+    var preview = beta
+    preview.branch = "public"
+    try await betaFetcher.applyBranch(&preview, branch: "preview", code: nil)
+    require(preview.branch == "preview" && gids(preview) == [12, 21], "a beta without a password needs no code")
+    SteamBranch.choose("preview", for: 9200)
+    require(SteamBranch.chosen(9200) == "preview" && SteamBranch.chosen(9201) == "public", "the choice is kept per game")
+    SteamBranch.choose("bad name", for: 9200)
+    require(SteamBranch.chosen(9200) == "preview", "a branch name Madeira cannot keep is not taken")
+    SteamBranch.setCode("letmein", branches: ["secret"], for: 9200)
+    SteamBranch.choose("secret", for: 9200)
+    require(SteamBranch.code(9200) == "letmein" && SteamBranch.unlocked(9200) == ["secret"], "the code and the branches it opened are kept")
+    SteamBranch.setCode(nil, branches: [], for: 9200)
+    require(SteamBranch.code(9200) == nil && SteamBranch.unlocked(9200).isEmpty && SteamBranch.chosen(9200) == "public",
+            "removing the code forgets it, and a chosen private branch goes back to public")
+    let recordDir = FileManager.default.temporaryDirectory.appendingPathComponent("madeira-beta-record-\(getpid())", isDirectory: true)
+    try FileManager.default.createDirectory(at: recordDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: recordDir) }
+    try AppManifestWriter.writeManifest(appID: 9200, name: "Beta", installDir: "Beta", buildID: 107, steamID: 1,
+                                        steamAppsPath: recordDir.path, installedDepots: [], betaKey: "secret")
+    let betaRecord = try String(contentsOf: recordDir.appendingPathComponent("appmanifest_9200.acf"), encoding: .utf8)
+    require(betaRecord.components(separatedBy: "\"BetaKey\"\t\t\"secret\"").count == 3 && SteamInstallFiles.betaKey(appID: 9200, steamApps: recordDir) == "secret",
+            "a beta install names its branch in UserConfig and MountedConfig")
+    try AppManifestWriter.writeManifest(appID: 9200, name: "Beta", installDir: "Beta", buildID: 100, steamID: 1,
+                                        steamAppsPath: recordDir.path, installedDepots: [])
+    let publicRecord = try String(contentsOf: recordDir.appendingPathComponent("appmanifest_9200.acf"), encoding: .utf8)
+    require(!publicRecord.contains("BetaKey") && SteamInstallFiles.betaKey(appID: 9200, steamApps: recordDir) == nil, "a public install names no branch")
+
     // ---- decrypt and decompress the known vectors
     let key = hexData(fx["key"] as! String)
     let plainVector = hexData(fx["vectorPlain"] as! String)
@@ -878,6 +1012,10 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
     let raw = hexData(fx["rawEncrypted"] as! String)
     let decrypted = try ContentDecryptor.decryptChunk(encryptedData: raw, depotKey: key)
     require(decrypted == plainVector.prefix(1000), "AES: the IV is ECB-decrypted, the rest CBC with PKCS7")
+    for count in [0, 16, 17, raw.count - 1] {
+        do { _ = try ContentDecryptor.decryptChunk(encryptedData: Data(raw.prefix(count)), depotKey: key); require(false, "truncated AES payload rejected") }
+        catch { require(true, "truncated AES payload rejected") }
+    }
     do { _ = try ContentDecryptor.decryptChunk(encryptedData: raw, depotKey: Data(count: 16)); require(false, "a short depot key is rejected") }
     catch { require(error is SteamError, "a short depot key is rejected") }
     do { _ = try ContentDecryptor.decompressChunk(compressedData: Data("ZZZZ-not-a-container".utf8), expectedSize: 999); require(false, "an unknown container is rejected") }
@@ -972,6 +1110,7 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
     require(app.sharedOwners[9100]?.installDir == "Fixture Game", "the owner of the shared depot is known for the record")
     let downloader = DepotDownloader(session: session)
     downloader.contentHosts = { _ in hosts }
+    downloader.manifestCacheFolder = tmp.appendingPathComponent("manifest-cache")
     var lastProgress = SteamDownloadProgress()
     let licensed: Set<UInt32> = phase == "refused-licensed" ? [9001, 9003, 9004] : [9001, 9003]
     do {
@@ -979,16 +1118,36 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
         print("RESULT install=ok")
     } catch {
         print("RESULT install=failed reason=\(SteamOwnedLibrary.reason(error))")
-        require(phase == "interrupt" || phase == "refused-licensed", "install failed only where the phase expects it (\(error))")
+        require(phase == "interrupt" || phase == "refused-licensed" || phase == "refused", "install failed only where the phase expects it (\(error))")
         if phase == "refused-licensed" { require(error as? SteamError == .depotKeyNotFound(9004), "a refusal for a depot the account is licensed for fails the install") }
+        if phase == "refused" {
+            require(error as? SteamError == .contentRefused(401), "every server refusing the file list is reported as a refusal, not a broken download (\(error))")
+            require(session.codeRequests.filter { $0.depot == 9001 }.count == 2, "a refused file list is asked for again with a fresh request code, once")
+            require(loggedEvents.contains { $0.contains("[steam-depot] manifest refused app=9000 depot=9001 ") && $0.contains("retry=fresh-code") }
+                    && loggedEvents.contains { $0.contains("[steam-depot] manifest refused app=9000 depot=9001 ") && $0.contains("retry=none") && $0.contains(":401") },
+                    "the log says which depot every server refused, with what")
+            require(!loggedEvents.contains { $0.contains("auth=") }, "no authorization token in the log")
+        }
+    }
+    if phase == "token-refresh" {
+        // dead, flaky (refused, asked again with new authorization), good (for the chunks).
+        require(session.authRequests.filter { $0.depot == 9001 }.count >= 4, "a server that refuses the file list is asked again with fresh authorization: \(session.authRequests.filter { $0.depot == 9001 }.count)")
     }
     let found = MadeiraDock.games(drive: drive)
     print("RESULT listed=\(found.filter { $0.id == 9000 && $0.installed }.count)")
-    if phase != "interrupt" && phase != "refused-licensed" {
+    if phase != "interrupt" && phase != "refused-licensed" && phase != "refused" {
         require(lastProgress.phase == .finishing && lastProgress.doneBytes == lastProgress.totalBytes && lastProgress.totalBytes > 0, "progress ends complete: \(lastProgress.doneBytes)/\(lastProgress.totalBytes)")
         // Keys are asked for with the app being installed; manifest codes and tokens with the app that owns the content.
         require(session.keyRequests.contains { $0.depot == 9001 && $0.app == 9000 } && session.keyRequests.contains { $0.depot == 9003 && $0.app == 9000 }, "depot keys are requested for the installed app")
-        require(session.codeRequests.contains { $0.depot == 9003 && $0.app == 9100 } && session.codeRequests.contains { $0.depot == 9001 && $0.app == 9000 }, "manifest codes are requested for the app that owns the depot")
+        // A manifest fetched by an earlier phase comes from the cache, with no code request.
+        let prepared = loggedEvents.first { $0.contains("[steam-depot] prepared app=9000 ") } ?? ""
+        require(prepared.contains("manifests-ms=") && prepared.contains("files-ms=") && prepared.contains("files="), "the wait before the download is timed in the log")
+        let fetchedShared = session.codeRequests.contains { $0.depot == 9003 }, fetchedMain = session.codeRequests.contains { $0.depot == 9001 }
+        require((!fetchedShared || session.codeRequests.contains { $0.depot == 9003 && $0.app == 9100 }) && (!fetchedMain || session.codeRequests.contains { $0.depot == 9001 && $0.app == 9000 }),
+                "manifest codes are requested for the app that owns the depot")
+        require(prepared.contains("manifest-cached=\((fetchedShared ? 0 : 1) + (fetchedMain ? 0 : 1))/2"), "every manifest not asked for came from the cache: \(prepared)")
+        if phase == "resume" { require(session.codeRequests.isEmpty, "a resumed install reads both file lists from the cache the interrupted one left") }
+        if phase == "update" { require(fetchedMain && !fetchedShared, "an update fetches only the new build's file list; the unchanged depot's comes from the cache") }
         require(session.authRequests.contains { $0.depot == 9003 && $0.app == 9100 && $0.host == "127.0.0.1" }, "content authorization names the bare host name")
         require(!session.keyRequests.contains { $0.depot == 9002 }, "a depot for another language is never asked for")
         guard let game = found.first(where: { $0.id == 9000 }) else { require(false, "Madeira Dock's discovery finds the downloaded game"); return }
@@ -999,7 +1158,9 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
         do { try MadeiraDock.validate(game, drive: drive, bundled: true) ; require(false, "validate needs the client files") }
         catch { require(error.localizedDescription.contains("client"), "Dock's launch check passes the record and stops at the missing client files only") }
         require(SteamInstallFiles.buildID(appID: 9000, steamApps: steamApps) == build, "the record's build id")
-        require(found.first(where: { $0.id == 9100 })?.installed == true, "the owning app has its own record for the shared depot, as Valve's client requires")
+        require(SteamInstallFiles.depots(appID: 9100, steamApps: steamApps).contains(9003)
+                && SteamInstallFiles.buildID(appID: 9100, steamApps: steamApps) == 7,
+                "the owning app has its own record for the shared depot, as Valve's client requires")
         let events = loggedEvents.joined(separator: "\n")
         require(!events.contains("Fixture") && !events.contains("7656119") && !events.contains("tok"), "no name, account or token in the log")
         require(events.contains("[steam-depot] license app=9000 skipped=9004"), "a depot the account neither has a key for nor a license for is left out")
@@ -1011,8 +1172,9 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
         require(ownedNow.buildID == 1001 && ownedNow.folderName == "Fixture Game", "the owned game carries the build")
     }
     if phase == "uninstall" {
-        SteamInstallFiles.delete(appID: 9000, folderName: "Fixture Game", steamApps: steamApps)
+        try SteamInstallFiles.delete(appID: 9000, folderName: "Fixture Game", steamApps: steamApps)
         require(MadeiraDock.games(drive: drive).isEmpty, "an uninstalled game is no longer found (its shared owner record went with it)")
+        require(!FileManager.default.fileExists(atPath: steamApps.appendingPathComponent("appmanifest_9100.acf").path), "the shared owner record was removed")
         require(!FileManager.default.fileExists(atPath: steamApps.appendingPathComponent("common/Fixture Game").path), "its folder is gone")
         require(FileManager.default.fileExists(atPath: steamApps.appendingPathComponent("common").path) , "the common folder stays")
     }
@@ -1047,25 +1209,46 @@ dock_body = (dock[dock.index('enum MadeiraDock {'):dock.index('    @MainActor pr
              dock[dock.index("    /// The host's environment for one launch."):])
 # URLSession lives in FoundationNetworking on Linux; the production file imports Foundation only.
 downloader_host = downloader.replace('import Foundation\n', 'import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n#endif\n', 1)
-# The free-space query is Darwin's (volumeAvailableCapacityForImportantUsage); the host has none, so the check is skipped there.
-space = 'if let free = installURL.freeSpace, case let available = UInt64(free), available < remaining {'
-assert space in downloader_host
-downloader_host = downloader_host.replace(space, 'if case let available = UInt64.max, available < remaining {')
+# Linux has no Darwin volume keys or statfs layout. Unknown capacity remains allowed.
+if sys.platform != 'darwin':
+    space = block(downloader_host, 'public var freeSpace: Int64?')
+    downloader_host = downloader_host.replace(space, 'public var freeSpace: Int64? { nil }\n')
+    # F_NOCACHE and F_RDAHEAD are Darwin's fcntl read hints; Linux reads the same bytes without them.
+    for hint in ('        _ = fcntl(fd, F_NOCACHE, 1)\n', '        _ = fcntl(fd, F_RDAHEAD, 1)\n'):
+        downloader_host = downloader_host.replace(hint, '')
+    # swift-corelibs-foundation's URLSession.data(from:) sometimes never returns once its task
+    # is cancelled (the interrupt phase hung about one run in four), where Apple's throws
+    # URLError.cancelled. Fetch outside the group's cancellation; the sibling chunks still
+    # stop at their next cancellation check.
+    downloader_host = downloader_host.replace(
+        '        let (data, response) = try await http.data(from: url)\n',
+        '        let (data, response) = try await Task.detached { try await http.data(from: url) }.value\n', 1)
 fetcher_source = sources['SwiftSteam/Library/SteamLibraryFetcher.swift']
+require('encoder.writeString(fieldNumber: 4, value: branch)' in downloader and 'branch: depot.hasOwnManifest(app.branch) ? app.branch : nil' in downloader
+        and 'buildID: app.branchBuildID' in downloader and 'betaKey: app.branch' in downloader,
+        "a beta download asks for its manifests under the branch and records the branch's build and BetaKey")
+require('try await fetcher.applyBranch(&info, branch: SteamBranch.chosen(appID), code: SteamBranch.code(appID))' in owned_source,
+        "every download takes the version chosen on the game's page")
 
 work = Path(tempfile.mkdtemp(prefix='madeira-steam-library-'))
 servers = []
 try:
     shim = work / 'shim'
-    for name, header, csource in [('CommonCrypto', CRYPTO_H, CRYPTO_C), ('Compression', COMPRESSION_H, COMPRESSION_C)]:
+    shim.mkdir()
+    native = sys.platform == 'darwin'
+    modules = []
+    for name, header, csource in ([] if native else [('CommonCrypto', CRYPTO_H, CRYPTO_C), ('Compression', COMPRESSION_H, COMPRESSION_C)]):
         directory = shim / name
         directory.mkdir(parents=True)
         stem = 'cc_shim' if name == 'CommonCrypto' else 'compression_shim'
         (directory / f'{stem}.h').write_text(header)
         (directory / f'{stem}.c').write_text(csource)
         (directory / 'module.modulemap').write_text(f'module {name} [system] {{ header "{stem}.h" export * }}\n')
-    (shim / 'zlib').mkdir()
-    (shim / 'zlib/module.modulemap').write_text('module zlib [system] { header "/usr/include/zlib.h" link "z" export * }\n')
+        modules += ['-I', str(directory)]
+    if not native:
+        (shim / 'zlib').mkdir()
+        (shim / 'zlib/module.modulemap').write_text('module zlib [system] { header "/usr/include/zlib.h" link "z" export * }\n')
+        modules += ['-I', str(shim / 'zlib')]
     (work / 'decoders.h').write_text(DECODERS_H.format(app=app))
 
     objects = []
@@ -1075,8 +1258,9 @@ try:
         require(result.returncode == 0, f'{Path(source).name} compiles on the host')
         if result.returncode: sys.stdout.write(result.stderr[-3000:])
         objects.append(str(obj))
-    compile_c(shim / 'CommonCrypto/cc_shim.c', ['-I', str(shim / 'CommonCrypto')])
-    compile_c(shim / 'Compression/compression_shim.c', ['-I', str(shim / 'Compression')])
+    if not native:
+        compile_c(shim / 'CommonCrypto/cc_shim.c', ['-I', str(shim / 'CommonCrypto')])
+        compile_c(shim / 'Compression/compression_shim.c', ['-I', str(shim / 'Compression')])
     for name in ['zstd_edu.c', 'lzma_shim.c', 'chunk_zip.c']:
         compile_c(steam / name)
 
@@ -1091,16 +1275,15 @@ try:
     (work / 'downloader.swift').write_text(downloader_host)
     production = [steam / 'Proto/SteamProtoMessages.swift', steam / 'Core/SteamError.swift', steam / 'Core/SteamProtocol.swift',
                   steam / 'Core/SteamMessageCodec.swift', steam / 'Core/SteamCMSession.swift',
-                  steam / 'Content/ContentDecryptor.swift', steam / 'Content/DepotManifest.swift',
+                  steam / 'Content/ContentDecryptor.swift', steam / 'Content/DepotManifest.swift', steam / 'Content/SteamLANPeer.swift',
                   steam / 'Library/SteamAppInfo.swift', steam / 'Library/SteamLibraryFetcher.swift',
-                  steam / 'Install/AppManifestWriter.swift', app / 'SteamInstall.swift', app / 'SteamKeyValues.swift']
+                  steam / 'Install/AppManifestWriter.swift', app / 'SteamInstall.swift', app / 'SteamKeyValues.swift', app / 'ExternalStorage.swift']
     exe = work / 'check'
     build = subprocess.run([SWIFTC, '-parse-as-library', '-swift-version', '5', '-sanitize=address', '-g', '-o', str(exe),
-                            '-I', str(shim / 'CommonCrypto'), '-I', str(shim / 'Compression'), '-I', str(shim / 'zlib'),
                             '-import-objc-header', str(work / 'decoders.h'),
                             str(work / 'stubs.swift'), str(work / 'checks.swift'), str(work / 'dock.swift'), str(work / 'owned.swift'),
-                            str(work / 'downloader.swift')] + [str(x) for x in production] + objects +
-                           ['-Xlinker', '-lcrypto', '-Xlinker', '-llzma', '-Xlinker', '-lz'], capture_output=True, text=True)
+                            str(work / 'downloader.swift')] + modules + [str(x) for x in production] + objects +
+                           ([] if native else ['-Xlinker', '-lcrypto']) + ['-Xlinker', '-llzma', '-Xlinker', '-lz'], capture_output=True, text=True)
     require(build.returncode == 0, 'the production Steam library, download and decoder code compile on the host')
     if build.returncode:
         sys.stdout.write(build.stderr[-6000:])
@@ -1232,6 +1415,21 @@ try:
     result = run('refused-licensed', other)
     require(result.get('install') == 'failed' and result.get('listed') == '0' and
             not list((work / 'root2').rglob('appmanifest_*.acf')), 'a refused licensed depot fails the install without a record')
+
+    # ---- a content server refuses a file list once (an expired authorization): asked again, the install finishes
+    state.reset_counters()
+    state.refuse_first_manifest = True
+    result = run('token-refresh', dict(fixture, tmp=str(work / 'root3')))
+    state.refuse_first_manifest = False
+    require(result.get('install') == 'ok' and result.get('listed') == '1', 'a file list refused once is fetched with fresh authorization and the install finishes')
+
+    # ---- every content server refuses the file list: one more round with a fresh request code, then a clear failure
+    state.reset_counters()
+    state.refuse_manifests = True
+    result = run('refused', dict(fixture, tmp=str(work / 'root4')))
+    state.refuse_manifests = False
+    require(result.get('install') == 'failed' and result.get('reason') == 'refused-401' and result.get('listed') == '0',
+            f'a file list every server refuses fails the install as a refusal: {result}')
 finally:
     for server in servers:
         server.shutdown(); server.server_close()
