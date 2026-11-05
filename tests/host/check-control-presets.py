@@ -338,13 +338,14 @@ hud = function(lib, 'struct LibraryHUD: View {')
 menu = function(hud, 'private var menu: some View {')
 row = menu.index('ControlLayoutMenu(style: .row)')
 assert 'if session && !m.editing { LibraryHUD() } else { topBar }' in overlay, 'a session shows the HUD instead of the top bar'
-assert menu.index('Toggle("Touch controls"') < row < menu.index('LabeledContent("Opacity")'), \
+assert menu.index('Toggle("触控操作"') < row < menu.index('LabeledContent15("不透明度")'), \
     'the Session menu offers the layout menu with the touch-control settings'
 assert 'controls.visible && ControlPresetsModel.enabled' in menu[row - 80:row], \
     'only while touch controls are on and MADEIRA_CONTROL_PRESETS is not 0'
-assert 'model.saveCurrentProfile()' in menu[row:menu.index('LabeledContent("Opacity")')], 'a chosen layout is saved to the game'
+assert 'model.saveCurrentProfile()' in menu[row:menu.index('LabeledContent15("不透明度")')], 'a chosen layout is saved to the game'
 layout_menu = function(presets, 'struct ControlLayoutMenu: View {')
-assert 'enum Style { case glass, row }' in layout_menu and 'LabeledContent("Controller layout")' in layout_menu
+assert 'enum Style { case glass, row }' in layout_menu and \
+    ('LabeledContent("Controller layout")' in layout_menu or 'LabeledContent15("手柄布局")' in layout_menu)
 assert 'ControlLayoutMenu()' in overlay, 'the overlay keeps its top-bar button, unchanged'
 entry = function(lib, 'struct LibraryEntry: Codable, Identifiable {')
 assert 'var controlLayout: String?' in entry, 'optional, so older library files decode'
