@@ -2586,12 +2586,24 @@ struct ContentView: View {
     }
 
     private func enableJIT() {
+        if StikJITHelper.hasMarkerConflict {
+            let message = "冲突：同时发现 _TrollStore 与 _TrollStoreLite 标记；请移除其中一个标记后重试。"
+            jitStatus = .unavailable
+            logStore.log(message, level: .error)
+            if library.enabled { library.error = message }
+            launchAfterJITEnded(started: false)
+            return
+        }
         // Explains why JIT cannot be enabled on a copy signed without get-task-allow; 0 opens StikDebug regardless.
         // A debugger can attach only to a process whose signature carries
         // get-task-allow (a development signature). A copy signed with a
         // distribution or enterprise certificate lacks it, StikDebug can never
         // attach, and CS_DEBUGGED never appears however often this is tapped.
-        if !SigningStatus.current.debuggable, MadeiraConfig.flag("MADEIRA_JIT_SIGNING_CHECK") {
+        let localTrollStorePath = StikJITHelper.usesTrollStore
+            && (StikJITHelper.installationType == 1 || StikJITHelper.installationType == 2)
+            && SigningStatus.current.debugged
+        if !SigningStatus.current.debuggable, !localTrollStorePath,
+           MadeiraConfig.flag("MADEIRA_JIT_SIGNING_CHECK") {
             jitStatus = .unavailable
             logStore.log(String(format: "[jit-signing] get-task-allow is missing (cs-flags=0x%x): no debugger can attach to this copy, "
                                 + "so JIT cannot be enabled. Reinstall Madeira with a development certificate.",
@@ -2607,7 +2619,11 @@ struct ContentView: View {
             switch result {
             case .success:
                 jitStatus = .available
-                logStore.log("JIT enabled! Debugger attached.", level: .success)
+                if StikJITHelper.isTrollStoreLite {
+                    logStore.log("映射检查通过，JIT代码执行仍未验证", level: .success)
+                } else {
+                    logStore.log("JIT enabled! Debugger attached.", level: .success)
+                }
                 launchAfterJITEnded(started: true)
             case .failure(let failure):
                 launchAfterJITEnded(started: false)
