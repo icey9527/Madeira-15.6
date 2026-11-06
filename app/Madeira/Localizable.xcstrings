@@ -72,6 +72,12 @@
             "state": "translated",
             "value": "Быстрая команда «%1$@»"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 快捷指令"
+          }
         }
       }
     },
@@ -185,6 +191,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Игры на .NET Framework не запустятся, пока вы не скачаете его снова."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "除非重新下载 .NET Framework，否则这类游戏无法启动。"
           }
         }
       }
@@ -304,7 +316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "2. 如提示登录，请先登录，点按 Generate new API key，再复制显示的密钥。"
+            "value": "2. 如提示登录就先登录，点“Generate new API key”，然后复制页面显示的密钥。"
           }
         }
       }
@@ -384,7 +396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "30 FPS"
+            "value": "30 帧"
           }
         }
       }
@@ -464,7 +476,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "40 FPS"
+            "value": "40 帧"
           }
         }
       }
@@ -544,7 +556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "60 FPS"
+            "value": "60 帧"
           }
         }
       }
@@ -584,7 +596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "64 位游戏通过 MoltenVK 获得 Vulkan，Zink OpenGL 后端也使用这个驱动。"
+            "value": "64 位游戏通过 MoltenVK 使用 Vulkan，Zink 的 OpenGL 后端也用它。"
           }
         }
       }
@@ -619,6 +631,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Выключенное DLC пропускается при следующем обновлении или восстановлении; его файлы остаются, пока вы не удалите игру."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关掉的 DLC 不参与下次更新或修复；它的文件保留到卸载游戏为止。"
           }
         }
       }
@@ -694,6 +712,12 @@
             "state": "translated",
             "value": "Резервная копия — это один zip с папками Документы, Сохранённые игры и AppData всех пользователей Windows (без кэшей), "
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备份是一个 zip，包含每个 Windows 用户的 Documents、Saved Games 与 AppData（不含缓存）， "
+          }
         }
       }
     },
@@ -732,7 +756,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "批处理文件退出时游戏就会关闭。请在 Wine 桌面中启动它。"
+            "value": "批处理文件一旦退出就会关闭游戏。请在 Wine 桌面里启动它。"
           }
         }
       }
@@ -808,6 +832,12 @@
             "state": "translated",
             "value": "Несколько необязательных шагов всё подготовят:"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "几个可选步骤帮你做好准备："
+          }
         }
       }
     },
@@ -846,7 +876,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏自带的配置文件，例如 Fallout.ini 或 FalloutPrefs.ini。更改会写入文件；请先关闭游戏。左滑可将文件移出此列表（文件本身保留）。"
+            "value": "游戏自带的设置文件，例如 Fallout.ini 或 FalloutPrefs.ini。改动会直接写入文件；请先关闭游戏。向左轻扫可把文件移出列表（文件本身保留）。"
           }
         }
       }
@@ -886,7 +916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "按住连发按键会持续重复，手柄和触控操作均如此。"
+            "value": "连发键按住会重复触发，手柄与触屏控件都一样。"
           }
         }
       }
@@ -926,7 +956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 无法识别的值；Direct3D 10/11 游戏使用 DXMT。"
+            "value": "Madeira 不认识的值；Direct3D 10/11 游戏使用 DXMT。"
           }
         }
       }
@@ -966,7 +996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 无法识别的值；Direct3D 9 游戏使用 DXMT。"
+            "value": "Madeira 不认识的值；Direct3D 9 游戏使用 DXMT。"
           }
         }
       }
@@ -1082,6 +1112,12 @@
             "state": "translated",
             "value": "О программе"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关于"
+          }
         }
       }
     },
@@ -1115,6 +1151,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Около 73 МБ с серверов обновлений Valve, с проверкой по закреплённым суммам SHA-256. Сеанс Windows для этого не запускается."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "约 73 MB，来自 Valve 更新服务器，按固定的 SHA-256 校验。此过程不启动 Windows 会话。"
           }
         }
       }
@@ -1194,7 +1236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "生效条件"
+            "value": "已启用"
           }
         }
       }
@@ -1350,6 +1392,12 @@
             "state": "translated",
             "value": "Добавить запись"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加条目"
+          }
         }
       }
     },
@@ -1388,7 +1436,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "添加驱动器或文件夹"
+            "value": "添加盘符或文件夹"
           }
         }
       }
@@ -1424,6 +1472,12 @@
             "state": "translated",
             "value": "Добавить программу"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加可执行文件"
+          }
         }
       }
     },
@@ -1457,6 +1511,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Добавить быструю команду «%1$@»"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加%1$@快捷指令"
           }
         }
       }
@@ -1492,6 +1552,12 @@
             "state": "translated",
             "value": "Добавить быструю команду"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加快捷指令"
+          }
         }
       }
     },
@@ -1525,6 +1591,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Добавить в madeira.cfg"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加到 madeira.cfg"
           }
         }
       }
@@ -1604,7 +1676,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在真实帧之间插入生成的一帧。延迟更高；FPS 上限会被忽略。"
+            "value": "在真实帧之间插入生成的帧。延迟增加，且忽略帧率上限。"
           }
         }
       }
@@ -1639,6 +1711,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Добавляет в игру файлы DLC. Файлы самой игры проверяются и сохраняются, поэтому это чуть дольше, чем одно DLC."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "把 DLC 的文件加入游戏。游戏自身文件会被校验并保留，所以比只装 DLC 略慢。"
           }
         }
       }
@@ -1758,7 +1836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "所有设置"
+            "value": "全部设置"
           }
         }
       }
@@ -1793,6 +1871,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Все настройки (ещё %1$lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部设置（另有 %1$lld 项）"
           }
         }
       }
@@ -1872,7 +1956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "防死区"
+            "value": "反死区"
           }
         }
       }
@@ -1907,6 +1991,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "ID приложения"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App ID"
           }
         }
       }
@@ -2106,7 +2196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "应用默认值"
+            "value": "应用默认"
           }
         }
       }
@@ -2226,7 +2316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "下次启动时，Madeira 会移除一次性安装写入 Wine 的内容：Rockstar Games Launcher、Social Club、Visual C++ 2015-2022 运行库（x86 和 x64）以及 Vulkan 运行库。该次启动只会重新运行这些安装程序，就像在新设备上一样；完成后请重启 Madeira 并启动游戏。共用这些安装内容的游戏（GTA V、Red Dead Redemption 2）也会在下次启动时重新安装。游戏文件和存档会保留。移除的内容都保存在 Madeira 文稿中的 madeira-reset-backup 文件夹里。退出登录还会移除 Rockstar 登录信息。"
+            "value": "下次启动时，Madeira 会清除一次性安装写入 Wine 的内容：Rockstar Games Launcher、Social Club、Visual C++ 2015-2022 运行库（x86 与 x64）以及 Vulkan 运行时。该次启动只重新运行安装程序，如同新设备；之后请重启 Madeira 再启动游戏。共用这些安装的游戏（GTA V、荒野大镖客 2）下次启动时也会重新安装。游戏文件与存档保留。被清除的内容都放在 Madeira 的 Documents 下 madeira-reset-backup 文件夹里。退出登录也会清除 Rockstar 登录状态。"
           }
         }
       }
@@ -2306,7 +2396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自动模式对 32 位游戏更快，对 64 位游戏更准确。完整模式可能使 32 位游戏的帧率减半。"
+            "value": "自动模式对 32 位游戏很快、对 64 位游戏很准；完整模式可能让 32 位游戏帧率减半。"
           }
         }
       }
@@ -2342,6 +2432,12 @@
             "state": "translated",
             "value": "Автоматически использует StikDebug, если он установлен. После сбоя Madeira не меняет способ втихую."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动模式在装有 StikDebug 时使用它。失败后 Madeira 不会悄悄更换方式。"
+          }
         }
       }
     },
@@ -2376,6 +2472,12 @@
             "state": "translated",
             "value": "Сохранить копию сохранений"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备份存档"
+          }
         }
       }
     },
@@ -2409,6 +2511,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Перед игрой подключите [LocalDevVPN](https://apps.apple.com/us/app/localdevvpn/id6755608044). Madeira включает JIT через него."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始游戏前请先连接 [LocalDevVPN](https://apps.apple.com/us/app/localdevvpn/id6755608044)。Madeira 通过它启用 JIT。"
           }
         }
       }
@@ -2448,7 +2556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "测试版代码"
+            "value": "测试码"
           }
         }
       }
@@ -2483,6 +2591,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Оба работают только для игр на Direct3D 12. Захват записывает проходы рендеринга следующего кадра в Documents/capture, а его список отрисовки — в журнал. Синхронизация GPU: F1 заставляет каждый проход ждать предыдущий (по умолчанию), F6 ждёт только там, где этого требуют барьеры игры, F5 заставляет проходы ждать на этапе фрагментов, F0 не синхронизирует вовсе (будет мерцание; для тестов)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "两项都只对 Direct3D 12 游戏生效。捕获会把下一帧的渲染通道写入 Documents/capture，并把绘制列表写入日志。GPU 同步：F1 让每个通道等待前一个（默认），F6 只在游戏的屏障要求处等待，F5 让渲染通道在片元阶段等待，F0 完全不同步（会有闪烁，仅供测试）。"
           }
         }
       }
@@ -2682,7 +2796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "内置辅助工具"
+            "value": "内置助手"
           }
         }
       }
@@ -2802,7 +2916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "逐一核对已安装的文件与 GOG 当前版本，下载缺失或有更改的文件。"
+            "value": "对照 GOG 当前版本校验已安装的每个文件，并下载缺失或变动的部分。"
           }
         }
       }
@@ -2882,7 +2996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "检测到的 CPU 核心数"
+            "value": "上报的 CPU 核心数"
           }
         }
       }
@@ -3038,6 +3152,12 @@
             "state": "translated",
             "value": "Отменить сопряжение"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消配对"
+          }
         }
       }
     },
@@ -3076,7 +3196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "取消此次下载？已下载的文件将被删除。"
+            "value": "取消这次下载？已下载的文件会被删除。"
           }
         }
       }
@@ -3116,7 +3236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "取消此次下载？已下载的内容将被删除。"
+            "value": "取消这次下载？已下载的部分会被删除。"
           }
         }
       }
@@ -3152,6 +3272,12 @@
             "state": "translated",
             "value": "Захватить следующий кадр"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "捕获下一帧"
+          }
         }
       }
     },
@@ -3185,6 +3311,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Карточки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "卡片"
           }
         }
       }
@@ -3260,6 +3392,12 @@
             "state": "translated",
             "value": "Проверить настройку"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查设置"
+          }
         }
       }
     },
@@ -3298,7 +3436,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在检查 Epic 云端…"
+            "value": "正在检查 Epic 云…"
           }
         }
       }
@@ -3374,6 +3512,12 @@
             "state": "translated",
             "value": "Проверка Steam Cloud…"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检查 Steam 云…"
+          }
         }
       }
     },
@@ -3412,7 +3556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在校验测试版代码"
+            "value": "正在校验测试码"
           }
         }
       }
@@ -3452,7 +3596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "逐一核对已安装的文件与 Epic 当前版本，下载缺失或有更改的文件。"
+            "value": "对照 Epic 当前版本校验已安装的每个文件，并下载缺失或变动的部分。"
           }
         }
       }
@@ -3532,7 +3676,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请在“设置 › 内存与同步”中选择 Fastsync 以使用这些选项。"
+            "value": "在「设置 › 内存与同步」里选择 Fastsync 才能使用这些。"
           }
         }
       }
@@ -3572,7 +3716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请选择 drive_c 中的可执行文件（.exe、.bat 或 .cmd）。"
+            "value": "请选择 drive_c 内的可执行文件（.exe、.bat 或 .cmd）。"
           }
         }
       }
@@ -3688,6 +3832,12 @@
             "state": "translated",
             "value": "Выбрать…"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择…"
+          }
         }
       }
     },
@@ -3721,6 +3871,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Очистить журнал"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空日志"
           }
         }
       }
@@ -3840,7 +3996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "要切换界面，请从应用切换器中彻底关闭 Madeira，然后重新打开。"
+            "value": "从后台多任务里关闭 Madeira 再打开，即可切换界面。"
           }
         }
       }
@@ -3875,6 +4031,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Закройте Madeira в переключателе приложений и откройте снова, чтобы использовать новый интерфейс."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从后台多任务里关闭 Madeira 再打开，即可使用新界面。"
           }
         }
       }
@@ -3914,7 +4076,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已请求关闭。如出现游戏内退出对话框，请确认。"
+            "value": "已请求关闭。请确认游戏内的退出对话框。"
           }
         }
       }
@@ -3994,7 +4156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请关闭游戏以同步存档。"
+            "value": "关闭游戏以同步存档。"
           }
         }
       }
@@ -4034,7 +4196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "关闭后将结束当前会话，未保存的进度会丢失。"
+            "value": "关闭正在运行的会话。未保存的进度会丢失。"
           }
         }
       }
@@ -4110,6 +4272,12 @@
             "state": "translated",
             "value": "Компактные карточки"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "紧凑卡片"
+          }
         }
       }
     },
@@ -4143,6 +4311,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Компактный список"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "紧凑列表"
           }
         }
       }
@@ -4257,6 +4431,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Подключить через «%1$@»"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用%1$@连接"
           }
         }
       }
@@ -4416,7 +4596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "手柄按键映射"
+            "value": "手柄按键绑定"
           }
         }
       }
@@ -4452,6 +4632,12 @@
             "state": "translated",
             "value": "Кнопка контроллера для этого действия (режим клавиатуры и мыши)"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该动作的手柄按键（键盘鼠标模式）"
+          }
         }
       }
     },
@@ -4485,6 +4671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Управление контроллера идёт на игрока 1 XInput. LS и RS — аналоговые стики; "
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手柄控件对应 XInput 1 号玩家。LS 与 RS 是模拟摇杆； "
           }
         }
       }
@@ -4564,7 +4756,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "复制主屏幕快捷方式链接"
+            "value": "复制主屏幕快捷指令链接"
           }
         }
       }
@@ -4644,7 +4836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在“文件”App 中，将游戏文件夹复制到 Madeira › wine › drive_c，然后点按 + 并选择游戏的 .exe 文件。"
+            "value": "用「文件」App 把游戏文件夹拷进 Madeira › wine › drive_c，然后点 + 选择它的 .exe。"
           }
         }
       }
@@ -4764,7 +4956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "鸣谢"
+            "value": "致谢"
           }
         }
       }
@@ -4804,7 +4996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自定义游戏库"
+            "value": "自定义库"
           }
         }
       }
@@ -4839,6 +5031,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Свой: %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自定义：%1$@"
           }
         }
       }
@@ -4913,6 +5111,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Куб D3D12"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "D3D12 立方体"
           }
         }
       }
@@ -5032,7 +5236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已安装 DLC"
+            "value": "已安装的 DLC"
           }
         }
       }
@@ -5072,7 +5276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "你拥有的 DLC 会随游戏一同下载，与 Steam 相同。关闭其中一项可将其文件排除在外；更改会在下次开始或继续下载时生效。上方的容量仅为游戏本体。"
+            "value": "你拥有的 DLC 会随游戏一起下载，如同 Steam。关掉某个就不下载它的文件；改动在下次开始或继续下载时生效。上面的体积只是游戏本身。"
           }
         }
       }
@@ -5152,7 +5356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "DXMT 在 Metal 上渲染 Direct3D 10 和 11。"
+            "value": "DXMT 在 Metal 上绘制 Direct3D 10 与 11。"
           }
         }
       }
@@ -5192,7 +5396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "DXMT 在 Metal 上渲染 Direct3D 9；32 位游戏通过 x86 转译器运行其前端。"
+            "value": "DXMT 在 Metal 上绘制 Direct3D 9；32 位游戏通过 x86 转译运行它的前端。"
           }
         }
       }
@@ -5272,7 +5476,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此版本不包含 DXVK。"
+            "value": "此构建不含 DXVK。"
           }
         }
       }
@@ -5312,7 +5516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vulkan 上的 DXVK（实验性）"
+            "value": "Vulkan 上的 DXVK（实验）"
           }
         }
       }
@@ -5428,6 +5632,12 @@
             "state": "translated",
             "value": "По умолчанию: левый стик WASD, правый стик мышь, RT и LT клик, крестовина стрелки, A Пробел, B Ctrl, X E, Y R, LB Q, RB F, L3 Shift, R3 C, Start Esc, Select Tab. Собственное назначение сенсорного элемента (редактор управления) действует, когда строка стоит по умолчанию."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认：左摇杆 WASD，右摇杆鼠标，RT 与 LT 点击，方向键，A 空格，B Ctrl，X E，Y R，LB Q，RB F，L3 Shift，R3 C，Start Esc，Select Tab。触屏控件自己的手柄绑定（控件编辑器）在该行处于默认时生效。"
+          }
         }
       }
     },
@@ -5501,6 +5711,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удалить «%1$@»"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除“%1$@”"
           }
         }
       }
@@ -5780,7 +5996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Direct3D 12 游戏由 madeira-d3d12 运行，这是 Madeira 自研的、运行在 Metal 上的 Direct3D 12。"
+            "value": "Direct3D 12 游戏由 madeira-d3d12 运行，这是 Madeira 自己的 Metal 版 Direct3D 12。"
           }
         }
       }
@@ -5900,7 +6116,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "直接启动"
+            "value": "直接"
           }
         }
       }
@@ -5976,6 +6192,12 @@
             "state": "translated",
             "value": "Максимум экрана"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "屏幕最高刷新率"
+          }
         }
       }
     },
@@ -6009,6 +6231,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Состояние Dock"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dock 状态"
           }
         }
       }
@@ -6124,6 +6352,12 @@
             "state": "translated",
             "value": "Скачать компоненты клиента Valve (около 73 МБ)"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载 Valve 客户端组件（约 73 MB）"
+          }
         }
       }
     },
@@ -6162,7 +6396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "下载大小"
+            "value": "下载体积"
           }
         }
       }
@@ -6198,6 +6432,12 @@
             "state": "translated",
             "value": "Скачиваются с серверов обновлений Valve и проверяются по закреплённым суммам SHA-256. Имеющиеся файлы Steam сохраняются."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 Valve 更新服务器，按固定的 SHA-256 校验。已有的 Steam 文件会保留。"
+          }
         }
       }
     },
@@ -6232,6 +6472,12 @@
             "state": "translated",
             "value": "Скачанные части сохраняются. Повторите, чтобы продолжить с места остановки."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已下载的部分会保留。再次尝试可从断点继续。"
+          }
         }
       }
     },
@@ -6265,6 +6511,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Загрузка %1$lld из %2$lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在下载 %1$lld / %2$lld"
           }
         }
       }
@@ -6344,7 +6596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "像触控板一样拖动指针。点按即点击。"
+            "value": "像触控板一样拖动指针。轻点即点击。"
           }
         }
       }
@@ -6424,7 +6676,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "拖动发送相对鼠标移动，用于鼠标视角。点按即点击。"
+            "value": "拖动以发送相对鼠标位移，用于第一人称视角。轻点即点击。"
           }
         }
       }
@@ -6544,7 +6796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Easy Anti-Cheat 无法在 iOS 的 Wine 中运行。开启此项后，游戏会在不含它的自带离线模式下启动：离线对战、训练、局域网和对局回放可用，在线对战不可用。"
+            "value": "Easy Anti-Cheat 无法在 iOS 的 Wine 里运行。开启后游戏会以自己的离线模式启动：离线对战、训练、局域网与回放可用，在线对战不可用。"
           }
         }
       }
@@ -6580,6 +6832,12 @@
             "state": "translated",
             "value": "Эко-режим"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "节能模式"
+          }
         }
       }
     },
@@ -6613,6 +6871,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Эко-режим запускает каждую игру с низким приоритетом потоков: это экономит заряд, но игры работают медленнее. По умолчанию выключен. Он для экранов загрузки: «Эко-режим» во внутриигровом меню включает и выключает его во время игры."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "节能模式让所有游戏的线程以低优先级启动，省电但游戏更慢。默认关闭。它面向加载界面：游戏内菜单里的节能开关可在运行中随时开关。"
           }
         }
       }
@@ -6652,7 +6916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可在游戏内菜单中编辑按键。"
+            "value": "游戏内菜单里可以编辑按键。"
           }
         }
       }
@@ -6728,6 +6992,12 @@
             "state": "translated",
             "value": "Включить JIT"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用 JIT"
+          }
         }
       }
     },
@@ -6761,6 +7031,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Включить JIT через StikDebug"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 StikDebug 启用 JIT"
           }
         }
       }
@@ -6840,7 +7116,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "输入测试版代码"
+            "value": "输入测试码"
           }
         }
       }
@@ -6875,6 +7151,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Введите этот код на устройстве %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你的%1$@上输入此验证码"
           }
         }
       }
@@ -6994,7 +7276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Epic Games 已不再将这款游戏列为已安装。请从 Epic Games 分区重新安装。"
+            "value": "Epic Games 已不再把这个游戏列为已安装。请从 Epic Games 分区重新安装。"
           }
         }
       }
@@ -7034,7 +7316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Epic 将此游戏标记为仅在线：只有在 Madeira 能连接 Epic 时才能启动。"
+            "value": "Epic 把这个游戏标记为仅在线：只有 Madeira 能连上 Epic 时才会启动。"
           }
         }
       }
@@ -7074,7 +7356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Epic 云端"
+            "value": "Epic 云"
           }
         }
       }
@@ -7114,7 +7396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Epic 云端有更新的存档"
+            "value": "Epic 云上有更新的存档"
           }
         }
       }
@@ -7149,6 +7431,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Все остальные параметры, которые Madeira читает из madeira.cfg. Пул JIT, видеопамять, уровень подкачки, движок синхронизации и эко-режим находятся в Настройки › Память и синхронизация; пути Direct3D 9/12, драйвер Vulkan и оконный режим — в Настройки › Графика. Большинство параметров читается при запуске Madeira, поэтому после изменения закройте её в переключателе приложений. «По умолчанию» убирает параметр из файла. Смахните строку влево, чтобы сбросить её."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其余选项 Madeira 都从 madeira.cfg 读取。JIT 内存池、显存、交换层、同步引擎与节能模式在「设置 › 内存与同步」；Direct3D 9/12 路线、Vulkan 驱动与窗口模式在「设置 › 图形」。多数选项在 Madeira 启动时读取，改完请从后台多任务关闭它。默认会把该选项从文件中移除。在某行上向左轻扫可重置。"
           }
         }
       }
@@ -7228,7 +7516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "实验性，仅限 64 位游戏：Direct3D 10/11 和 DXGI 通过 Vulkan 上的 DXVK 运行（除非在下方选择 Vulkan 驱动，否则使用 MoltenVK）。Direct3D 12 则使用 vkd3d-proton。"
+            "value": "实验性，仅 64 位游戏：Direct3D 10/11 与 DXGI 通过 Vulkan 上的 DXVK 运行（除非下面选了别的 Vulkan 驱动，否则用 MoltenVK）。Direct3D 12 则使用 vkd3d-proton。"
           }
         }
       }
@@ -7268,7 +7556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "实验性，仅限 64 位游戏：Direct3D 12 通过 Vulkan 上的 vkd3d-proton 运行（除非在下方选择 Vulkan 驱动，否则使用 MoltenVK）。"
+            "value": "实验性，仅 64 位游戏：Direct3D 12 通过 Vulkan 上的 vkd3d-proton 运行（除非下面选了别的 Vulkan 驱动，否则用 MoltenVK）。"
           }
         }
       }
@@ -7308,7 +7596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "实验性：32 位和 64 位游戏使用 Wine 自带的、基于 OpenGL 的 Direct3D 9，需要 Zink OpenGL 后端。"
+            "value": "实验性：32 位与 64 位游戏使用 Wine 自带的 OpenGL 版 Direct3D 9，需要 Zink 的 OpenGL 后端。"
           }
         }
       }
@@ -7348,7 +7636,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "实验性：64 位游戏通过 Mesa 的 KosmicKrisp 驱动获得 Vulkan。需要 iOS 26 以及 A14 或更新芯片。"
+            "value": "实验性：64 位游戏通过 Mesa 的 KosmicKrisp 驱动使用 Vulkan。需要 iOS 26 与 A14 或更新的芯片。"
           }
         }
       }
@@ -7428,7 +7716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "外置驱动器"
+            "value": "外部存储"
           }
         }
       }
@@ -7624,6 +7912,12 @@
             "state": "translated",
             "value": "Ограничение FPS"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帧率上限"
+          }
         }
       }
     },
@@ -7657,6 +7951,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "FPS:"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帧率："
           }
         }
       }
@@ -7696,7 +7996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "快速信号量等待（实验性）"
+            "value": "快速信号量等待（实验）"
           }
         }
       }
@@ -7892,6 +8192,12 @@
             "state": "translated",
             "value": "Совпадающие файлы сохраняются; скачивается только отличающееся. Затем Steam запускает игру в этой версии."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相同的文件会保留，只下载有差异的部分。Steam 随后用这个版本启动游戏。"
+          }
         }
       }
     },
@@ -7925,6 +8231,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Файлы с теми же именами в C:\\users будут перезаписаны."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "C:\\users 下的同名文件会被覆盖。"
           }
         }
       }
@@ -8004,7 +8316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 itch.io 中查找游戏"
+            "value": "在 itch.io 上找游戏"
           }
         }
       }
@@ -8044,7 +8356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 %1$@ 上查找游戏"
+            "value": "在%1$@上找游戏"
           }
         }
       }
@@ -8084,7 +8396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 Steam 中查找"
+            "value": "在 Steam 上查找"
           }
         }
       }
@@ -8124,7 +8436,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已完成的文件会保留。重试即可从中断处继续。"
+            "value": "已完成的文件会保留。再次尝试可从断点继续。"
           }
         }
       }
@@ -8164,7 +8476,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为工具栏和“桌面”按钮启用流动金属质感。关闭后会使用系统的液态玻璃效果。"
+            "value": "栏与桌面按钮上的流动玻璃效果。关闭后使用系统的液态玻璃。"
           }
         }
       }
@@ -8199,6 +8511,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Размер папки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件夹体积"
           }
         }
       }
@@ -8238,7 +8556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "适用于加载时崩溃的 Unity 游戏，例如 Megabonk。可能导致其他游戏卡死"
+            "value": "适用于加载时崩溃的 Unity 游戏，例如 Megabonk。可能让其他游戏卡死"
           }
         }
       }
@@ -8273,6 +8591,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Для игры, лаунчер которой закрывает Madeira при запуске игры (Fallout: New Vegas): выберите собственную программу игры."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "适用于启动游戏时启动器会关闭 Madeira 的游戏（如《辐射：新维加斯》）：请选游戏自身的程序。"
           }
         }
       }
@@ -8312,7 +8636,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "适用于已完成安装却一直未关闭、导致 Madeira 始终未检测到结束的安装程序。下次启动时，游戏自带的安装脚本程序会被记为已完成，如同正常结束一样，不再重复运行。不会安装或删除任何内容。"
+            "value": "适用于安装程序已完成却始终没关闭，导致 Madeira 一直没看到它结束的情况。下次启动时，游戏自带的安装脚本程序会被记为已完成（如同跑完一次），不再重复运行。不会安装或删除任何东西。"
           }
         }
       }
@@ -8347,6 +8671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Для всего, чего нет в списке, например env.FEX_TSOENABLED = 1."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "适用于未列出的项目，例如 env.FEX_TSOENABLED = 1。"
           }
         }
       }
@@ -8426,7 +8756,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "适用于通过 DirectInput 读取手柄的旧游戏。"
+            "value": "适用于通过 DirectInput 读手柄的老游戏。"
           }
         }
       }
@@ -8466,7 +8796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "适用于 64 GB 及以上的请求。默认最多备份 16 GB。"
+            "value": "用于 64 GB 及以上的申请。默认最多备份 16 GB。"
           }
         }
       }
@@ -8546,7 +8876,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "清除 Apple 登录信息"
+            "value": "清除 Apple 登录"
           }
         }
       }
@@ -8586,7 +8916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "帧生成（实验性）"
+            "value": "帧生成（实验）"
           }
         }
       }
@@ -8626,7 +8956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "免费游戏（以及随意付费游戏）无需购买即可安装。付费游戏需先在 itch.io 购买，之后会自动出现在游戏库中，itch.io 收藏中的游戏也是如此。"
+            "value": "免费游戏（以及随意付费的）无需购买即可安装。付费游戏需先在 itch.io 购买；之后它会自动出现在库里，你的 itch.io 合集里的游戏也是。"
           }
         }
       }
@@ -8702,6 +9032,12 @@
             "state": "translated",
             "value": "Свободно там"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该处可用空间"
+          }
         }
       }
     },
@@ -8735,6 +9071,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Свободно там, где установлена игра"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "游戏所在位置的可用空间"
           }
         }
       }
@@ -8770,6 +9112,12 @@
             "state": "translated",
             "value": "Из параметров запуска Steam, с их аргументами."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 Steam 的启动设置，带其参数。"
+          }
         }
       }
     },
@@ -8803,6 +9151,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Из параметров запуска Steam."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 Steam 的启动设置。"
           }
         }
       }
@@ -8842,7 +9196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "完整（准确）"
+            "value": "完整（精确）"
           }
         }
       }
@@ -8877,6 +9231,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Функциональные клавиши"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "功能键"
           }
         }
       }
@@ -8916,7 +9276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏会用你的账号直接从 GOG 下载到 C:\\GOG Games，并包含你拥有的 DLC。请在下载时保持 Madeira 打开：后台只允许很短时间，之后下载会暂停，回到 Madeira 时继续。有游戏运行时下载也会暂停。"
+            "value": "游戏用你的账号直接从 GOG 下载到 C:\\GOG Games，含你拥有的 DLC。下载期间请保持 Madeira 打开：后台只允许很短时间，之后会暂停，回到前台继续。有游戏在运行时下载也会暂停。"
           }
         }
       }
@@ -8992,6 +9352,12 @@
             "state": "translated",
             "value": "Синхронизация GPU"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GPU 同步"
+          }
         }
       }
     },
@@ -9026,6 +9392,12 @@
             "state": "translated",
             "value": "Об игре"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "游戏详情"
+          }
         }
       }
     },
@@ -9059,6 +9431,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Язык игры"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "游戏语言"
           }
         }
       }
@@ -9138,7 +9516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏名称或 itch.io 链接"
+            "value": "游戏名称，或它的 itch.io 链接"
           }
         }
       }
@@ -9214,6 +9592,12 @@
             "state": "translated",
             "value": "Собственная поддержка игры"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "游戏自带支持"
+          }
         }
       }
     },
@@ -9248,6 +9632,12 @@
             "state": "translated",
             "value": "Игры, которые клиент Steam установил в этот префикс. Используется только параметр запуска Steam по умолчанию."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 客户端已在此前缀安装的游戏。只使用 Steam 的默认启动项。"
+          }
         }
       }
     },
@@ -9281,6 +9671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Игры на Microsoft .NET Framework работают в Wine Mono — открытой среде .NET проекта Wine. Madeira скачивает её с WineHQ: около 42 МБ, около 130 МБ после установки."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基于微软 .NET Framework 的游戏运行在 Wine Mono 上，这是 Wine 项目的开源 .NET 运行时。Madeira 从 WineHQ 下载：约 42 MB，装好后约 130 MB。"
           }
         }
       }
@@ -9320,7 +9716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏会用你的账号直接从 Epic 下载到 C:\\Program Files\\Epic Games。iOS 26 及更高版本会在后台继续下载，由 iOS 显示进度。较早的 iOS 上请在下载时保持 Madeira 打开：后台只允许很短时间，之后下载会暂停，回到 Madeira 时继续。有游戏运行时下载也会暂停。"
+            "value": "游戏用你的账号直接从 Epic 下载到 C:\\Program Files\\Epic Games。iOS 26 及以后下载可在后台继续，进度由 iOS 显示。更早的 iOS 上请在下载期间保持 Madeira 打开：后台只允许很短时间，之后下载会暂停，回到前台继续。有游戏在运行时下载也会暂停。"
           }
         }
       }
@@ -9360,7 +9756,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏会用你的账号直接从 itch.io 下载到 C:\\itch。请在下载时保持 Madeira 打开：后台只允许很短时间，之后下载会暂停，回到 Madeira 时继续。有游戏运行时下载也会暂停。"
+            "value": "游戏用你的账号直接从 itch.io 下载到 C:\\itch。下载期间请保持 Madeira 打开：后台只允许很短时间，之后会暂停，回到前台继续。有游戏在运行时下载也会暂停。"
           }
         }
       }
@@ -9400,7 +9796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "带创意工坊的游戏"
+            "value": "有创意工坊的游戏"
           }
         }
       }
@@ -9440,7 +9836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "手势区域"
+            "value": "手势区"
           }
         }
       }
@@ -9520,7 +9916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "“向 Claude 求助”会分享已知修复指南、最近的日志和 madeira.cfg。如需同时附带某款游戏的配置，请使用其游戏详情页上的按钮。"
+            "value": "「向 Claude 求助」会分享已知修复指南、最近的日志与 madeira.cfg。若还要带上某个游戏的配置，请用它「游戏详情」页上的按钮。"
           }
         }
       }
@@ -9675,6 +10071,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Группировать по"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分组方式"
           }
         }
       }
@@ -9950,6 +10352,12 @@
             "state": "translated",
             "value": "Как создать файл сопряжения"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如何创建配对文件"
+          }
         }
       }
     },
@@ -10028,7 +10436,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "如果这个文件是安装程序，Play 会在 Wine 桌面中运行它一次，安装到 C:\\itch；之后 Play 会直接启动游戏。"
+            "value": "如果这是安装程序，点「开始」会在 Wine 桌面里运行一次并安装到 C:\\itch；之后点「开始」直接启动游戏。"
           }
         }
       }
@@ -10063,6 +10471,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Импортировать файл сопряжения"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入配对文件"
           }
         }
       }
@@ -10182,7 +10596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "安装 %1$@ 以下载其创意工坊内容。"
+            "value": "安装%1$@才能下载它的创意工坊内容。"
           }
         }
       }
@@ -10298,6 +10712,12 @@
             "state": "translated",
             "value": "Установить StikDebug"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装 StikDebug"
+          }
         }
       }
     },
@@ -10331,6 +10751,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Установить на"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装到"
           }
         }
       }
@@ -10410,7 +10836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "安装于 Madeira 加入 GOG 运行库之前。“修复已安装的文件”会补上它们。"
+            "value": "在 Madeira 加入 GOG 运行库之前安装的。「修复已安装文件」会补上。"
           }
         }
       }
@@ -10446,6 +10872,12 @@
             "state": "translated",
             "value": "Установленные DLC"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装的 DLC"
+          }
         }
       }
     },
@@ -10480,6 +10912,12 @@
             "state": "translated",
             "value": "Установленные игры"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装的游戏"
+          }
         }
       }
     },
@@ -10513,6 +10951,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Установленный язык"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装语言"
           }
         }
       }
@@ -10552,7 +10996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "安装位置"
+            "value": "安装于"
           }
         }
       }
@@ -10752,7 +11196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可执行文件头无效。"
+            "value": "可执行文件头部无效。"
           }
         }
       }
@@ -10872,7 +11316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "内容会通过你的账号从 Steam 下载到游戏旁边的 Steam 创意工坊文件夹，游戏经由 Madeira Dock 启动时即可找到。订阅属于你的 Steam 账号，与在 PC 上相同。"
+            "value": "内容会用你的账号从 Steam 下载到游戏旁边的 Steam Workshop 文件夹，这样通过 Madeira Dock 启动时游戏能找到它们。订阅属于你的 Steam 账号，与在电脑上相同。"
           }
         }
       }
@@ -10912,7 +11356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "仍在此设备上、但你的账号已不再订阅的内容，例如游戏为服务器下载的内容。"
+            "value": "仍在设备上、但你的账号已不再订阅的内容，例如某个游戏为服务器下载的。"
           }
         }
       }
@@ -11028,6 +11472,12 @@
             "state": "translated",
             "value": "JIT позволяет Madeira выполнять код Windows. Выберите, как устройство %1$@ его получит."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JIT 让 Madeira 能运行 Windows 代码。请选择你的%1$@获取它的方式。"
+          }
         }
       }
     },
@@ -11061,6 +11511,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Способ JIT"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JIT 方式"
           }
         }
       }
@@ -11176,6 +11632,12 @@
             "state": "translated",
             "value": "Пул JIT — это память, резервируемая при запуске для переведённого кода x86 (от 256 до 1152 МБ; меньше 512 МБ — большим играм может не хватить места)."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JIT 内存池是启动时为转译的 x86 代码预留的内存（256 至 1152 MB；低于 512 MB 时大型游戏可能不够用）。"
+          }
         }
       }
     },
@@ -11209,6 +11671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Настройка JIT"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JIT 设置"
           }
         }
       }
@@ -11248,7 +11716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "保留 Epic 存档…"
+            "value": "保留 Epic 的存档…"
           }
         }
       }
@@ -11324,6 +11792,12 @@
             "state": "translated",
             "value": "Оставить сохранения Steam Cloud…"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留 Steam 云存档…"
+          }
         }
       }
     },
@@ -11358,6 +11832,12 @@
             "state": "translated",
             "value": "Оставить текущее управление?"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留当前控件？"
+          }
         }
       }
     },
@@ -11391,6 +11871,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Оставить сохранения этого устройства"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留本机存档"
           }
         }
       }
@@ -11430,7 +11916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "保留此设备上的存档…"
+            "value": "保留本机存档…"
           }
         }
       }
@@ -11510,7 +11996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "键鼠"
+            "value": "键盘与鼠标"
           }
         }
       }
@@ -11590,7 +12076,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此版本不包含 KosmicKrisp（缺少 gl/libvulkan_kosmickrisp.dylib）。"
+            "value": "此构建不含 KosmicKrisp（缺少 gl/libvulkan_kosmickrisp.dylib）。"
           }
         }
       }
@@ -11746,6 +12232,12 @@
             "state": "translated",
             "value": "Последний результат Dock"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次 Dock 结果"
+          }
         }
       }
     },
@@ -11779,6 +12271,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Последний запуск"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次游玩"
           }
         }
       }
@@ -12014,6 +12512,12 @@
             "state": "translated",
             "value": "Буквы"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字母"
+          }
         }
       }
     },
@@ -12092,7 +12596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏库详情"
+            "value": "库详情"
           }
         }
       }
@@ -12128,6 +12632,12 @@
             "state": "translated",
             "value": "Вид библиотеки"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "库布局"
+          }
         }
       }
     },
@@ -12161,6 +12671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Параметры библиотеки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "库选项"
           }
         }
       }
@@ -12275,6 +12791,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Список"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表"
           }
         }
       }
@@ -12430,6 +12952,12 @@
             "state": "translated",
             "value": "LocalDevVPN установлен"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装 LocalDevVPN"
+          }
         }
       }
     },
@@ -12468,7 +12996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "LocalDevVPN 已能连接此设备。"
+            "value": "LocalDevVPN 已能访问本机。"
           }
         }
       }
@@ -12664,6 +13192,12 @@
             "state": "translated",
             "value": "Madeira Dock запускает установленную игру Steam через собственный клиент Steam от Valve, без окна Steam. Клиент Valve входит с вашей учётной записью и решает, может ли игра запуститься."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Madeira Dock 通过 Valve 自家的 Steam 客户端启动已安装的 Steam 游戏，不显示 Steam 桌面窗口。Valve 客户端用你的账号登录并决定游戏能否运行。"
+          }
         }
       }
     },
@@ -12697,6 +13231,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Madeira Dock запускает ваши установленные игры Steam через собственный клиент Steam от Valve, без окна Steam. Ему нужны компоненты клиента, которые Madeira скачивает у Valve."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Madeira Dock 通过 Valve 自家的 Steam 客户端启动已安装的 Steam 游戏，不显示 Steam 桌面窗口。它需要客户端组件，Madeira 会从 Valve 下载。"
           }
         }
       }
@@ -12776,7 +13316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 无法连接此设备。请连接 LocalDevVPN 后重试。"
+            "value": "Madeira 无法访问本机。请连接 LocalDevVPN 后重试。"
           }
         }
       }
@@ -12812,6 +13352,12 @@
             "state": "translated",
             "value": "Madeira скачивает его с WineHQ: около 42 МБ, около 130 МБ после установки. Большинству игр он не нужен; можно добавить его позже в Настройках."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Madeira 从 WineHQ 下载：约 42 MB，装好后约 130 MB。多数游戏不需要它；也可以稍后在设置里添加。"
+          }
         }
       }
     },
@@ -12845,6 +13391,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Madeira включает JIT через LocalDevVPN — бесплатное приложение, которое даёт Madeira сетевой путь к этому устройству (%1$@). Установите его из App Store и вернитесь."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Madeira 通过 LocalDevVPN 启用 JIT，这个免费 App 为 Madeira 提供到本%1$@的网络通路。请先从 App Store 安装，然后回来。"
           }
         }
       }
@@ -12884,7 +13436,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 会忘记此驱动器，并从游戏库中移除其游戏。驱动器上的文件会保留。"
+            "value": "Madeira 会忘记这个盘并把它上面的游戏从库中移除。盘上的文件会保留。"
           }
         }
       }
@@ -12919,6 +13471,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Madeira — это проверка концепции: запуск x86-игр Windows на iOS с помощью FEX-Emu, Wine и трансляции графики на Metal."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Madeira 是一个概念验证项目，用 FEX-Emu、Wine 与基于 Metal 的图形转译在 iOS 上运行 x86 Windows 游戏。"
           }
         }
       }
@@ -12958,7 +13516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 基于 Wine、FEX-Emu、Feifan He（3Shain）开发的 DXMT（其中 Direct3D 9 前端由 David Acevedo（dacevedo12）开发）、Mattias Jansson 开发的 rpmalloc，以及 StikDebug、StikJIT 和 idevice。感谢所有为这些项目作出贡献的人。"
+            "value": "Madeira 建立在 Wine、FEX-Emu、Feifan He（3Shain）的 DXMT（Direct3D 9 前端由 David Acevedo / dacevedo12 提供）、Mattias Jansson 的 rpmalloc、StikDebug、StikJIT 与 idevice 之上。感谢所有为这些项目贡献的人。"
           }
         }
       }
@@ -12998,7 +13556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 会将 GOG 登录令牌保存在此设备的钥匙串中，仅限此设备使用。退出登录会移除它；已安装的游戏仍会保留，并可继续游玩。"
+            "value": "Madeira 把 GOG 登录令牌保存在本机钥匙串中，仅限本机。退出登录会删除它；已安装的游戏会保留并可继续游玩。"
           }
         }
       }
@@ -13038,7 +13596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 会将 Epic Games 登录令牌保存在此设备的钥匙串中，仅限此设备使用。退出登录会移除它；已安装的游戏仍会保留。"
+            "value": "Madeira 把 Epic Games 登录令牌保存在本机钥匙串中，仅限本机。退出登录会删除它；已安装的游戏保留。"
           }
         }
       }
@@ -13073,6 +13631,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Madeira ставит копию этой программы на место той, что запускает Steam (лаунчер сохраняется и вернётся вместе с выбором Steam). Steam по-прежнему запускает игру и проверяет владение."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Madeira 会把一份副本放到 Steam 启动的那个程序的位置（启动器保留，可在 Steam 选项里切回）。Steam 仍负责启动游戏并校验拥有权。"
           }
         }
       }
@@ -13112,7 +13676,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Madeira 使用你在 itch.io 创建的 API 密钥登录，密钥保存在此设备的钥匙串中，仅限此设备使用。退出登录会移除它；已安装的游戏仍会保留，并可继续游玩。你也可以随时在 itch.io 上删除该密钥。"
+            "value": "Madeira 用你在 itch.io 创建的 API 密钥登录，密钥保存在本机钥匙串中，仅限本机。退出登录会删除它；已安装的游戏会保留并可继续游玩。你也可以随时在 itch.io 上删除该密钥。"
           }
         }
       }
@@ -13152,7 +13716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此安装中缺少 Madeira 的 JIT 脚本。请重新安装 Madeira。"
+            "value": "此安装缺少 Madeira 的 JIT 脚本。请重新安装 Madeira。"
           }
         }
       }
@@ -13192,7 +13756,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "随意逛逛吧"
+            "value": "随意逛逛"
           }
         }
       }
@@ -13227,6 +13791,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Память и синхронизация"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存与同步"
           }
         }
       }
@@ -13266,7 +13836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MetalFX 按上方分辨率渲染再放大（Direct3D 11 和 12）。"
+            "value": "MetalFX 按上面的分辨率渲染再放大（Direct3D 11 与 12）。"
           }
         }
       }
@@ -13306,7 +13876,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MetalFX 超分辨率"
+            "value": "MetalFX 放大"
           }
         }
       }
@@ -13341,6 +13911,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Способ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "方式"
           }
         }
       }
@@ -13416,6 +13992,12 @@
             "state": "translated",
             "value": "Модификаторы и правка"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "修饰键与编辑"
+          }
         }
       }
     },
@@ -13490,6 +14072,12 @@
             "state": "translated",
             "value": "Большинство параметров читается при запуске Madeira: после изменения закройте её в переключателе приложений."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多数选项在 Madeira 启动时读取：改完请从后台多任务关闭它。"
+          }
         }
       }
     },
@@ -13563,6 +14151,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Мышь и указатель"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鼠标与指针"
           }
         }
       }
@@ -13642,7 +14236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "移动对象"
+            "value": "移动"
           }
         }
       }
@@ -13722,7 +14316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "移动会先复制游戏、校验副本，然后删除原文件。完成前请保持驱动器连接。"
+            "value": "移动会复制游戏、校验副本，然后删除原件。请保持该盘连接直到完成。"
           }
         }
       }
@@ -13762,7 +14356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "移动手柄（或此设备）即可瞄准。自动模式会使用手柄的陀螺仪（DualSense、DualShock 4、Switch Pro），否则使用此设备的。自动模式下，若游戏识别到手柄则移动右摇杆，否则移动鼠标。没有手柄时，只有“始终”可用。若缓慢推摇杆无效，请调高防死区。"
+            "value": "转动手柄（或本机）即可瞄准。自动陀螺仪有手柄时用手柄的（DualSense、DualShock 4、Switch Pro），否则用本机的。自动模式在游戏识别到手柄时移动右摇杆，否则移动鼠标。没有手柄时只有「始终」有效。如果摇杆慢速瞄准没反应，请调大反死区。"
           }
         }
       }
@@ -13838,6 +14432,12 @@
             "state": "translated",
             "value": "Навигация"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导航"
+          }
         }
       }
     },
@@ -13871,6 +14471,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Нужен клиент Valve: Настройки › Steam › Madeira Dock."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要 Valve 客户端：「设置 › Steam › Madeira Dock」。"
           }
         }
       }
@@ -13946,6 +14552,12 @@
             "state": "translated",
             "value": "Новое в Madeira"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Madeira 新增"
+          }
         }
       }
     },
@@ -13984,7 +14596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "新版游戏库网格"
+            "value": "新库网格"
           }
         }
       }
@@ -14024,7 +14636,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚未安装 Steam 游戏。"
+            "value": "尚未安装任何 Steam 游戏。"
           }
         }
       }
@@ -14100,6 +14712,12 @@
             "state": "translated",
             "value": "Программа для Windows не найдена."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到 Windows 程序。"
+          }
         }
       }
     },
@@ -14133,6 +14751,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Здесь нет программ. Скопируйте файлы в Madeira/wine/drive_c через «Файлы»."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这里没有可执行文件。请用「文件」把文件拷进 Madeira/wine/drive_c。"
           }
         }
       }
@@ -14172,7 +14796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未找到游戏。此驱动器上的 Steam 游戏会显示在 Steam 分区。"
+            "value": "未找到游戏。这个盘上的 Steam 游戏会显示在 Steam 分区。"
           }
         }
       }
@@ -14212,7 +14836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有匹配搜索的游戏。"
+            "value": "没有匹配的游戏。"
           }
         }
       }
@@ -14248,6 +14872,12 @@
             "state": "translated",
             "value": "В библиотеке Steam в drive_c не найдено установленных игр Steam."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 drive_c 的 Steam 库中没有找到已安装的 Steam 游戏。"
+          }
         }
       }
     },
@@ -14282,6 +14912,12 @@
             "state": "translated",
             "value": "Нет интернета? Добавьте локальную копию"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有网络？添加本地副本"
+          }
         }
       }
     },
@@ -14315,6 +14951,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Нет интернета? Добавьте локальную копию, затем выберите приложение «Команды» в появившемся меню «Поделиться»."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有网络？添加本地副本，然后在弹出的分享面板里选择「快捷指令」App。"
           }
         }
       }
@@ -14354,7 +14996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有匹配结果。请换个标题试试。"
+            "value": "无匹配。换个名称试试。"
           }
         }
       }
@@ -14394,7 +15036,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有其他游戏符合你的搜索。"
+            "value": "其他游戏没有匹配项。"
           }
         }
       }
@@ -14429,6 +15071,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Других параметров по запросу «%1$@» нет."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他选项没有匹配“%1$@”的。"
           }
         }
       }
@@ -14468,7 +15116,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此设备没有保存配对文件。"
+            "value": "本机没有存储配对文件。"
           }
         }
       }
@@ -14508,7 +15156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Epic 云端和此设备上都没有这款游戏的存档。"
+            "value": "Epic 云与本机都没有这个游戏的存档。"
           }
         }
       }
@@ -14543,6 +15191,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Для этой игры нет сохранений ни в Steam Cloud, ни на этом устройстве."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 云与本机都没有这个游戏的存档。"
           }
         }
       }
@@ -14582,7 +15236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有已订阅的内容。浏览创意工坊添加一些吧。"
+            "value": "没有订阅内容。去创意工坊添加一些。"
           }
         }
       }
@@ -14662,7 +15316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏运行时不可用。游戏结束前，Steam 会把你的账号交给游戏使用。"
+            "value": "游戏运行时不可用。Steam 会把你的账号交给游戏，直到游戏结束。"
           }
         }
       }
@@ -14862,7 +15516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚未就绪，无法离线游玩"
+            "value": "尚未准备好离线游玩"
           }
         }
       }
@@ -14938,6 +15592,12 @@
             "state": "translated",
             "value": "Не синхронизировано"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未同步"
+          }
         }
       }
     },
@@ -14972,6 +15632,12 @@
             "state": "translated",
             "value": "Ещё не синхронизировано."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未同步。"
+          }
         }
       }
     },
@@ -15005,6 +15671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не загружено, Madeira остаётся открытой: %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未上传，Madeira 保持打开：%1$@"
           }
         }
       }
@@ -15044,7 +15716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在你选择保留哪一份之前，不会更改任何内容。"
+            "value": "在你选择保留哪一个之前，不会改动任何内容。"
           }
         }
       }
@@ -15080,6 +15752,12 @@
             "state": "translated",
             "value": "Цифры"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "数字"
+          }
         }
       }
     },
@@ -15113,6 +15791,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Цифровой блок"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小键盘"
           }
         }
       }
@@ -15228,6 +15912,12 @@
             "state": "translated",
             "value": "По умолчанию выключено. На экране 120 Гц держит панель на 120 Гц при ограничении игры в 60 FPS, так что кадр, пропустивший обновление, ждёт 8 мс вместо 17 мс. Расходует больше заряда."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。在 120 Hz 屏幕上，游戏限 60 帧时让面板保持 120 Hz，这样错过一次刷新的帧只等 8 ms 而不是 17 ms。更耗电。"
+          }
         }
       }
     },
@@ -15266,7 +15956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "关闭，因此游戏找不到 Vulkan；但若在上方选择了 DXVK 或 vkd3d-proton，则会启用 MoltenVK。"
+            "value": "关闭，游戏就找不到 Vulkan；除非在上面选了 DXVK 或 vkd3d-proton，那会开启 MoltenVK。"
           }
         }
       }
@@ -15306,7 +15996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "关闭：游戏找不到 Vulkan，即使在上方选择了 DXVK 和 vkd3d-proton 也不会使用。"
+            "value": "关闭：游戏找不到 Vulkan，即使上面选了 DXVK 与 vkd3d-proton 也不会使用。"
           }
         }
       }
@@ -15422,6 +16112,12 @@
             "state": "translated",
             "value": "Один ключ = значение на строку, как в madeira.cfg; строки, начинающиеся с #, — комментарии. Примеры: fence-chain = 6, dxmt = d3d11.mipClampBC=1, env.FEX_MULTIBLOCK = 1."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每行一个 key = value，与 madeira.cfg 相同；以 # 开头的行是注释。例如：fence-chain = 6，dxmt = d3d11.mipClampBC=1，env.FEX_MULTIBLOCK = 1。"
+          }
         }
       }
     },
@@ -15455,6 +16151,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Одноразовые установки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次性安装"
           }
         }
       }
@@ -15494,7 +16196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "仅支持 x86 和 x64 可执行文件。"
+            "value": "仅支持 x86 与 x64 可执行文件。"
           }
         }
       }
@@ -15650,6 +16352,12 @@
             "state": "translated",
             "value": "Откройте Настройки › Конфиденциальность и безопасность › Режим разработчика, прокрутите вниз и нажмите **Создать пару с %1$@**. Не выключайте Wi-Fi."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开「设置 › 隐私与安全性 › 开发者模式」，向下滚动并点 **与 %1$@ 配对**。保持 Wi-Fi 开启。"
+          }
         }
       }
     },
@@ -15688,7 +16396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 Safari 中打开登录页并登录。随后 GOG 会打开一个地址以 embed.gog.com/on_login_success 开头的页面。复制完整地址并粘贴到这里。"
+            "value": "在 Safari 中打开登录页并登录。GOG 随后会打开一个地址以 embed.gog.com/on_login_success 开头的页面。复制整个地址并粘贴到这里。"
           }
         }
       }
@@ -15808,7 +16516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 Safari 中打开登录页面并登录。Epic 随后会显示一段包含 \"authorizationCode\" 的短文本。复制整段文本（或只复制其中的代码），粘贴到这里。"
+            "value": "在 Safari 中打开登录页并登录。Epic 随后会显示一段含 “authorizationCode” 的文本。复制整段文本或只复制代码，粘贴到这里。"
           }
         }
       }
@@ -15843,6 +16551,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Другие записи в madeira.cfg"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "madeira.cfg 中的其他条目"
           }
         }
       }
@@ -15922,7 +16636,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "其他已安装的游戏"
+            "value": "其他已安装游戏"
           }
         }
       }
@@ -15957,6 +16671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ваши DLC (%1$lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拥有的 DLC（%1$lld）"
           }
         }
       }
@@ -16116,7 +16836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请先配对此设备或导入其配对文件。"
+            "value": "请先配对这台设备，或导入它的配对文件。"
           }
         }
       }
@@ -16156,7 +16876,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "配对此设备或导入其配对文件，以完成内置 StikJIT 设置。"
+            "value": "请先配对这台设备或导入它的配对文件，以完成内置 StikJIT 设置。"
           }
         }
       }
@@ -16272,6 +16992,12 @@
             "state": "translated",
             "value": "Пара создана на этом устройстве (%1$@)"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已在本%1$@上配对"
+          }
         }
       }
     },
@@ -16305,6 +17031,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Пара создана с %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已与%1$@配对"
           }
         }
       }
@@ -16340,6 +17072,12 @@
             "state": "translated",
             "value": "Сопряжение"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配对"
+          }
         }
       }
     },
@@ -16373,6 +17111,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Файл сопряжения импортирован"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配对文件已导入"
           }
         }
       }
@@ -16452,7 +17196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "每次启动时都会传入。上方为完整命令。"
+            "value": "每次启动都会传入。上面是完整命令。"
           }
         }
       }
@@ -16532,7 +17276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "过去 30 天"
+            "value": "近 30 天"
           }
         }
       }
@@ -16572,7 +17316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "过去 7 天"
+            "value": "近 7 天"
           }
         }
       }
@@ -16612,7 +17356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "粘贴登录验证码"
+            "value": "粘贴登录代码"
           }
         }
       }
@@ -16768,6 +17512,12 @@
             "state": "translated",
             "value": "Приостановить обновление"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂停更新"
+          }
         }
       }
     },
@@ -16806,7 +17556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "每款游戏的 madeira.cfg 行；会覆盖全局文件。"
+            "value": "针对单个游戏的 madeira.cfg 行；会覆盖全局文件。"
           }
         }
       }
@@ -16886,7 +17636,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "双指开合游戏库卡片可调整每行显示的数量。关闭后卡片使用原始网格。缩放触感会在开合跨过某个尺寸时轻震。"
+            "value": "在库的卡片上双指捏合可改变每行显示数量。关闭后卡片使用原来的网格。捏合跨过某个尺寸时会有点击触感。"
           }
         }
       }
@@ -16922,6 +17672,12 @@
             "state": "translated",
             "value": "Платформа"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平台"
+          }
         }
       }
     },
@@ -16955,6 +17711,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Играть"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始"
           }
         }
       }
@@ -17030,6 +17792,12 @@
             "state": "translated",
             "value": "Режим указателя"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "指针模式"
+          }
         }
       }
     },
@@ -17104,6 +17872,12 @@
             "state": "translated",
             "value": "Показ:"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前："
+          }
         }
       }
     },
@@ -17142,7 +17916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "每秒按下次"
+            "value": "每秒按压次数"
           }
         }
       }
@@ -17258,6 +18032,12 @@
             "state": "translated",
             "value": "Программы из установочного скрипта Steam для игры, например установщики сред, которые клиент Steam запускает перед первым стартом. Запуск через Dock выполняет ещё не отмеченные как выполненные до старта клиента Valve; затем выбор меняется на «Пропустить». «Отметить как выполненное» и «Сбросить» действуют со следующего запуска игры через Dock."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "游戏 Steam 安装脚本里的程序，例如运行库安装，Steam 桌面客户端会在首次启动前运行它们。Dock 启动时，会先运行尚未记为完成的那些，再启动 Valve 客户端；之后该选项变为「跳过」。「记为已完成」与「重置」在游戏下次 Dock 启动时生效。"
+          }
         }
       }
     },
@@ -17296,7 +18076,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "用过它的程序会保留它；其他程序会要求 Wine 重新下载。"
+            "value": "已用过的程序会保留它。其他程序会要求 Wine 重新下载。"
           }
         }
       }
@@ -17331,6 +18111,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Выйти из игры"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出游戏"
           }
         }
       }
@@ -17370,7 +18156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可以开始游戏"
+            "value": "可以游玩"
           }
         }
       }
@@ -17405,6 +18191,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Недавно добавленные"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近添加"
           }
         }
       }
@@ -17444,7 +18236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将 %1$@ 的一次性安装记录为已完成？"
+            "value": "把%1$@的一次性安装记为已完成？"
           }
         }
       }
@@ -17484,7 +18276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "记为完成"
+            "value": "记为已完成"
           }
         }
       }
@@ -17524,7 +18316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "记为完成…"
+            "value": "记为已完成…"
           }
         }
       }
@@ -17684,7 +18476,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请刷新 Epic Games 游戏库后重试。"
+            "value": "刷新 Epic Games 库后重试。"
           }
         }
       }
@@ -17724,7 +18516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请刷新 GOG 游戏库后重试。"
+            "value": "刷新 GOG 库后重试。"
           }
         }
       }
@@ -17759,6 +18551,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Обновите библиотеку Steam и повторите попытку."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新 Steam 库后重试。"
           }
         }
       }
@@ -17798,7 +18596,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请刷新 itch.io 游戏库后重试。"
+            "value": "刷新 itch.io 库后重试。"
           }
         }
       }
@@ -17913,6 +18711,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Относительно горизонтали. Игры масштабируют наклон и поворот камеры иначе, чем у мыши; уменьшите, если взгляд поднимается быстрее, чем поворачивается."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相对水平方向。游戏对相机俯仰和偏航的缩放与鼠标不同；如果视角上抬比转向快，就调低这个值。"
           }
         }
       }
@@ -18108,6 +18912,12 @@
             "state": "translated",
             "value": "Удалить Wine Mono"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除 Wine Mono"
+          }
         }
       }
     },
@@ -18141,6 +18951,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удалить Wine Mono?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除 Wine Mono？"
           }
         }
       }
@@ -18180,7 +18996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "移除测试版代码"
+            "value": "移除测试码"
           }
         }
       }
@@ -18300,7 +19116,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从游戏库中移除"
+            "value": "从库中移除"
           }
         }
       }
@@ -18340,7 +19156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从此游戏库中移除"
+            "value": "从这个库中移除"
           }
         }
       }
@@ -18380,7 +19196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "确定要从游戏库中移除此条目吗？可执行文件和存档仍会保留在 drive_c 中。"
+            "value": "移除这个库条目？你的可执行文件与存档仍留在 drive_c。"
           }
         }
       }
@@ -18420,7 +19236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "修复已安装的文件"
+            "value": "修复已安装文件"
           }
         }
       }
@@ -18456,6 +19272,12 @@
             "state": "translated",
             "value": "Заменить"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替换"
+          }
         }
       }
     },
@@ -18489,6 +19311,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Заменить сохранения Steam Cloud и закрыть"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替换 Steam 云存档并关闭"
           }
         }
       }
@@ -18524,6 +19352,12 @@
             "state": "translated",
             "value": "Заменить сохранения Steam Cloud сохранениями этого устройства?"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用本机存档替换 Steam 云存档？"
+          }
         }
       }
     },
@@ -18558,6 +19392,12 @@
             "state": "translated",
             "value": "Заменить облачные сохранения"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替换云存档"
+          }
         }
       }
     },
@@ -18591,6 +19431,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Требования"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要求"
           }
         }
       }
@@ -18670,7 +19516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "重置 %1$@ 的一次性安装？"
+            "value": "重置%1$@的一次性安装？"
           }
         }
       }
@@ -18706,6 +19552,12 @@
             "state": "translated",
             "value": "Сбросить Developer Disk Image"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置开发者磁盘映像"
+          }
         }
       }
     },
@@ -18739,6 +19591,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Сбросить всё"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部恢复默认"
           }
         }
       }
@@ -18898,7 +19756,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "恢复推荐设置"
+            "value": "恢复为推荐值"
           }
         }
       }
@@ -18938,7 +19796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "恢复默认设置"
+            "value": "恢复默认"
           }
         }
       }
@@ -19094,6 +19952,12 @@
             "state": "translated",
             "value": "Перезапустите Madeira (закройте её в переключателе приложений), чтобы изменения вступили в силу."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重启 Madeira（从后台多任务关闭它）后改动才会生效。"
+          }
         }
       }
     },
@@ -19127,6 +19991,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Перезапустите Madeira (закройте её в переключателе приложений), чтобы эти изменения вступили в силу."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重启 Madeira（从后台多任务关闭它）后这些改动才会生效。"
           }
         }
       }
@@ -19166,7 +20036,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "要开始另一款游戏，请重启 Madeira：在应用切换器中上滑关闭 Madeira，再重新打开。"
+            "value": "重启 Madeira 才能启动另一个游戏：在后台多任务里把 Madeira 划掉，然后重新打开。"
           }
         }
       }
@@ -19202,6 +20072,12 @@
             "state": "translated",
             "value": "Восстановить"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复"
+          }
         }
       }
     },
@@ -19235,6 +20111,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Восстановить сохранения из копии…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从备份恢复存档…"
           }
         }
       }
@@ -19350,6 +20232,12 @@
             "state": "translated",
             "value": "Продолжить обновление"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续更新"
+          }
         }
       }
     },
@@ -19423,6 +20311,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Правый стик как мышь"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "右摇杆当鼠标"
           }
         }
       }
@@ -19578,6 +20472,12 @@
             "state": "translated",
             "value": "Запускает игру без Steam. Только игры без DRM."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不通过 Steam 运行游戏。仅适用于无 DRM 的游戏。"
+          }
         }
       }
     },
@@ -19612,6 +20512,12 @@
             "state": "translated",
             "value": "Запускает потоки игры с низким приоритетом на энергоэффективных ядрах: прохладнее и медленнее. Включайте, пока игра загружается, и выключайте для игры."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "让游戏的线程以低优先级运行在能效核上：更凉但更慢。可在游戏加载时使用，进入游戏后关掉。"
+          }
         }
       }
     },
@@ -19645,6 +20551,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Одинаково на обоих"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "两边相同"
           }
         }
       }
@@ -19720,6 +20632,12 @@
             "state": "translated",
             "value": "Сначала сохранитесь в игре. Загружает сохранения этой игры в Steam Cloud, затем закрывает Madeira; Steam в этом сеансе выходит из учётной записи, когда начинается загрузка."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先在游戏里保存。这会把该游戏存档上传到 Steam 云，然后关闭 Madeira；上传开始时本次会话的 Steam 会退出登录。"
+          }
         }
       }
     },
@@ -19753,6 +20671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Сохранения"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存档"
           }
         }
       }
@@ -19792,7 +20716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索 itch.io 或粘贴游戏链接，把免费游戏添加到此游戏库，并在这里安装。"
+            "value": "搜索 itch.io 或粘贴游戏链接，把免费游戏加入这个库并在这里安装。"
           }
         }
       }
@@ -19912,7 +20836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索游戏库"
+            "value": "搜索你的库"
           }
         }
       }
@@ -19992,7 +20916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在这里查看你在 itch.io 购买或领取的游戏，无需离开 Madeira 即可安装。"
+            "value": "在 itch.io 上购买或领取的游戏会显示在这里，可直接在 Madeira 里安装。"
           }
         }
       }
@@ -20032,7 +20956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在这里查看你的 Epic Games 游戏，无需离开 Madeira 即可安装。"
+            "value": "你的 Epic Games 游戏会显示在这里，可直接在 Madeira 里安装。"
           }
         }
       }
@@ -20072,7 +20996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在这里查看你的 GOG 游戏，无需离开 Madeira 即可安装。"
+            "value": "你的 GOG 游戏会显示在这里，可直接在 Madeira 里安装。"
           }
         }
       }
@@ -20107,6 +21031,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Здесь видны ваши игры Steam; устанавливайте их, не выходя из Madeira."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的 Steam 游戏会显示在这里，可直接在 Madeira 里安装。"
           }
         }
       }
@@ -20222,6 +21152,12 @@
             "state": "translated",
             "value": "Задано в вашем madeira.cfg, но не читается по имени в коде Madeira, например параметры FEX в виде env.FEX_*."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你的 madeira.cfg 里设置了，但 Madeira 代码没有按名称读取，例如作为 env.FEX_* 传入的 FEX 选项。"
+          }
         }
       }
     },
@@ -20255,6 +21191,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Настройки › .NET Framework скачивает или удаляет Wine Mono."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「设置 › .NET Framework」可下载或移除 Wine Mono。"
           }
         }
       }
@@ -20290,6 +21232,12 @@
             "state": "translated",
             "value": "Настройки › Steam › Madeira Dock показывает игры Steam, установленные в drive_c Madeira, и запускает их."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「设置 › Steam › Madeira Dock」列出 Madeira 的 drive_c 中已安装的 Steam 游戏并可启动它们。"
+          }
         }
       }
     },
@@ -20324,6 +21272,12 @@
             "state": "translated",
             "value": "Руководство по настройке"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置指南"
+          }
         }
       }
     },
@@ -20357,6 +21311,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Шаги настройки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置步骤"
           }
         }
       }
@@ -20396,7 +21356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "快捷指令 › 打开 URL › 粘贴 › 添加到主屏幕。"
+            "value": "「快捷指令 › 打开 URL › 粘贴 › 添加到主屏幕」。"
           }
         }
       }
@@ -20592,6 +21552,12 @@
             "state": "translated",
             "value": "Показано %1$lld из %2$lld. Уточните запрос или откройте «Все настройки»."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示 %1$lld / %2$lld。请细化搜索，或打开全部设置。"
+          }
         }
       }
     },
@@ -20750,7 +21716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请在“设置 › GOG”中登录 GOG 以更新这款游戏。不登录也能游玩。"
+            "value": "在「设置 › GOG」登录后才能更新此游戏。不登录也可游玩。"
           }
         }
       }
@@ -20790,7 +21756,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用地址登录"
+            "value": "用地址登录"
           }
         }
       }
@@ -20950,7 +21916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请在“设置 › Epic Games”中登录 Epic Games，以进行在线游玩并更新这款游戏。"
+            "value": "在「设置 › Epic Games」登录后即可在线游玩并更新此游戏。"
           }
         }
       }
@@ -20990,7 +21956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "登录 Epic Games 以同步存档。"
+            "value": "登录 Epic Games 后才能同步存档。"
           }
         }
       }
@@ -21070,7 +22036,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请登录 Steam（“设置 › Steam”）以查看你的创意工坊内容。"
+            "value": "登录 Steam（设置 › Steam）后才能看到你的创意工坊内容。"
           }
         }
       }
@@ -21105,6 +22071,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Войдите в Steam, чтобы использовать Steam Cloud."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登录 Steam 后才能使用 Steam 云。"
           }
         }
       }
@@ -21184,7 +22156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请在“设置 › itch.io”中登录 itch.io 以更新这款游戏。不登录也能游玩。"
+            "value": "在「设置 › itch.io」登录后才能更新此游戏。不登录也可游玩。"
           }
         }
       }
@@ -21224,7 +22196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用验证码登录"
+            "value": "用代码登录"
           }
         }
       }
@@ -21304,7 +22276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出 Epic Games 登录"
+            "value": "退出 Epic Games"
           }
         }
       }
@@ -21344,7 +22316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出 Epic Games 登录？"
+            "value": "退出 Epic Games？"
           }
         }
       }
@@ -21384,7 +22356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出 GOG 登录"
+            "value": "退出 GOG"
           }
         }
       }
@@ -21424,7 +22396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出 GOG 登录？"
+            "value": "退出 GOG？"
           }
         }
       }
@@ -21460,6 +22432,12 @@
             "state": "translated",
             "value": "Выйти из Steam"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出 Steam"
+          }
         }
       }
     },
@@ -21493,6 +22471,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Выйти из Steam?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出 Steam？"
           }
         }
       }
@@ -21532,7 +22516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出 itch.io 登录"
+            "value": "退出 itch.io"
           }
         }
       }
@@ -21572,7 +22556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出 itch.io 登录？"
+            "value": "退出 itch.io？"
           }
         }
       }
@@ -21688,6 +22672,12 @@
             "state": "translated",
             "value": "Вход выполнен: %1$@"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已登录为%1$@"
+          }
         }
       }
     },
@@ -21801,6 +22791,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "С прошлой настройки в Madeira появилось кое-что новое для настройки:"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自你上次运行设置以来，Madeira 有新内容需要设置："
           }
         }
       }
@@ -21916,6 +22912,12 @@
             "state": "translated",
             "value": "Пропустить"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳过"
+          }
         }
       }
     },
@@ -21949,6 +22951,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Меньший пул JIT (512 МБ) для этого запуска"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本次启动使用更小的 JIT 内存池（512 MB）"
           }
         }
       }
@@ -21984,6 +22992,12 @@
             "state": "translated",
             "value": "Некоторые игры для Windows построены на Microsoft .NET Framework. Madeira запускает их в Wine Mono — открытой среде .NET проекта Wine."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有些 Windows 游戏基于微软 .NET Framework。Madeira 用 Wine Mono（Wine 项目的开源 .NET 运行时）运行它们。"
+          }
         }
       }
     },
@@ -22017,6 +23031,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Сортировать по"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排序方式"
           }
         }
       }
@@ -22136,7 +23156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "先在线启动游戏，之后即可离线游玩"
+            "value": "先在线启动一次游戏以便离线游玩"
           }
         }
       }
@@ -22176,7 +23196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "先在线启动一次，之后即可离线游玩"
+            "value": "先在线启动一次以便离线游玩"
           }
         }
       }
@@ -22211,6 +23231,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Запускать через"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启动方式"
           }
         }
       }
@@ -22250,7 +23276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "不启用 Easy Anti-Cheat 启动"
+            "value": "不使用 Easy Anti-Cheat 启动"
           }
         }
       }
@@ -22285,6 +23311,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Запуск JIT"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在启动 JIT"
           }
         }
       }
@@ -22324,7 +23356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在启动 Madeira 的 JIT 辅助程序…"
+            "value": "正在启动 Madeira 的 JIT 助手…"
           }
         }
       }
@@ -22364,7 +23396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在启动游戏…"
+            "value": "正在启动你的游戏…"
           }
         }
       }
@@ -22399,6 +23431,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Запускается через клиент Steam от Valve, с вашим входом."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通过 Valve 的 Steam 客户端以你的身份登录后启动。"
           }
         }
       }
@@ -22478,7 +23516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Steam 云存档"
+            "value": "Steam 云"
           }
         }
       }
@@ -22514,6 +23552,12 @@
             "state": "translated",
             "value": "Сохранения Steam Cloud"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 云存档"
+          }
         }
       }
     },
@@ -22547,6 +23591,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Тестирование Steam"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 测试"
           }
         }
       }
@@ -22622,6 +23672,12 @@
             "state": "translated",
             "value": "Учётная запись Steam"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 账号"
+          }
         }
       }
     },
@@ -22660,7 +23716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Steam 会在每次启动时把这些添加到选定的启动选项。"
+            "value": "Steam 每次启动都会把它们加到选定的启动项上。"
           }
         }
       }
@@ -22695,6 +23751,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Клиент Steam"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 客户端"
           }
         }
       }
@@ -22734,7 +23796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Steam 尚未告知这些游戏是否有创意工坊。请在游戏库下拉刷新。"
+            "value": "Steam 还没说明这些游戏是否有创意工坊。请在库上下拉刷新。"
           }
         }
       }
@@ -22769,6 +23831,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Вход в Steam"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 登录"
           }
         }
       }
@@ -22808,7 +23876,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Steam 启动方式"
+            "value": "Steam 启动"
           }
         }
       }
@@ -22844,6 +23912,12 @@
             "state": "translated",
             "value": "Steam не указывает размер этой игры. Обновите библиотеку Steam, чтобы прочитать его снова."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 没有给出这个游戏的大小。请刷新 Steam 库重新读取。"
+          }
         }
       }
     },
@@ -22878,6 +23952,12 @@
             "state": "translated",
             "value": "Выбор Steam"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 的选择"
+          }
         }
       }
     },
@@ -22911,6 +23991,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Шаг %1$lld из %2$lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %1$lld 步，共 %2$lld 步"
           }
         }
       }
@@ -23106,6 +24192,12 @@
             "state": "translated",
             "value": "StikDebug нужен файл сопряжения и активное подключение LocalDevVPN. Madeira отправляет свой скрипт автоматически."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "StikDebug 需要配对文件和可用的 LocalDevVPN 连接。Madeira 会自动发送自己的脚本。"
+          }
         }
       }
     },
@@ -23144,7 +24236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未检测到 StikDebug，Madeira 将使用内置辅助程序。"
+            "value": "未检测到 StikDebug，Madeira 将使用内置助手。"
           }
         }
       }
@@ -23300,6 +24392,12 @@
             "state": "translated",
             "value": "Stray (UE4, -dx11)"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stray（UE4，-dx11）"
+          }
         }
       }
     },
@@ -23414,6 +24512,12 @@
             "state": "translated",
             "value": "Охват подкачки"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "交换覆盖范围"
+          }
         }
       }
     },
@@ -23447,6 +24551,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Уровень подкачки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "交换层"
           }
         }
       }
@@ -23482,6 +24592,12 @@
             "state": "translated",
             "value": "Уровень подкачки переносит данные игры в файл в хранилище этого устройства, когда памяти не хватает, до выбранного размера, ценой некоторой скорости. Охват решает, какие выделения он переносит: только крупные (от 8 МБ, по умолчанию), все выделения от 1 МБ или их плюс выделения за пределами адресного диапазона игры. «Широкий» подкрепляет каждое новое резервирование от 4 МБ (swap-min-mb в madeira.cfg меняет порог) сразу при создании, поэтому охвачены и мелкие commit-ы игр внутри него; размер уровня подкачки ограничивает используемое хранилище. Более широкий охват экономит больше памяти, но может замедлить игру."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存紧张时，交换层会把游戏数据搬到本机存储的一个文件里，最大到所选体积，代价是速度。覆盖范围决定搬哪些分配：仅大块（8 MB 及以上，默认）、所有 1 MB 及以上的分配，或再加上超出游戏地址范围的分配。「宽」会把每个 4 MB 及以上的新预留（madeira.cfg 的 swap-min-mb 可调整下限）在创建时就备份，因此游戏在其中做的小额提交也被覆盖，交换层体积限制它占用的存储。覆盖越宽越省内存，但可能让游戏变慢。"
+          }
         }
       }
     },
@@ -23515,6 +24631,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Символы"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "符号"
           }
         }
       }
@@ -23550,6 +24672,12 @@
             "state": "translated",
             "value": "Движок синхронизации"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步引擎"
+          }
         }
       }
     },
@@ -23583,6 +24711,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Движок синхронизации: Fastsync (по умолчанию) обрабатывает события и семафоры внутри процесса; его параметры для каждой игры — в сведениях об игре. Madsync — старый движок внутри процесса. Стандартная синхронизация Wine не использует ни один из них. Одновременно работает только один движок."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步引擎：Fastsync（默认）在进程内处理事件与信号量；它的单游戏选项在各个游戏的详情里。Madsync 是较早的进程内引擎。Wine 标准同步两者都不用。同一时间只运行一个引擎。"
           }
         }
       }
@@ -23662,7 +24796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "与 Epic 云端同步存档"
+            "value": "与 Epic 云同步存档"
           }
         }
       }
@@ -23697,6 +24831,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Синхронизирует при запуске Madeira и при открытии этой страницы, но не во время игры. Закончив, нажмите «Загрузить сохранения». Заменённые сохранения попадают в Файлы › Madeira › Steam Cloud Backups."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Madeira 启动时和打开此页时同步，游玩过程中不同步。停止游玩时请用「上传存档」。被替换的存档会放到「文件 › Madeira › Steam Cloud Backups」。"
           }
         }
       }
@@ -23736,7 +24876,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏会像 GOG Galaxy 那样在 Wine 中启动自己的程序。游戏运行期间由 Madeira 代替 GOG Galaxy，因此使用 Galaxy 的游戏可以获得成就和统计。Galaxy 云存档暂不可用。"
+            "value": "游戏在 Wine 里启动它自己的程序，如同 GOG Galaxy 那样。游戏运行时由 Madeira 代替 GOG Galaxy，所以使用 Galaxy 的游戏能获得成就与统计。Galaxy 云存档暂不可用。"
           }
         }
       }
@@ -23776,7 +24916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这款 GOG 游戏已被卸载。请从 GOG 分区重新安装。"
+            "value": "这个 GOG 游戏已不再安装。请从 GOG 分区重新安装。"
           }
         }
       }
@@ -23856,7 +24996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点按屏幕定位并点击。按住并移动可拖动。双指为右键或滚动。"
+            "value": "轻点屏幕定位并点击。按住移动即拖动。两指：右键或滚动。"
           }
         }
       }
@@ -23896,7 +25036,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这不是 StikDebug 远程配对文件。请用 iloader 创建一个后重试。"
+            "value": "这不是 StikDebug 的远程配对文件。请用 iloader 生成一个再试。"
           }
         }
       }
@@ -23936,7 +25076,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏开发者为私密测试提供的代码，类似 Steam 的“测试版”选项卡。由 Steam 校验。"
+            "value": "游戏开发者为内测给出的代码，如同 Steam 的「测试」标签页。由 Steam 校验。"
           }
         }
       }
@@ -23971,6 +25111,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Управление на экране не сохранено в раскладке."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "屏幕上的控件没有保存在任何布局里。"
           }
         }
       }
@@ -24010,7 +25156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "开发者界面是 Madeira 原有的诊断页面。重启 Madeira 后，更改才会生效。"
+            "value": "开发者界面是 Madeira 最初的诊断屏幕。改动在 Madeira 重启后生效。"
           }
         }
       }
@@ -24050,7 +25196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可执行文件必须位于 drive_c 或外置驱动器中。"
+            "value": "可执行文件必须在 drive_c 或外部存储中。"
           }
         }
       }
@@ -24130,7 +25276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏和 Steam 都已关闭，Steam 已保存。Madeira 每次打开只能运行一款游戏：再次打开即可游玩。"
+            "value": "游戏与 Steam 都已关闭，Steam 也已保存。Madeira 每次打开只运行一个游戏：请重新打开它再玩。"
           }
         }
       }
@@ -24170,7 +25316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏未能关闭。打开菜单可强制关闭 Madeira。"
+            "value": "游戏没有关闭。请打开菜单强制关闭 Madeira。"
           }
         }
       }
@@ -24210,7 +25356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏未响应“退出游戏”。这将立即关闭 Madeira：未保存的进度以及游戏在本次会话中更改的设置都会丢失。"
+            "value": "游戏没有响应「退出游戏」。这会立即关闭 Madeira：未保存的进度以及游戏在本次会话改过的设置都会丢失。"
           }
         }
       }
@@ -24330,7 +25476,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "游戏会在 Wine 中启动自己的程序。每次启动时，Madeira 都会像 Epic 启动器那样向 Epic 请求一次性登录码并传给游戏，因此游戏会以你的账号登录 Epic。Madeira 中没有 Epic 启动器。"
+            "value": "游戏在 Wine 里启动它自己的程序。每次启动时，Madeira 会向 Epic 申请一次性登录码并交给游戏，如同 Epic 的启动器，因此游戏能用你的账号登录 Epic。Madeira 里没有 Epic 启动器。"
           }
         }
       }
@@ -24370,7 +25516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "该密钥让 Madeira 查看你的 itch.io 游戏库并下载游戏。密钥仅保存在此设备上。"
+            "value": "该密钥让 Madeira 能看到你的 itch.io 库并下载游戏。它只保存在本机。"
           }
         }
       }
@@ -24410,7 +25556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "手柄会充当键盘和鼠标。可在“手柄按键映射”中更改按键。"
+            "value": "手柄当作键盘鼠标。可在「手柄按键绑定」里改键。"
           }
         }
       }
@@ -24446,6 +25592,12 @@
             "state": "translated",
             "value": "Файл сопряжения хранится в связке ключей этого устройства (%1$@)."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配对文件保存在本%1$@的钥匙串中。"
+          }
         }
       }
     },
@@ -24479,6 +25631,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Сохранения в Steam Cloud перезаписываются для всех устройств. Их текущие копии сначала сохраняются в Файлы › Madeira › Steam Cloud Backups."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam 云里的存档会在所有设备上被覆盖。当前副本会先保存到「文件 › Madeira › Steam Cloud Backups」。"
           }
         }
       }
@@ -24518,7 +25676,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此设备与 Epic 云端的存档不同"
+            "value": "本机存档与 Epic 云存档不一致"
           }
         }
       }
@@ -24558,7 +25716,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "会话无法启动。请检查诊断日志和 JIT 状态。"
+            "value": "会话无法启动。请检查诊断日志与 JIT 状态。"
           }
         }
       }
@@ -24593,6 +25751,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Вход хранится в Связке ключей этого устройства, пока вы не выйдете."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登录状态保存在本机钥匙串中，直到你退出登录。"
           }
         }
       }
@@ -24632,7 +25796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "工作文件夹是一个 C:\\ 路径。服务用于需要它们的启动器。"
+            "value": "工作目录是 C:\\ 路径。服务选项用于需要它的启动器。"
           }
         }
       }
@@ -24672,7 +25836,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这些选项会把 d3d9 / d3d11 / d3d12 / vulkan 写入 madeira.cfg；更改会在下次会话启动时生效。单游戏的覆盖项请写在游戏的自定义配置行中（高级 › 此游戏的配置）。"
+            "value": "这些会把 d3d9 / d3d11 / d3d12 / vulkan 写入 madeira.cfg；改动在下次会话启动时生效。单游戏覆盖写在该游戏的自定义配置行（高级 › 此游戏的配置）。"
           }
         }
       }
@@ -24712,7 +25876,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此版本没有 Zink OpenGL 后端（gl/ 文件夹），因此 wined3d 无法启动。"
+            "value": "此构建没有 Zink 的 OpenGL 后端（gl/ 目录），因此 wined3d 无法启动。"
           }
         }
       }
@@ -24752,7 +25916,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此设备"
+            "value": "本机"
           }
         }
       }
@@ -24792,7 +25956,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此设备的存档更新"
+            "value": "本机有更新的存档"
           }
         }
       }
@@ -24832,7 +25996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此设备没有 Metal 4 GPU，因此 KosmicKrisp 无法启动。"
+            "value": "本机没有 Metal 4 GPU，因此 KosmicKrisp 无法运行。"
           }
         }
       }
@@ -24872,7 +26036,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此文件没有设置内容（key = value 行）。"
+            "value": "这个文件里没有设置（key = value 行）。"
           }
         }
       }
@@ -24912,7 +26076,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这款游戏自带安装程序。“运行安装程序”会在 Wine 桌面中启动它，它会自行安装到游戏文件夹中（部分安装程序会问一两个问题）。关闭后请退出会话：Madeira 会找到已安装的游戏，此后“开始游戏”即可启动它。"
+            "value": "这个游戏自带安装程序。「运行安装程序」会在 Wine 桌面里启动它，安装程序会自己装进游戏的文件夹（有些安装程序会问一两个问题）。它关闭后请退出会话：Madeira 会找到它安装的游戏，此后「开始」就直接启动游戏。"
           }
         }
       }
@@ -24952,7 +26116,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这款游戏并非免费，且此 itch.io 账号尚未购买。请在商店页面购买后刷新游戏库。"
+            "value": "这个游戏不是免费的，而这个 itch.io 账号没有买过它。请在它的商店页购买，然后刷新游戏库。"
           }
         }
       }
@@ -24992,7 +26156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本游戏的配置"
+            "value": "这个游戏的配置"
           }
         }
       }
@@ -25032,7 +26196,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这款游戏的下载尚未完成。请继续下载，等完成后再游玩。"
+            "value": "这个游戏的下载还没完成。请继续下载，等它完成后再开始游玩。"
           }
         }
       }
@@ -25072,7 +26236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这款游戏的更新尚未完成。请继续下载，等完成后再游玩。"
+            "value": "这个游戏的更新还没完成。请继续下载，等它完成后再开始游玩。"
           }
         }
       }
@@ -25112,7 +26276,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此 iPhone"
+            "value": "这台 iPhone"
           }
         }
       }
@@ -25152,7 +26316,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "无法打开此图片。"
+            "value": "无法打开这张图片。"
           }
         }
       }
@@ -25187,6 +26351,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Эта установка может ждать в фоне всего около 30 секунд, поэтому сразу перейдите в Настройки."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个安装只能在后台等大约 30 秒，所以请立刻前往「设置」。"
           }
         }
       }
@@ -25266,7 +26436,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这款 itch.io 游戏已被卸载。请从 itch.io 分区重新安装。"
+            "value": "这个 itch.io 游戏已不再安装。请从 itch.io 区块重新安装。"
           }
         }
       }
@@ -25301,6 +26471,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Thumper (отдельная версия)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thumper（独立版）"
           }
         }
       }
@@ -25340,7 +26516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "倾斜（翻滚）"
+            "value": "倾斜（横滚）"
           }
         }
       }
@@ -25536,6 +26712,12 @@
             "state": "translated",
             "value": "Чувствительность касания"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "触控灵敏度"
+          }
         }
       }
     },
@@ -25614,7 +26796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "连发"
+            "value": "加速"
           }
         }
       }
@@ -25730,6 +26912,12 @@
             "state": "translated",
             "value": "Без ограничения"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不限制"
+          }
         }
       }
     },
@@ -25808,7 +26996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "卸载 %1$@？其已下载的文件将从此设备删除。保存在其他位置的存档会保留。"
+            "value": "卸载 %1$@？它下载的文件会从本机删除。存在别处的存档会保留。"
           }
         }
       }
@@ -25843,6 +27031,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удалить %1$@? Скачанные файлы будут удалены оттуда, где игра установлена. Сохранения в других местах останутся."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "卸载 %1$@？它下载的文件会从安装位置删除。存在别处的存档会保留。"
           }
         }
       }
@@ -25962,7 +27156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "取消订阅并保留文件"
+            "value": "取消订阅，保留文件"
           }
         }
       }
@@ -26162,7 +27356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上传此设备的存档"
+            "value": "上传本机存档"
           }
         }
       }
@@ -26202,7 +27396,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将本设备的存档上传为 Epic 的最新快照？其他设备会收到这些存档。较旧的快照会保留在云端。"
+            "value": "把本机存档作为 Epic 的最新快照上传？其他设备会拿到它们。较旧的快照仍留在云端。"
           }
         }
       }
@@ -26237,6 +27431,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Выгрузка %1$lld из %2$lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在上传 %1$lld / %2$lld"
           }
         }
       }
@@ -26356,7 +27556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "要在此设备上使用 Epic 的存档吗？被替换的文件会先复制到“文件 › Madeira › Epic Cloud Backups”。"
+            "value": "在本机使用 Epic 的存档？被替换的文件会先复制到「文件 › Madeira › Epic Cloud Backups」。"
           }
         }
       }
@@ -26436,7 +27636,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 Steam 美术图"
+            "value": "使用 Steam 封面图"
           }
         }
       }
@@ -26512,6 +27712,12 @@
             "state": "translated",
             "value": "Использовать для JIT"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用它来做 JIT"
+          }
         }
       }
     },
@@ -26545,6 +27751,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Использовать сохранения Steam Cloud"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Steam 云存档"
           }
         }
       }
@@ -26584,7 +27796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用鼠标？请开启“辅助触控”（设置 > 辅助功能 > 触控），然后重新打开 Madeira。"
+            "value": "用鼠标？请打开「辅助触控」（设置 > 辅助功能 > 触控），然后重新打开 Madeira。"
           }
         }
       }
@@ -26620,6 +27832,12 @@
             "state": "translated",
             "value": "Valley of the Ancient (UE5)"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valley of the Ancient（UE5）"
+          }
         }
       }
     },
@@ -26654,6 +27872,12 @@
             "state": "translated",
             "value": "Компоненты клиента Valve установлены"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valve 的客户端组件已安装"
+          }
         }
       }
     },
@@ -26687,6 +27911,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Компоненты клиента Valve установлены."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valve 的客户端组件已安装。"
           }
         }
       }
@@ -26802,6 +28032,12 @@
             "state": "translated",
             "value": "Скорость по вертикали"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "垂直速度"
+          }
         }
       }
     },
@@ -26835,6 +28071,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Видеопамять"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显存"
           }
         }
       }
@@ -26870,6 +28112,12 @@
             "state": "translated",
             "value": "Видеопамять — это сколько графической памяти, по словам Madeira, есть у игр. «Автоматически» рассчитывает её по свободной памяти при запуске. Слишком много — и Madeira могут закрыть за перерасход памяти; слишком мало — и игры постоянно перезагружают текстуры."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显存是告诉游戏它有多少图形内存。自动会根据启动时的空闲内存来定。设得太高可能因占用内存过多而导致 Madeira 被系统关掉；设得太低会让游戏反复重载纹理。"
+          }
         }
       }
     },
@@ -26903,6 +28151,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Открыть в магазине Steam"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Steam 商店查看"
           }
         }
       }
@@ -27018,6 +28272,12 @@
             "state": "translated",
             "value": "Подождать и синхронизировать"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待并同步"
+          }
         }
       }
     },
@@ -27096,7 +28356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在等待 Madeira 的 JIT 辅助程序连接…"
+            "value": "正在等待 Madeira 的 JIT 助手连接…"
           }
         }
       }
@@ -27172,6 +28432,12 @@
             "state": "translated",
             "value": "Ожидание устройства %1$@…"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在等待你的 %1$@…"
+          }
         }
       }
     },
@@ -27210,7 +28476,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "等待下载…"
+            "value": "正在等待下载…"
           }
         }
       }
@@ -27250,7 +28516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "程序中的网页"
+            "value": "程序里的网页"
           }
         }
       }
@@ -27286,6 +28552,12 @@
             "state": "translated",
             "value": "Добро пожаловать в Madeira"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "欢迎使用 Madeira"
+          }
         }
       }
     },
@@ -27319,6 +28591,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Если LocalDevVPN не достигает устройства, «Включить JIT» запускает вашу быструю команду «%1$@»: она выключает сотовые данные, когда нет Wi-Fi, подключает LocalDevVPN и возвращает всё обратно после запуска игры. Каждый запуск ненадолго открывает «Команды»."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LocalDevVPN 连不上这台设备时，「启用 JIT」会运行你的 %1$@ 快捷指令：没有 Wi-Fi 时关掉蜂窝数据并连接 LocalDevVPN，游戏启动后把两者恢复。每次运行都会短暂打开「快捷指令」。"
           }
         }
       }
@@ -27358,7 +28636,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "“开始游戏”所启动的程序。若启动器关闭后没有启动游戏，请选择游戏本体。"
+            "value": "「开始」启动哪个程序。如果游戏的启动器关掉后没能启动游戏，就选游戏本体。"
           }
         }
       }
@@ -27518,7 +28796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "整块预留 4 MB 以上（宽泛）"
+            "value": "整块预留 4 MB 以上（宽）"
           }
         }
       }
@@ -27634,6 +28912,12 @@
             "state": "translated",
             "value": "Wine Mono установлен."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wine Mono 已安装。"
+          }
         }
       }
     },
@@ -27667,6 +28951,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Wine Virtual Desktop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wine 虚拟桌面"
           }
         }
       }
@@ -27786,7 +29076,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "OpenGL 上的 Wine wined3d（Zink）"
+            "value": "Wine wined3d on OpenGL（Zink）"
           }
         }
       }
@@ -27866,7 +29156,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在上方选择 DXVK 时，Direct3D 12 游戏会使用 Vulkan 上的 vkd3d-proton：DXVK 的 DXGI 只会列出 Vulkan 设备。"
+            "value": "上面选了 DXVK 时，Direct3D 12 游戏走 Vulkan 上的 vkd3d-proton：DXVK 的 DXGI 只显示 Vulkan 设备。"
           }
         }
       }
@@ -27901,6 +29191,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "С быстрой командой «%1$@» «Включить JIT» сам подключает LocalDevVPN, выключает сотовые данные, пока нет Wi-Fi, и после запуска игры возвращает всё обратно, включая VPN, который вы использовали."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 %1$@ 快捷指令时，「启用 JIT」会替你连接 LocalDevVPN、在没有 Wi-Fi 时关掉蜂窝数据，并在游戏启动后把它们连同你原先用的 VPN 一起恢复。"
           }
         }
       }
@@ -27940,7 +29236,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "工作文件夹（默认为程序所在文件夹）"
+            "value": "工作文件夹（默认：程序所在文件夹）"
           }
         }
       }
@@ -27975,6 +29271,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Мастерская"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "创意工坊"
           }
         }
       }
@@ -28050,6 +29352,12 @@
             "state": "translated",
             "value": "XInput и DirectInput применяется при следующем запуске."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "XInput 与 DirectInput 在下次启动时生效。"
+          }
         }
       }
     },
@@ -28083,6 +29391,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Сменить способ JIT или импортировать файл сопряжения можно в Настройки › JIT."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你可以在「设置 › JIT」里更改 JIT 方式或导入配对文件。"
           }
         }
       }
@@ -28118,6 +29432,12 @@
             "state": "translated",
             "value": "Эту настройку можно пройти снова в Настройки › JIT или Настройки › Steam."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你可以从「设置 › JIT」或「设置 › Steam」重新运行这个设置。"
+          }
         }
       }
     },
@@ -28151,6 +29471,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ваш пароль отправляется только в Steam и никогда не сохраняется."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的密码只会发给 Steam，绝不会被保存。"
           }
         }
       }
@@ -28190,7 +29516,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "手势区域始终位于按键下方。"
+            "value": "触控区域始终位于按钮下层。"
           }
         }
       }
@@ -28230,7 +29556,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "缩放触感"
+            "value": "缩放触感反馈"
           }
         }
       }
@@ -28265,6 +29591,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "arm64 DX11 cube"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "arm64 DX11 立方体"
           }
         }
       }
@@ -28339,6 +29671,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "по умолчанию %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认 %1$@"
           }
         }
       }
@@ -28458,7 +29796,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "itch.io 仅为这款游戏提供 Windows 试玩版。"
+            "value": "itch.io 只为这个游戏提供 Windows 版试玩。"
           }
         }
       }
@@ -28493,6 +29831,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "ключ или env.NAME"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "键名，或 env.NAME"
           }
         }
       }
@@ -28567,6 +29911,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "задано"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已设置"
           }
         }
       }
@@ -28646,7 +29996,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此版本不包含 vkd3d-proton。"
+            "value": "这个构建里没有 vkd3d-proton。"
           }
         }
       }
@@ -28682,6 +30032,12 @@
             "state": "translated",
             "value": "x64 DX11 cube"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "x64 DX11 立方体"
+          }
         }
       }
     },
@@ -28716,6 +30072,12 @@
             "state": "translated",
             "value": "x64 call cost"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "x64 调用开销"
+          }
         }
       }
     },
@@ -28749,6 +30111,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "x64 clock test"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "x64 时钟测试"
           }
         }
       }

@@ -117,6 +117,7 @@
 		A1000021 /* libwineserver.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000020 /* libwineserver.a */; };
 		A1000022 /* nls in Resources */ = {isa = PBXBuildFile; fileRef = A2000021 /* nls */; };
 		A1000023 /* fonts in Resources */ = {isa = PBXBuildFile; fileRef = A2000023 /* fonts */; };
+		A10009A1 /* fonts-ja in Resources */ = {isa = PBXBuildFile; fileRef = A20009A1 /* fonts-ja */; };
 		A1000030 /* WineProcessBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* WineProcessBridge.m */; };
 		A1000031 /* libntdll_unix.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000032 /* libntdll_unix.a */; };
 		A1000032 /* aarch64-windows in Resources */ = {isa = PBXBuildFile; fileRef = A2000033 /* aarch64-windows */; };
@@ -410,6 +411,7 @@
 		A2000020 /* libwineserver.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libwineserver.a; sourceTree = "<group>"; };
 		A2000021 /* nls */ = {isa = PBXFileReference; lastKnownFileType = folder; path = nls; sourceTree = "<group>"; };
 		A2000023 /* fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = fonts; sourceTree = "<group>"; };
+		A20009A1 /* fonts-ja */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "fonts-ja"; sourceTree = "<group>"; };
 		A2000030 /* WineProcessBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WineProcessBridge.m; sourceTree = "<group>"; };
 		A2000031 /* WineProcessBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WineProcessBridge.h; sourceTree = "<group>"; };
 		A2000032 /* libntdll_unix.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libntdll_unix.a; sourceTree = "<group>"; };
@@ -788,6 +790,7 @@
 				B2000051 /* Madeira JIT.shortcut */,
 				A2000021 /* nls */,
 				A2000023 /* fonts */,
+				A20009A1 /* fonts-ja */,
 				A2000033 /* aarch64-windows */,
 				A20000F1 /* legal */,
 				A2000080 /* arm64ec-windows */,
@@ -1009,6 +1012,7 @@
 			files = (
 				A1000022 /* nls in Resources */,
 				A1000023 /* fonts in Resources */,
+				A10009A1 /* fonts-ja in Resources */,
 				A1000032 /* aarch64-windows in Resources */,
 				A10000F1 /* legal in Resources */,
 				A1000080 /* arm64ec-windows in Resources */,
