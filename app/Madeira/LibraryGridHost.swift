@@ -1071,7 +1071,7 @@ final class LibraryGridHostController: UIViewController, UICollectionViewDelegat
         props.open(card, page)
         // An open that never leaves this screen (no push) must not leave the idle work suspended.
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
+            try? await sleep15(for: 1.2)
             if let self, self.isViewLoaded, self.view.window != nil, !self.zoomStart.pageActive { self.resumeZoomIdleWork() }
         }
     }

@@ -131,7 +131,7 @@ extension LibraryGridHostController {
         guard zoomStart.scrollIdleTask == nil else { return }
         zoomStart.scrollIdleTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(40))
+                try? await sleep15(for: 0.040)
                 guard let self, !Task.isCancelled else { return }
                 if self.zoom != nil {
                     self.zoomStart.scrollIdleTask = nil
