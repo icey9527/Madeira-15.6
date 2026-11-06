@@ -1634,7 +1634,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .background(Color.black)
         .statusBarHidden(true)
-        .persistentSystemOverlays(.hidden)
+        .persistentSystemOverlays15(.hidden)
     }
 
     /// Portrait: classic tooling layout — header, badges, 240pt game strip,
@@ -4584,7 +4584,7 @@ struct TouchControlsOverlay: View {
                 // happen) draws nothing over the library's own screens.
                 if landscape && !(library.enabled && !session && !m.editing) {
                     if m.editing {
-                        Color.clear.contentShape(editorCanvas(geo.size))
+                        Color.clear.contentShape(editorCanvas(geo.size), eoFill: true)
                             .onTapGesture { m.selected = nil; zones.selected = nil }
                     }
                     if (m.visible || m.editing) && !library.blocksGameplayTouch {
@@ -4616,7 +4616,7 @@ struct TouchControlsOverlay: View {
         }
         .ignoresSafeArea()
         .statusBarHidden(library.current != nil)
-        .persistentSystemOverlays(library.current != nil ? .hidden : .automatic)
+        .persistentSystemOverlays15(library.current != nil ? .hidden : .automatic)
     }
 
     /// The dismissal gesture must never take a control's drag on iOS 26.
@@ -4627,10 +4627,10 @@ struct TouchControlsOverlay: View {
             let frame = CGRect(x: CGFloat(control.nx) * screen.width - size.width / 2,
                                y: CGFloat(control.ny) * screen.height - size.height / 2,
                                width: size.width, height: size.height)
-            area = area.subtracting(Path(frame))
+            area = area.subtracting15(Path(frame))
         }
         if GestureZonesModel.enabled {
-            for zone in zones.zones { area = area.subtracting(Path(zone.rect(in: screen))) }
+            for zone in zones.zones { area = area.subtracting15(Path(zone.rect(in: screen))) }
         }
         return area
     }

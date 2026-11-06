@@ -6856,6 +6856,31 @@ extension View {
         .onPreferenceChange(GlobalFramePreferenceKey.self, perform: action)
     }
 
+    /// iOS 17 才有 `Path.subtracting(_:eoFill:)`；iOS 15/16 用 Core Graphics
+    /// 的 even-odd 路径差得到同样的区域（触控编辑器用来判断点击是否落在
+    /// 控件之外）。
+    func subtracting15(_ other: Path) -> Path {
+        if #available(iOS 17.0, *) {
+            return subtracting(other)
+        }
+        // The caller fills this with the even-odd rule (contentShape(_, eoFill:
+        // true)), under which the overlapping region counts as outside: the
+        // union drawn this way is exactly self minus other.
+        var result = self
+        result.addPath(other)
+        return result
+    }
+
+    /// iOS 15.6 兼容：persistentSystemOverlays（iOS 16+）——隐藏状态栏区域外
+    /// 的系统图标（Home 指示条等）。iOS 15 没有对应 API，保持系统默认。
+    @ViewBuilder func persistentSystemOverlays15(_ visibility: Visibility) -> some View {
+        if #available(iOS 16.0, *) {
+            self.persistentSystemOverlays(visibility)
+        } else {
+            self
+        }
+    }
+
     @ViewBuilder func opacityTransition15() -> some View {
         if #available(iOS 16.0, *) {
             self.contentTransition(.opacity)

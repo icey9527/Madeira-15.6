@@ -216,7 +216,7 @@ def function(source, start):
 
 panel = content[content.index('struct MappingPanel: View {'):]
 setter = panel.split('set: { value in', 1)[1].split('}), in:', 1)[0]
-backdrop = content.split('Color.clear.contentShape(editorCanvas(geo.size))', 1)[1]
+backdrop = content.split('Color.clear.contentShape(editorCanvas(geo.size), eoFill: true)', 1)[1]
 dismiss = function(backdrop, '.onTapGesture {').split('{', 1)[1][:-1]
 sizes = '\n'.join(function(content, signature) for signature in ('static func diameter(', 'static func size('))
 canvas = function(content, 'private func editorCanvas(')
