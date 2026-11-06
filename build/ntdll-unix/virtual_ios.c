@@ -5971,13 +5971,29 @@ static void ios_va_describe_range( void *addr, ULONG_PTR len, char *buf, size_t 
     mach_vm_size_t size = 0;
     vm_region_basic_info_data_64_t info;
     mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+    vm_region_extended_info_data_t einfo;
+    mach_msg_type_number_t ecnt = VM_REGION_EXTENDED_INFO_COUNT;
     mach_port_t obj = MACH_PORT_NULL;
+    int tag = -1;
 
     if (mach_vm_region( mach_task_self(), &a, &size, VM_REGION_BASIC_INFO_64,
                         (vm_region_info_t)&info, &cnt, &obj ) != KERN_SUCCESS)
     {
         snprintf( buf, buflen, "no-region-above (free to end of VA)" );
         return;
+    }
+    /* WHO owns the region we landed in: Darwin's user_tag names it
+     * (51 = VM_MEMORY_LAYERKIT, i.e. CoreAnimation). On a device where every
+     * 4 GB candidate is taken this is the question worth answering, and it
+     * costs one extra query on an address we already report. */
+    {
+        mach_vm_address_t t = a;
+        mach_vm_size_t tsize = 0;
+        mach_port_t tobj = MACH_PORT_NULL;
+        if (mach_vm_region( mach_task_self(), &t, &tsize, VM_REGION_EXTENDED_INFO,
+                            (vm_region_info_t)&einfo, &ecnt, &tobj ) == KERN_SUCCESS )
+            tag = einfo.user_tag;
+        if (tobj != MACH_PORT_NULL) mach_port_deallocate( mach_task_self(), tobj );
     }
     if (a >= end)       /* nothing mapped anywhere in the requested range */
     {
@@ -5994,16 +6010,16 @@ static void ios_va_describe_range( void *addr, ULONG_PTR len, char *buf, size_t 
     if (a > start)      /* head free, tail taken: name the occupied sub-range */
     {
         snprintf( buf, buflen, "PARTIALLY OCCUPIED: free 0x%llx..0x%llx, then OCCUPIED 0x%llx+0x%llx "
-                               "prot=%x/%x shared=%d (0x%llx of the range is not free)",
+                               "prot=%x/%x shared=%d tag=%d (0x%llx of the range is not free)",
                   (unsigned long long)start, (unsigned long long)a,
                   (unsigned long long)a, (unsigned long long)size,
-                  info.protection, info.max_protection, info.shared,
+                  info.protection, info.max_protection, info.shared, tag,
                   (unsigned long long)(end - a) );
         return;
     }
-    snprintf( buf, buflen, "OCCUPIED 0x%llx+0x%llx prot=%x/%x shared=%d%s",
+    snprintf( buf, buflen, "OCCUPIED 0x%llx+0x%llx prot=%x/%x shared=%d tag=%d%s",
               (unsigned long long)a, (unsigned long long)size,
-              info.protection, info.max_protection, info.shared,
+              info.protection, info.max_protection, info.shared, tag,
               (len && a + size < end) ? " (and the range continues past this region)" : "" );
 }
 
@@ -8556,6 +8572,41 @@ static ULONG_PTR ios_wow_window_pick( unsigned *guard_owned )
 
     ERR( "[wow-window] no free 4GB-aligned slot in [%p,%p): a 32-bit process cannot start; "
          "the REJECTED lines above say what is in each candidate\n", (void *)floor, (void *)ceil );
+    /* One shot, on the failure path only: what actually holds the band, by
+     * Darwin's user_tag. The REJECTED lines name the first region at each
+     * candidate; this says whether the whole band belongs to one owner
+     * (51 = VM_MEMORY_LAYERKIT, CoreAnimation) or to several. Answers the
+     * question without a second device run. */
+    {
+        mach_vm_address_t a = (mach_vm_address_t)floor;
+        unsigned shown = 0;
+        while (a < (mach_vm_address_t)ceil && shown < 24)
+        {
+            mach_vm_size_t size = 0;
+            vm_region_extended_info_data_t einfo;
+            mach_msg_type_number_t cnt = VM_REGION_EXTENDED_INFO_COUNT;
+            mach_port_t obj = MACH_PORT_NULL;
+            mach_vm_address_t q = a;
+
+            if (mach_vm_region( mach_task_self(), &q, &size, VM_REGION_EXTENDED_INFO,
+                                (vm_region_info_t)&einfo, &cnt, &obj ) != KERN_SUCCESS )
+            {
+                ERR( "[wow-band] 0x%llx..0x%llx FREE (to the end of the map)\n",
+                     (unsigned long long)a, (unsigned long long)ceil );
+                break;
+            }
+            if (obj != MACH_PORT_NULL) mach_port_deallocate( mach_task_self(), obj );
+            if (q >= (mach_vm_address_t)ceil) break;
+            if (q > a)
+                ERR( "[wow-band] 0x%llx..0x%llx FREE (0x%llx)\n", (unsigned long long)a,
+                     (unsigned long long)q, (unsigned long long)(q - a) );
+            ERR( "[wow-band] 0x%llx +0x%llx tag=%d prot=%x\n", (unsigned long long)q,
+                 (unsigned long long)size, einfo.user_tag, einfo.protection );
+            a = q + size;
+            shown++;
+        }
+        ERR( "[wow-band] end of the census (%u region(s); tag 51 = LayerKit/CoreAnimation)\n", shown );
+    }
     return 0;
 }
 
