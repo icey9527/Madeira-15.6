@@ -17,7 +17,9 @@ on:
     # dev is the test channel: every push there builds and publishes a
     # pre-release, so day-to-day testing never needs a merge. port/ios15.6
     # publishes the stable release on merge.
-    branches: [port/ios15.6, dev]
+    # L0-*: temporary layer-isolation branches (a module taken from dev on top
+    # of a known-good release) so one layer can be built and tested on its own.
+    branches: [port/ios15.6, dev, 'L0-*']
   # A weekly no-change build keeps the action caches alive: GitHub drops cache
   # entries unused for 7 days, and the first build after that rebuilds the iOS
   # LLVM toolchain from scratch (15+ minutes) instead of restoring it.
@@ -105,6 +107,7 @@ jobs:
           case "$GITHUB_REF" in
             refs/heads/port/ios15.6) echo "分支正确（正式通道）: $GITHUB_REF" ;;
             refs/heads/dev) echo "分支正确（测试通道）: $GITHUB_REF" ;;
+            refs/heads/L0-*) echo "分支正确（单层验证分支）: $GITHUB_REF" ;;
             *) echo "::error::CI 只允许在 port/ios15.6 分支运行（当前 $GITHUB_REF），不要拿原版分支跑构建"; exit 1 ;;
           esac
 

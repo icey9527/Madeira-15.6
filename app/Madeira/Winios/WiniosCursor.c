@@ -127,3 +127,14 @@ unsigned int winios_direct_cursor_copy_image(void *dst, size_t cap, struct winio
     pthread_mutex_unlock(&cursor_lock);
     return serial;
 }
+
+/* L0 test branch only (win32u + Winios on top of v0.1.3): the newer
+ * Winios.m calls this to decide whether the desktop mouse-routing metadata is
+ * set. That routing is an upstream feature whose switch lives in
+ * HardwareInput.swift, which this branch does not take. Report it enabled, so
+ * the cursor path behaves exactly as v0.1.3 did. The full port carries the
+ * real definition from HardwareInput.swift. */
+int winios_mouse_routing_enabled(void)
+{
+    return 1;
+}
