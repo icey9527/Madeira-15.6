@@ -25724,9 +25724,17 @@ static void *get_host_addr_space_limit(void)
         {
             void *kern = (void *)(uintptr_t)vmi.max_address;
 
+            /* The walk can only conclude a power of two, so on a 63 GB map (this
+             * iPad: 0xfc0000000) it over-reads to 64 GB. Keeping that answer, as
+             * this used to, puts host_addr_space_limit past the real ceiling:
+             * every window that reaches for the top -- [0x7400000000, 64GB) among
+             * them -- inverts, the steer fails, CoreAnimation's exclusion is
+             * dropped and a Steam session lands guest views in it and dies.
+             * Prefer the kernel's own answer whenever it is plausible (at least
+             * 32 GB); a bogus small value is still ignored. */
             dprintf( 2, "[va-limit] ml749 walk=%p kernel_max=%p -> %s\n",
-                     walked, kern, kern > walked ? "USING KERNEL (walk underestimated)" : "keeping walk" );
-            if (kern > walked && (uintptr_t)kern >= 0x100000000ULL) return kern;
+                     walked, kern, (uintptr_t)kern >= 0x800000000ULL ? "USING KERNEL" : "keeping walk" );
+            if ((uintptr_t)kern >= 0x800000000ULL) return kern;
         }
         else dprintf( 2, "[va-limit] ml749 walk=%p kernel_max=UNAVAILABLE -> keeping walk\n", walked );
 

@@ -130,10 +130,15 @@ jobs:
             echo "configuration=Debug" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=stable" >> "$GITHUB_OUTPUT"
+            # The release tag follows the app's MARKETING_VERSION (kept in step
+            # with upstream), so 0.2.0 publishes as v0.2.0 and the next upstream
+            # version starts its own release. dev keeps the single "nightly" tag.
+            version="$(sed -n 's/.*MARKETING_VERSION = \([0-9.]*\);.*/\1/p' app/Madeira.xcodeproj/project.pbxproj | head -1)"
+            [ -n "$version" ] || { echo "::error::MARKETING_VERSION not found in project.pbxproj"; exit 1; }
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "title=Madeira iOS 15.6 移植 正式版" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-stable.ipa" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15.6 移植 v$version" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-v$version.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           fi
