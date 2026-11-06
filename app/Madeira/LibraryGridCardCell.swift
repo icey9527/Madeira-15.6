@@ -34,8 +34,14 @@ final class LibraryGridLabelView: UIView {
         isOpaque = false
         contentMode = .redraw
         isUserInteractionEnabled = false
-        registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
-            self.setNeedsDisplay()
+    }
+
+    // iOS 15.6: registerForTraitChanges is iOS 17; the same two changes arrive here.
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        if previous?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory
+            || previous?.userInterfaceStyle != traitCollection.userInterfaceStyle {
+            setNeedsDisplay()
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -63,6 +69,31 @@ class LibraryGridHeldCell: UICollectionViewCell {
         super.prepareForReuse()
         heldHiddenByZoom = false
         isHidden = false
+    }
+
+    // iOS 15.6: UIHostingConfiguration (iOS 16) is not available, so a fixed
+    // cell carries its SwiftUI content through a child hosting controller.
+    private var hosting: UIHostingController<AnyView>?
+
+    func hostFixedContent<Content: View>(_ content: () -> Content, parent: UIViewController) {
+        let root = AnyView(content())
+        if let hosting {
+            hosting.rootView = root
+            return
+        }
+        let controller = UIHostingController(rootView: root)
+        controller.view.backgroundColor = .clear
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        parent.addChild(controller)
+        contentView.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: contentView.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+        ])
+        controller.didMove(toParent: parent)
+        hosting = controller
     }
 }
 

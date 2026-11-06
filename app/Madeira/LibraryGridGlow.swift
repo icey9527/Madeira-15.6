@@ -246,10 +246,14 @@ final class LibraryGlowView: UIView {
         for view in pair { addSubview(view) }
         // A cover that arrives (or a better size): the card's light is made from it.
         LibraryCoverCache.shared.updates.receive(on: DispatchQueue.main).sink { [weak self] key in self?.coverLanded(key) }.store(in: &cancellables)
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in self.markDirty() }
         for name in [UIApplication.didReceiveMemoryWarningNotification, LibraryGridArm.releaseMemory] {
             NotificationCenter.default.publisher(for: name).sink { [weak self] _ in self?.releaseTextures() }.store(in: &cancellables)
         }
+    }
+    // iOS 15.6: registerForTraitChanges is iOS 17; light/dark arrives here.
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        if previous?.userInterfaceStyle != traitCollection.userInterfaceStyle { markDirty() }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 

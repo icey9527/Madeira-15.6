@@ -135,9 +135,12 @@ final class LibraryGridHostController: UIViewController, UICollectionViewDelegat
         }
         let fixedRegistration = UICollectionView.CellRegistration<LibraryGridHeldCell, String> { [weak self] cell, _, id in
             guard let self, let props = self.props, let fixed = self.fixedByID[id] else { return }
-            cell.contentConfiguration = UIHostingConfiguration {
-                props.fixed(fixed, self.contentWidth).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }.margins(.all, 0)
+            let body = { props.fixed(fixed, self.contentWidth).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading) }
+            if #available(iOS 16.0, *) {
+                cell.contentConfiguration = UIHostingConfiguration(content: body).margins(.all, 0)
+            } else {
+                cell.hostFixedContent(body, parent: self)
+            }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collection) { collection, path, item in
             switch item {
@@ -162,12 +165,35 @@ final class LibraryGridHostController: UIViewController, UICollectionViewDelegat
             }
         }
         // Dynamic Type: the trait (the system setting, and any override above the page).
-        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _: UITraitCollection) in
-            self.contentSizeChanged()
+        if #available(iOS 17.0, *) {
+            registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _: UITraitCollection) in
+                self.contentSizeChanged()
+            }
+            // Light / dark: the stage's covers carry the style they were built for.
+            registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
+                self.modelDidChange()
+            }
         }
-        // Light / dark: the stage's covers carry the style they were built for.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
-            self.modelDidChange()
+        // iOS 15/16: no registerForTraitChanges; traitCollectionDidChange below
+        // reports the same two changes (Dynamic Type and light/dark).
+    }
+
+    private var lastContentSizeCategory: UIContentSizeCategory?
+    private var lastUserInterfaceStyle: UIUserInterfaceStyle?
+
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        let size = traitCollection.preferredContentSizeCategory
+        if lastContentSizeCategory == nil { lastContentSizeCategory = size }
+        else if size != lastContentSizeCategory {
+            lastContentSizeCategory = size
+            contentSizeChanged()
+        }
+        let style = traitCollection.userInterfaceStyle
+        if lastUserInterfaceStyle == nil { lastUserInterfaceStyle = style }
+        else if style != lastUserInterfaceStyle {
+            lastUserInterfaceStyle = style
+            modelDidChange()
         }
     }
 
