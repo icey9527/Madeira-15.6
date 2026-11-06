@@ -33,8 +33,8 @@ void winios_drv_register(void);
 
 /* Touch → mouse bridge. Called by Madeira Swift's UIKit gesture
  * handlers; events are queued to a thread-safe ring buffer and drained
- * inside winios_pProcessEvents. (x, y) are in logical 1024×768 pixels
- * — Swift side handles iOS-pixel → logical-pixel scaling. */
+ * inside winios_pProcessEvents. (x, y) are in the live guest screen's
+ * pixels. Swift maps view points through the current display layout. */
 void winios_post_touch_down(int x, int y);
 void winios_post_touch_move(int x, int y);
 void winios_post_touch_up(int x, int y);
@@ -42,6 +42,12 @@ void winios_post_touch_up(int x, int y);
 /* Key press bridge (VK codes: RETURN=0x0D SPACE=0x20 ESCAPE=0x1B).
  * down=1 press, down=0 release. */
 void winios_post_key(int vk, int down);
+
+/* Text-only paste: one Unicode scalar, optionally represented by a US-layout
+ * virtual key. Returns 0 when the queue is busy; retry without advancing.
+ * Cancel invalidates text already queued, without discarding physical input. */
+int winios_try_post_text(unsigned int scalar, int vk, int shift, int interval_ms);
+void winios_cancel_text(void);
 
 /* S2 desktop compositor placement. Called by the Swift presentation
  * placeholder (MetalBackedView) with its bounds in UIWindow coords —
@@ -76,7 +82,12 @@ int winios_compositor_set_hidden(int hidden);
  * session start clears the overlay. */
 void winios_note_game_metal_hwnd(void *hwnd);
 void winios_session_reset(void);
+/* Ends a Dock session: explorer's desktop is asked to close (its own thread posts WM_CLOSE). */
+void winios_close_desktop(void);
 int winios_desktop_point_from_window(double wx, double wy, int *px, int *py);
+/* Main thread: the client rectangle shown by the direct-mode Metal layer.
+ * Returns 0 in desktop mode, for launcher dialogs, or before a valid frame. */
+int winios_game_client_rect(int *x, int *y, int *w, int *h);
 
 /* Top-level window census, for the starting screen of a Madeira Dock start
  * (DockStartScreen.swift). A Dock start is a desktop session, and the
@@ -109,7 +120,9 @@ struct winios_census_window {
 };
 
 /* Main thread. on=1 starts an empty census (and forgets cached process paths,
- * whose ids a new session may reuse); on=0 stops and empties it. */
+ * whose ids a new session may reuse); on=0 stops and empties it. on=2 ends a
+ * running census but keeps the windows it knows and only goes on restoring a
+ * window first shown minimized, for the rest of the session. */
 void winios_window_census_enable(int on);
 
 /* Main thread. Copies up to `max` entries; returns how many were copied. */
