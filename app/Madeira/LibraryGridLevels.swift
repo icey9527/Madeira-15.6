@@ -296,7 +296,7 @@ struct LibraryCardLabel: Hashable {
         return fit
     }
     private struct TitleLinesKey: Hashable { let title: String; let width: CGFloat; let font: String; let size: CGFloat }
-    private static let titleLinesMemo = OSAllocatedUnfairLock(initialState: [TitleLinesKey: TitleFit]())
+    private static let titleLinesMemo = LockedState15(initialState: [TitleLinesKey: TitleFit]())
 
     static var titleStyle: NSParagraphStyle {
         let style = NSMutableParagraphStyle()
@@ -357,7 +357,7 @@ struct LibraryCardLabel: Hashable {
     }
 
     private struct PillWidthKey: Hashable { let text: String; let font: String; let size: CGFloat }
-    private static let pillWidthMemo = OSAllocatedUnfairLock(initialState: [PillWidthKey: CGFloat]())
+    private static let pillWidthMemo = LockedState15(initialState: [PillWidthKey: CGFloat]())
 
     private static func pillWidth(_ text: String, font: UIFont) -> CGFloat {
         let key = PillWidthKey(text: text, font: font.fontName, size: font.pointSize)

@@ -37,8 +37,8 @@ final class DeferredMainWork {
     var quietPerUnitCost: Double = 3
     var maxQuiet: TimeInterval = 0.4
     /// The pause between slices (lets a frame commit; a gate that yielded 0 would still starve a display link).
-    var turnGap: Duration = .milliseconds(2)
-    var pollInterval: Duration = .milliseconds(30)
+    var turnGap: MadeiraDuration15 = 0.002
+    var pollInterval: MadeiraDuration15 = 0.030
     /// Injectable for tests.
     var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
@@ -204,7 +204,7 @@ final class DeferredMainWork {
         pump = Task { @MainActor [weak self] in
             while let self, !self.jobs.isEmpty, !Task.isCancelled {
                 let ran = self.runSlice()
-                try? await Task.sleep(for: ran ? self.turnGap : self.pollInterval)
+                try? await sleep15(for: ran ? self.turnGap : self.pollInterval)
             }
             self?.pump = nil
         }

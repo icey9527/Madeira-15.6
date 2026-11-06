@@ -31,8 +31,8 @@ struct LibraryGridHostView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: LibraryGridHostController, context: Context) {
         controller.update(self)
     }
-    func sizeThatFits(_ proposal: ProposedViewSize, uiViewController: LibraryGridHostController, context: Context) -> CGSize? {
-        return proposal.replacingUnspecifiedDimensions(by: CGSize(width: 390, height: 844))
+    func sizeThatFits(_ proposal: ProposedSize15, uiViewController: LibraryGridHostController, context: Context) -> CGSize? {
+        return proposal.replacingUnspecified(by: CGSize(width: 390, height: 844))
     }
 }
 
@@ -90,7 +90,7 @@ final class LibraryGridHostController: UIViewController, UICollectionViewDelegat
     private var fonts = LibraryCardLabel.Fonts.current()
     /// The fonts' generation, bumped by a Dynamic Type change: background measuring with the old fonts stops and is dropped.
     private var fontsGeneration = 0
-    private let measuringGeneration = OSAllocatedUnfairLock(initialState: 0)
+    private let measuringGeneration = LockedState15(initialState: 0)
 
     // MARK: Setup
 

@@ -204,8 +204,8 @@ final class LibraryGridCardCell: LibraryGridHeldCell {
             // Press: spring(response: 0.26, dampingFraction: 0.86) in, spring(response: 0.42, dampingFraction: 0.58) back.
             let pressed = isHighlighted
             let scale = LibraryCardArtworkPress.pressedScale
-            UIView.animate(springDuration: pressed ? 0.26 : 0.42, bounce: pressed ? 0.14 : 0.42, delay: 0,
-                           options: [.allowUserInteraction, .beginFromCurrentState]) {
+            UIView.animateSpring15(duration: pressed ? 0.26 : 0.42, bounce: pressed ? 0.14 : 0.42, delay: 0,
+                               options: [.allowUserInteraction, .beginFromCurrentState]) {
                 self.cover?.transform = pressed ? CGAffineTransform(scaleX: scale, y: scale) : .identity
             }
         }
