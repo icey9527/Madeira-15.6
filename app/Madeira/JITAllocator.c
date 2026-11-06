@@ -504,6 +504,11 @@ static bool jit_marker_exists(const char *marker) {
  * jit_trollstore_lite_ready() is polled every 2 s by the library badge and on
  * every Play; the pair costs two _NSGetExecutablePath + access calls now
  * instead of dozens a minute, and nothing runs while a game is playing. */
+/* jit_detect_installation()'s cached answer; -1 until first read, and again
+ * after jit_installation_type_refresh(). Declared here because the cached
+ * read below comes before the probe state it is unrelated to. */
+static int g_installation_kind = -1;
+
 static jit_installation_t jit_detect_installation(void) {
     int cached = __atomic_load_n(&g_installation_kind, __ATOMIC_RELAXED);
     if (cached < 0) {
@@ -599,9 +604,6 @@ static void *jit_trollstore_allocate_rx(size_t size) {
 /* Set by jit_local_probe_with: the one-place answer for both local backends. */
 static volatile int g_local_probe_passed;
 static int g_local_probe_kind = -1;   /* installation type the cached result belongs to */
-/* jit_detect_installation()'s cached answer; -1 until first read, and again
- * after jit_installation_type_refresh(). */
-static int g_installation_kind = -1;
 
 /* EXECUTION leg of the Lite probe.
  *
@@ -782,8 +784,8 @@ failed:
 }
 
 /* A page from the standard backend: the BRK protocol hands one over when a
- * debugger services it, and jit26_prepare_region falls back to the same
- * self-allocated mapping when none does. */
+ * debugger services it, and jit26_prepare_region (declared in the header)
+ * falls back to the same self-allocated mapping when none does. */
 static void *jit_trollstore_brk_rx(size_t size) {
     void *page = jit26_prepare_region(NULL, size);
     if (!page) {
