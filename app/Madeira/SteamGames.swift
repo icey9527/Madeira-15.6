@@ -577,7 +577,6 @@ struct SteamGamesSection: View {
                             }
                             .accessibilityLabel("Steam 创意工坊")
                         }
-                        }
                     }
                     // Signed out: the account's games need a sign-in; say so here rather
                     // than hiding the section until someone finds Settings › Steam.
@@ -644,7 +643,6 @@ struct SteamGamesSection: View {
                 model.refresh()
                 if libraryEnabled { steam.reconcileSession(); steam.refreshAfterForeground() }
             }
-        }
         }
         .sheet(item: $selected) { selection in
             SteamGameSheet(appID: selection.id) { entry in
@@ -1367,7 +1365,7 @@ struct SteamCloudSection: View {
             } header: {
                 Text("Steam Cloud")
             } footer: {
-                Text(“存档会在 Madeira 启动时以及打开此页面时与 Steam Cloud 同步，游玩期间不会同步。结束游戏时，可在游戏菜单中选择“上传存档并关闭 Madeira”；否则，本次游玩产生的存档会在下次启动 Madeira 时上传。两端内容不一致或本设备缺失的存档都不会在未经确认的情况下被覆盖；同步过程中被替换的存档会备份到“文件”›Madeira›Steam Cloud Backups。”)
+                Text("存档会在 Madeira 启动时以及打开此页面时与 Steam Cloud 同步，游玩期间不会同步。结束游戏时，可在游戏菜单中选择“上传存档并关闭 Madeira”；否则，本次游玩产生的存档会在下次启动 Madeira 时上传。两端内容不一致或本设备缺失的存档都不会在未经确认的情况下被覆盖；同步过程中被替换的存档会备份到“文件”›Madeira›Steam Cloud Backups。")
             }
         }
     }

@@ -483,7 +483,6 @@ final class DepotDownloader {
                     SteamLog.event("[steam-depot] low disk space warning: \(headroom / (1024 * 1024)) MB free after install")
                 }
             }
-            }
         }
 
         // 3a. Files already on disk (a repair, an update, a moved game): each is
