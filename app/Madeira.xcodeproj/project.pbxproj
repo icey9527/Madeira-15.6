@@ -201,7 +201,8 @@
 		A1000976 /* LibraryGridZoomStart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000976 /* LibraryGridZoomStart.swift */; };
 		A1000975 /* LibraryGridZoomIdle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000975 /* LibraryGridZoomIdle.swift */; };
 		A1000974 /* LibraryGridZoomHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000974 /* LibraryGridZoomHaptics.swift */; };
-		A1000975 /* Compat15.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000975 /* Compat15.swift */; };
+		A1000F53 /* Compat15Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000F53 /* Compat15Views.swift */; };
+		A1000F52 /* Compat15.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000F52 /* Compat15.swift */; };
 		A1000973 /* DeferredMainWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000973 /* DeferredMainWork.swift */; };
 		A1000972 /* InteractionFrameRate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000972 /* InteractionFrameRate.swift */; };
 		A1000970 /* LibraryGridZoomBlend.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000970 /* LibraryGridZoomBlend.swift */; };
@@ -499,7 +500,8 @@
 		A2000976 /* LibraryGridZoomStart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LibraryGridZoomStart.swift"; sourceTree = "<group>"; };
 		A2000975 /* LibraryGridZoomIdle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LibraryGridZoomIdle.swift"; sourceTree = "<group>"; };
 		A2000974 /* LibraryGridZoomHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LibraryGridZoomHaptics.swift"; sourceTree = "<group>"; };
-		A2000975 /* Compat15.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Compat15.swift"; sourceTree = "<group>"; };
+		A2000F53 /* Compat15Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Compat15Views.swift"; sourceTree = "<group>"; };
+		A2000F52 /* Compat15.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Compat15.swift"; sourceTree = "<group>"; };
 		A2000973 /* DeferredMainWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeferredMainWork.swift"; sourceTree = "<group>"; };
 		A2000972 /* InteractionFrameRate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "InteractionFrameRate.swift"; sourceTree = "<group>"; };
 		A2000970 /* LibraryGridZoomBlend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LibraryGridZoomBlend.swift"; sourceTree = "<group>"; };
@@ -743,7 +745,8 @@
 				A2000976 /* LibraryGridZoomStart.swift */,
 				A2000975 /* LibraryGridZoomIdle.swift */,
 				A2000974 /* LibraryGridZoomHaptics.swift */,
-				A2000975 /* Compat15.swift */,
+				A2000F53 /* Compat15Views.swift */,
+				A2000F52 /* Compat15.swift */,
 				A2000973 /* DeferredMainWork.swift */,
 				A2000972 /* InteractionFrameRate.swift */,
 				A2000970 /* LibraryGridZoomBlend.swift */,
@@ -1210,7 +1213,8 @@
 				A1000976 /* LibraryGridZoomStart.swift in Sources */,
 				A1000975 /* LibraryGridZoomIdle.swift in Sources */,
 				A1000974 /* LibraryGridZoomHaptics.swift in Sources */,
-				A1000975 /* Compat15.swift in Sources */,
+				A1000F53 /* Compat15Views.swift in Sources */,
+				A1000F52 /* Compat15.swift in Sources */,
 				A1000973 /* DeferredMainWork.swift in Sources */,
 				A1000972 /* InteractionFrameRate.swift in Sources */,
 				A1000970 /* LibraryGridZoomBlend.swift in Sources */,

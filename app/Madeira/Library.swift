@@ -3069,7 +3069,7 @@ struct LibraryStoreTabBar: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
+        StoreTabsFitting15 {
             Picker("Store", selection: picked) {
                 ForEach(tabs) { Text($0.title).tag($0) }
             }
@@ -5723,7 +5723,7 @@ struct LibraryHUD: View {
                         ? LaunchCurtain.CoverStyle(corner: 20, shadowOpacity: 0.55, shadowRadius: 15, shadowOffset: CGSize(width: 0, height: 14))
                         : LaunchCurtain.CoverStyle(corner: 14, shadowOpacity: 0.33, shadowRadius: 10, shadowOffset: .zero)
                     Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(160))
+                        try? await sleep15(for: 0.160)
                         LaunchCurtain.shared.handOff(to: coverFrame, style: style, landed: { coverLanded = true })
                     }
                 } else {
@@ -5983,7 +5983,7 @@ struct LibraryHUD: View {
             }.padding(.horizontal, 22).padding(.top, 22).padding(.bottom, 8)
             Form {
                 PadAssistPage(settings: Binding(get: { model.padAssist }, set: { model.padAssist = $0; model.saveCurrentProfile() }))
-            }.scrollContentBackground(.hidden)
+            }.hiddenScrollBackground15()
         }
     }
 
@@ -6859,18 +6859,6 @@ extension View {
     /// iOS 17 才有 `Path.subtracting(_:eoFill:)`；iOS 15/16 用 Core Graphics
     /// 的 even-odd 路径差得到同样的区域（触控编辑器用来判断点击是否落在
     /// 控件之外）。
-    func subtracting15(_ other: Path) -> Path {
-        if #available(iOS 17.0, *) {
-            return subtracting(other)
-        }
-        // The caller fills this with the even-odd rule (contentShape(_, eoFill:
-        // true)), under which the overlapping region counts as outside: the
-        // union drawn this way is exactly self minus other.
-        var result = self
-        result.addPath(other)
-        return result
-    }
-
     /// iOS 15.6 兼容：`.pickerStyle(.navigationLink)`（iOS 16+）——低版本用
     /// `.menu`，同样是点开后从列表里选一项。
     @ViewBuilder func pickerStyleNavigationLink15() -> some View {
@@ -7207,7 +7195,7 @@ private struct LaunchFloodShape: Shape {
     private func watchStart() async {
         let model = LibraryModel.shared
         while !Task.isCancelled, covering {
-            try? await Task.sleep(for: .milliseconds(200))
+            try? await sleep15(for: 0.200)
             guard covering else { return }
             let t = Date().timeIntervalSince(started)
             if model.cloudNotice != nil || model.error != nil { retract(); return }
