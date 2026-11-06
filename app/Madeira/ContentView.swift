@@ -2642,8 +2642,9 @@ struct ContentView: View {
                 case .success:
                     jitStatus = .available
                     if StikJITHelper.isTrollStoreLite {
-                        logStore.log("映射检查通过；dynamic-codesigning=\(checkAppEntitlement("dynamic-codesigning") ? 1 : 0) "
-                                     + "debugger=\(isDebuggerAttached() ? 1 : 0) executable=\(StikJITHelper.liteCanExecuteCode ? 1 : 0)",
+                        logStore.log("TrollStore Lite 检查通过：双映射 + 生成代码可执行；"
+                                     + "dynamic-codesigning=\(checkAppEntitlement("dynamic-codesigning") ? 1 : 0) "
+                                     + "debugger=\(isDebuggerAttached() ? 1 : 0)",
                                      level: .success)
                     } else {
                         logStore.log("JIT enabled! Debugger attached.", level: .success)

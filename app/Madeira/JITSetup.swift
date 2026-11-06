@@ -330,14 +330,7 @@ final class JITCoordinator: ObservableObject {
                                         userInfo: [NSLocalizedDescriptionKey: message])))
             return
         }
-        guard StikJITHelper.liteCanExecuteCode else {
-            error = StikJITHelper.liteExecutionMessage
-            status = nil
-            completion(.failure(NSError(domain: "MadeiraJIT", code: 16,
-                                        userInfo: [NSLocalizedDescriptionKey: StikJITHelper.liteExecutionMessage])))
-            return
-        }
-        status = "映射检查通过"
+        status = "双映射与代码执行检查通过"
         error = nil
         completion(.success(()))
     }
@@ -739,15 +732,11 @@ struct JITSetupView: View {
                         Button("检查本地 JIT 映射") {
                             let passed = jit_trollstore_probe()
                             let detail = StikJITHelper.lastJITError
-                            if passed && StikJITHelper.isTrollStoreLite && !StikJITHelper.liteCanExecuteCode {
-                                trollStoreProbeResult = StikJITHelper.liteExecutionMessage
-                            } else {
-                                trollStoreProbeResult = passed
-                                    ? (StikJITHelper.isTrollStoreLite
-                                       ? "映射检查通过，JIT 代码可执行"
-                                       : "TrollStore RX allocation probe passed.")
-                                    : (detail.isEmpty ? "本地 JIT 检查失败。" : detail)
-                            }
+                            trollStoreProbeResult = passed
+                                ? (StikJITHelper.isTrollStoreLite
+                                   ? "双映射与代码执行检查通过"
+                                   : "TrollStore RX allocation probe passed.")
+                                : (detail.isEmpty ? "本地 JIT 检查失败。" : detail)
                         }
                         if let trollStoreProbeResult {
                             Text(trollStoreProbeResult)
@@ -755,7 +744,7 @@ struct JITSetupView: View {
                     } header: {
                         Text("TrollStore")
                     } footer: {
-                        Text("TrollStore Lite 需要本地双映射检查通过；该检查不会执行生成的代码，iOS 17 设备兼容性仍需实机验证。")
+                        Text("TrollStore Lite 需要本地双映射检查通过，并在该页上真正执行一条生成的指令：映射成功但代码无法运行时会直接报错，不会停在加载画面。")
                     }
                 }
 
