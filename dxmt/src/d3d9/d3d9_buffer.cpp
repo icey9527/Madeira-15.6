@@ -10,8 +10,6 @@
 #include "d3d9_census.hpp"
 
 namespace dxmt {
-#include <algorithm>
-#include <cstdint>
 
 namespace {
 
@@ -68,37 +66,6 @@ MTLD3D9VertexBuffer::MTLD3D9VertexBuffer(
   // A non-DEFAULT buffer is dirty over its whole extent from creation so its
   // first bind or Unlock uploads the mirror; DEFAULT contents are undefined
   // until the app writes them (DXVK d3d9_common_buffer.cpp).
-// MTLD3D9IndexBuffer::refreshRange: an indexed draw stores only the index bytes
-// it reads. MADEIRA_D3D9_INDEX_RANGE=0 keeps the whole-buffer refresh before
-// every draw. Read once.
-bool
-indexRangeEnabled() {
-  static const bool enabled = env::getEnvVar("MADEIRA_D3D9_INDEX_RANGE") != "0";
-  return enabled;
-}
-
-// What refreshRange saved, logged now and then so a session log shows it.
-// Calling thread under the device lock; a second device only mixes its counts in.
-struct IndexRangeStats {
-  uint64_t stores = 0, stored = 0, whole = 0, renames = 0;
-};
-
-void
-noteIndexRangeStore(IndexRangeStats &stats, uint64_t stored, uint64_t whole) {
-  ++stats.stores;
-  stats.stored += stored;
-  stats.whole += whole;
-  if (stats.stores != 1 && stats.stores != 4096 && (stats.stores & ((1u << 18) - 1)) != 0)
-    return;
-  Logger::info(
-      "[d3d9-index-range] " + std::to_string(stats.stores) + " index stores, " + std::to_string(stats.stored >> 10) +
-      " KB stored where the whole-buffer refresh would have stored " + std::to_string(stats.whole >> 10) + " KB, " +
-      std::to_string(stats.renames) + " renames (MADEIRA_D3D9_INDEX_RANGE=0 restores the whole-buffer refresh)"
-  );
-}
-
-IndexRangeStats g_indexRangeStats;
-
   if (m_pool != D3DPOOL_DEFAULT)
     m_dirty = true;
   // Self-pin: same shape as MTLD3D9Surface / MTLD3D9Texture. The
@@ -436,122 +403,6 @@ MTLD3D9IndexBuffer::refreshWholeMirror() {
   m_dirty = m_writeLocked;
 }
 
-bool
-MTLD3D9IndexBuffer::renameBeforeStore() {
-  // refreshWholeMirror's rename and its madeira-bcd out-of-memory fallback, the
-  // same steps in the same order: wait for the GPU and try again, and with
-  // nothing to recycle store into the current generation, which no unfinished
-  // draw reads once the GPU is idle.
-  if (SUCCEEDED(renameDynamicBuffer(
-          m_device, m_dynamic.ptr(), m_device->m_currentCmdSeq,
-          m_device->m_cachedSignaled.load(std::memory_order_acquire)
-      )))
-    return true;
-  if (m_device->drainForDynamicRename()) {
-    if (FAILED(renameDynamicBuffer(
-            m_device, m_dynamic.ptr(), m_device->m_currentCmdSeq,
-            m_device->m_cachedSignaled.load(std::memory_order_acquire)
-        )))
-      m_device->noteRenameInPlace();
-    return true;
-  }
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    Logger::warn("d3d9: out of video memory refreshing a dynamic buffer; the draw reads stale contents");
-  }
-  return false;
-}
-
-// refreshWholeMirror stores the whole mirror before every draw that follows a
-// write lock, and before every draw while a lock is held. An engine that keeps
-// one large index buffer mapped while it draws from it, or locks a little of it
-// before each draw, then copies the whole buffer per draw: a Call of Duty
-// engine's render thread spent nearly all its time in that copy (memmove under
-// refreshWholeMirror) on an A19 Pro, at 12-20 fps with the GPU 22% busy.
-//
-// An indexed draw reads exactly its StartIndex .. StartIndex + count indices,
-// so only those bytes have to be current when it is recorded. What keeps this
-// as safe as the whole-buffer refresh:
-// - The range comes from the draw, never from the window a lock announced, so
-//   a write past a lock's window still reaches the draw that reads it.
-// - A write lock makes every byte of the current allocation suspect (Lock), so
-//   each later draw stores its own range from the mirror again, and while a
-//   lock is held every draw does: the application may write at any time.
-// - A store goes into the allocation earlier draws were recorded against only
-//   while every write lock since that allocation was installed carried
-//   NOOVERWRITE. The application then promises not to change the bytes those
-//   draws read, so the store rewrites them with the values they already hold,
-//   which is what a draw on Windows reads from a directly mapped buffer. After
-//   any other write lock (plain or DISCARD) the store renames first, and for as
-//   long as such a lock is held every store does, so the recorded draws keep
-//   the contents they were recorded with.
-// - The bytes known to be current are one interval, grown together with the
-//   gap to a new range when the gap is no larger than that range, so between
-//   two write locks no byte is stored twice and a draw whose range is current
-//   stores nothing.
-void
-MTLD3D9IndexBuffer::refreshRange(UINT begin, UINT end) {
-  if (!indexRangeEnabled()) {
-    refreshWholeMirror();
-    return;
-  }
-  if (!m_dirty || m_direct || !m_hostPtr)
-    return;
-  end = std::min(end, m_size);
-  if (begin >= end)
-    return;
-  if (!m_writeLocked && begin >= m_currentBegin && end <= m_currentEnd)
-    return;
-  if (m_renameDue) {
-    if (!renameBeforeStore())
-      return;
-    ++g_indexRangeStats.renames;
-    // While a lock without NOOVERWRITE is held, the application may still
-    // change the bytes this draw reads, so the next store renames again: each
-    // draw keeps its own copy, as with refreshWholeMirror.
-    m_renameDue = m_renameEachStore;
-    m_currentBegin = m_currentEnd = 0;
-  }
-  // The bytes to store: the new range, plus the gap to the current interval
-  // when that keeps it one piece, minus what is current already.
-  UINT lo = begin, hi = end;
-  bool grow = m_currentBegin < m_currentEnd && !m_writeLocked;
-  if (grow) {
-    const UINT gap = begin > m_currentEnd ? begin - m_currentEnd : (m_currentBegin > end ? m_currentBegin - end : 0);
-    grow = gap <= end - begin;
-  }
-  const uint32_t sub = m_dynamic->immediateSuballocation();
-  const char *mirror = static_cast<const char *>(m_hostPtr);
-  uint64_t stored = 0;
-  if (grow) {
-    lo = std::min(begin, m_currentBegin);
-    hi = std::max(end, m_currentEnd);
-    if (lo < m_currentBegin) {
-      m_dynamic->immediateName()->updateContents(lo, mirror + lo, m_currentBegin - lo, sub);
-      stored += m_currentBegin - lo;
-    }
-    if (hi > m_currentEnd) {
-      m_dynamic->immediateName()->updateContents(m_currentEnd, mirror + m_currentEnd, hi - m_currentEnd, sub);
-      stored += hi - m_currentEnd;
-    }
-  } else {
-    m_dynamic->immediateName()->updateContents(begin, mirror + begin, end - begin, sub);
-    stored = end - begin;
-  }
-  noteIndexRangeStore(g_indexRangeStats, stored, m_size);
-  // Still mapped: nothing is current past this draw (see m_writeLocked). Else
-  // keep the larger of the two intervals when they did not join.
-  if (m_writeLocked)
-    return;
-  if (grow || hi - lo >= m_currentEnd - m_currentBegin) {
-    m_currentBegin = lo;
-    m_currentEnd = hi;
-  }
-  if (m_currentBegin == 0 && m_currentEnd == m_size)
-    m_dirty = false;
-}
-
 void
 MTLD3D9IndexBuffer::markLosable() {
   if (!m_isLosable) {
@@ -690,14 +541,6 @@ MTLD3D9IndexBuffer::Lock(UINT OffsetToLock, UINT SizeToLock, void **ppbData, DWO
   if (buffer_lock_updates_dirty(Flags)) {
     m_dirty = true;
     m_writeLocked = true;
-    // refreshRange: so no byte of the current allocation is known to be current
-    // any more. Only a lock without NOOVERWRITE (after sanitisation, every lock
-    // outside the DEFAULT pool) allows changing bytes a recorded draw reads.
-    m_currentBegin = m_currentEnd = 0;
-    if (!(Flags & D3DLOCK_NOOVERWRITE)) {
-      m_renameDue = true;
-      m_renameEachStore = true;
-    }
   }
   m_lockCount.increment();
   *ppbData = static_cast<char *>(m_hostPtr) + OffsetToLock;
@@ -709,11 +552,8 @@ MTLD3D9IndexBuffer::Unlock() {
   D3D9_CENSUS(D3D9_CENSUS_MTLD3D9IndexBuffer_Unlock);
   D9DeviceLock lock = m_device->LockDevice();
   // See MTLD3D9VertexBuffer::Unlock: the draw refreshes, not this.
-  if (m_lockCount.decrement() == 0) {
+  if (m_lockCount.decrement() == 0)
     m_writeLocked = false;
-    // refreshRange: no lock without NOOVERWRITE is held any more.
-    m_renameEachStore = false;
-  }
   return D3D_OK;
 }
 

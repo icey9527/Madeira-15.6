@@ -1086,17 +1086,9 @@ OVERLAY = {
                         "Launcher 132 MB, Social Club 68 MB through a whole RDR2 session). Larger uploads still get a "
                         "block of their own; each named program logs one [small-rings] line. Unset or 0 (default): "
                         "32 MB, as before. Set it in the game's own file; read when the program starts."},
-    # DXMT's Direct3D 9 index buffers read it (dxmt, build/dxmt-patches/0001-d3d9-index-range-per-draw.patch).
-    "env.MADEIRA_D3D9_INDEX_RANGE": {"category": "Direct3D 9/10/11 (DXMT)",
-                "title": "Direct3D 9: upload only the index bytes a draw reads",
-                "kind": "bool", "default": "1", "sources": ["build/dxmt-patches/0001-d3d9-index-range-per-draw.patch"],
-                "note": "On by default. A 32-bit Direct3D 9 game writes its index buffers through a copy Madeira keeps; "
-                        "an indexed draw now copies only the indices it reads into the buffer the GPU reads, instead of "
-                        "the whole buffer before every draw after a lock (the slowdown in engines that lock a little of "
-                        "one big index buffer before each draw, such as Call of Duty's). A lock without NOOVERWRITE still "
-                        "gives the next draw a fresh buffer, so draws already recorded keep what they read. "
-                        "[d3d9-index-range] lines in the log say how much was copied. 0: the whole-buffer copy, as before. "
-                        "Read once per session."},
+    # DXMT's index-range patch has no option while the vendored dxmt predates
+    # it (it has no direct-mapped buffers or per-draw capture); the patch is
+    # disabled until dxmt is synced to upstream's pin.
     # DXMT's Direct3D 9 format gate reads it (dxmt/src/d3d9/d3d9_format.cpp, isColorRTFormat).
     "env.MADEIRA_D3D9_LUMINANCE_RT": {"category": "Direct3D 9/10/11 (DXMT)",
                 "title": "Direct3D 9: luminance formats as render targets",
