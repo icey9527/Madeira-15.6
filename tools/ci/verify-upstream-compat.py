@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """Verify the committed Windows-side compatibility layers.
 
-The four directories below are the unmodified upstream Madeira v0.1.3
-compatibility binaries, committed so CI and local builds use them directly
-instead of rebuilding and drifting.  tools/ci/upstream-compat.sha256 is the
-authoritative manifest; any edit, addition or deletion fails the build.
+The four directories below are the committed Windows binaries the app ships,
+taken from the upstream tree this branch is based on and extended by this
+fork.  tools/ci/upstream-compat.sha256 is the authoritative manifest; any edit,
+addition or deletion fails the build.
+
+A wave of upstream work that adds or replaces farm DLLs is a deliberate merge:
+regenerate the manifest in the same commit that lands the binaries, with
+
+    python3 tools/ci/update-upstream-compat.py
+
+so the check keeps catching accidental drift without failing on every merge.
 """
 
 from __future__ import annotations
