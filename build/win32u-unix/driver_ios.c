@@ -3194,8 +3194,13 @@ static void ios_foreground_if_none( const char *why )
 
     if (enabled < 0)
     {
-        const char *e = getenv( "MADEIRA_INPUT_FOREGROUND" );  /* 1: while no window is foreground, a process polling messages or posting input makes its main window foreground */
-        enabled = e && e[0] == '1' && !e[1];
+        /* Madeira-15.6: on by default. iOS has no window manager, so a game that shows
+         * its window without activating it (Eden and other emulators do) never becomes
+         * foreground: the wineserver queues WM_INPUT only for the foreground process,
+         * so the pad and keys go nowhere until the user taps the window. 0 turns it off,
+         * as upstream's opt-in switch did. */
+        const char *e = getenv( "MADEIRA_INPUT_FOREGROUND" );  /* 0: never make the main window foreground while no window is (on by default here) */
+        enabled = !(e && e[0] == '0' && !e[1]);
     }
     if (!enabled || NtUserGetForegroundWindow()) return;
 

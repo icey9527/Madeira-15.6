@@ -259,12 +259,13 @@ OVERLAY = {
     # madeira-bcd: Horizon Zero Dawn on build 471 got no input at all.
     "env.MADEIRA_INPUT_FOREGROUND": {"category": "Windows, display & input",
                 "title": "Bring the game to the front when no window is",
-                "kind": "bool", "default": "0",
-                "note": "Default off. iOS has no window manager: a game that shows its window without activating "
-                        "it and reads no XInput stays in the background, and Windows sends raw keyboard and mouse "
-                        "input only to the program in front (Horizon Zero Dawn ignored every key and tap). 1: while "
-                        "no window at all is in front, the game's main window is brought to the front when it polls "
-                        "its messages or a key or tap arrives. Never while another window is in front."},
+                "kind": "bool", "default": "1",
+                "note": "Default on (Madeira-15.6; upstream ships it off). iOS has no window manager, and a window "
+                        "shown without activation never gets Windows' raw keyboard and mouse input, which goes only "
+                        "to the program in front: Horizon Zero Dawn ignored every key and tap, and emulators such as "
+                        "Eden take no controller input until their window is tapped. While no window at all is in "
+                        "front, the game's main window is brought to the front as it polls messages or a key or tap "
+                        "arrives. Never while another window is in front. 0: never."},
     "env.MADEIRA_WGI_HOST_PADS": {"category": "Controllers", "title": "Controllers in Windows.Gaming.Input",
                 "kind": "bool", "default": "0",
                 "note": "Default off. 1: each connected XInput controller (a paired pad or the touch controller) "
