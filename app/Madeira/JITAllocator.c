@@ -582,6 +582,80 @@ static void *jit_trollstore_allocate_rx(size_t size) {
 
 static volatile int g_lite_probe_passed;
 
+/* EXECUTION leg of the Lite probe.
+ *
+ * The mapping checks above prove the pages are mapped and share one backing,
+ * but not that the kernel will let this process RUN what it writes there.
+ * On iOS 18 CS_DEBUGGED survives the debugger that set it detaching, and a
+ * process in that state maps fine and then dies on the first generated
+ * instruction (the game sat on its loading screen). Running one instruction
+ * is the only honest answer, and MeloNX's iOS 18 path shows it can succeed
+ * without a debugger attached.
+ *
+ * If a signal still arrives, the handler skips the instruction and records
+ * the signal, so the caller reports it instead of the app dying. A hard
+ * failure (SIGKILL-class, a fault the kernel refuses to deliver) ends the
+ * process, which is what the old gate would have prevented -- accepted here
+ * because the alternative was refusing correct devices. */
+static volatile sig_atomic_t g_lite_exec_signal;
+static volatile sig_atomic_t g_lite_exec_done;
+
+static void lite_exec_handler(int sig, siginfo_t *info, void *context) {
+    (void)info;
+    ucontext_t *uc = (ucontext_t *)context;
+    if (!g_lite_exec_done) {
+        g_lite_exec_signal = sig;
+        uc->uc_mcontext->__ss.__pc += 4;   /* skip `brk`/faulting insn; the caller decides */
+        uc->uc_mcontext->__ss.__x[0] = 0;
+        return;
+    }
+    /* Not ours: restore the default action so the fault reports properly. */
+    struct sigaction dfl;
+    memset(&dfl, 0, sizeof(dfl));
+    dfl.sa_handler = SIG_DFL;
+    sigaction(sig, &dfl, NULL);
+}
+
+/* Writes `mov x0, #42; ret` through the RW alias and calls it at the RX
+ * address. Returns 1 when the instruction ran and returned 42. */
+static int jit_lite_execute_probe(void *rx, void *rw) {
+    static const uint32_t code[] = {
+        0xD2800540u,   /* mov  x0, #42 */
+        0xD65F03C0u,   /* ret         */
+    };
+    struct sigaction sa, old_segv, old_bus, old_trap;
+    int ok = 0;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sa.sa_sigaction = lite_exec_handler;
+    g_lite_exec_signal = 0;
+    g_lite_exec_done = 0;
+    sigaction(SIGSEGV, &sa, &old_segv);
+    sigaction(SIGBUS, &sa, &old_bus);
+    sigaction(SIGILL, &sa, &old_trap);
+
+    memcpy(rw, code, sizeof(code));
+    sys_icache_invalidate(rx, sizeof(code));
+    {
+        typedef int64_t (*jit_fn_t)(void);
+        int64_t result = ((jit_fn_t)rx)();
+        g_lite_exec_done = 1;
+        ok = (result == 42) && (g_lite_exec_signal == 0);
+    }
+
+    sigaction(SIGSEGV, &old_segv, NULL);
+    sigaction(SIGBUS, &old_bus, NULL);
+    sigaction(SIGILL, &old_trap, NULL);
+    if (!ok && g_lite_exec_signal)
+        jit_set_last_error("JIT 执行检查失败：映射可写可执行，但运行代码时收到信号 %d"
+                           "（iOS 18 起需要调试器保持附着，或改用 StikDebug / 内置辅助工具）",
+                           (int)g_lite_exec_signal);
+    else if (!ok)
+        jit_set_last_error("JIT 执行检查失败：执行结果不正确（页面能映射但不能运行生成的代码）");
+    return ok;
+}
+
 static bool jit_region_has_protection(void *address, size_t size, vm_prot_t required, vm_prot_t forbidden,
                                       const char *label) {
     vm_address_t query = (vm_address_t)address;
@@ -660,10 +734,15 @@ static bool jit_trollstore_lite_probe(void) {
         goto failed;
     }
 
+    /* The mapping is what the pool needs; running one instruction here says
+     * whether this process may execute what it maps (jit_lite_execute_probe
+     * sets the error text on failure). */
+    if (!jit_lite_execute_probe((void *)rx, (void *)rw)) goto failed;
+
     vm_deallocate(task, rw, size);
     vm_deallocate(task, (vm_address_t)rx, size);
     g_lite_probe_passed = 1;
-    jit_log("[trollstore-lite] 映射检查通过；JIT 代码执行仍未验证");
+    jit_log("[trollstore-lite] 双映射与代码执行检查均通过");
     return true;
 
 failed:
