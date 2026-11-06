@@ -134,7 +134,7 @@ struct EASheets: ViewModifier {
             content
             // The library reappears after every session: downloads continue then.
             .onAppear { if EALibrary.enabled { ea.start(); ea.reconcileSession() } }
-            .onChange(of: scenePhase) { _, phase in if phase == .active && EALibrary.enabled { ea.reconcileSession() } }
+            .onChange(of: scenePhase) { phase in if phase == .active && EALibrary.enabled { ea.reconcileSession() } }
             .sheet(item: $sheets.eaGame) { selection in
                 EAGameSheet(offerID: selection.id) { entry in
                     // Let the download sheet finish dismissing before presenting the details page.
@@ -382,7 +382,7 @@ struct EAGameSheet: View {
             .navigationTitle("EA app").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task(id: ea.downloads[offerID]?.state) {
-                freeSpace = EADownloader.freeSpace(at: URL.documentsDirectory)
+                freeSpace = EADownloader.freeSpace(at: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
             }
             .task(id: offerID) { await ea.loadSize(offerID) }
             .confirmationDialog(ea.installed[offerID] == nil ? "Cancel this download? Downloaded files are deleted." : "Stop this download?",
@@ -541,8 +541,10 @@ struct EASignInView: View {
             .navigationTitle("EA app").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                if !ea.signedIn {
-                    ToolbarItem(placement: .primaryAction) {
+                // A plain `if` inside .toolbar needs ToolbarContentBuilder's
+                // buildIf (iOS 16+); the item is conditional on the body instead.
+                ToolbarItem(placement: .primaryAction) {
+                    if !ea.signedIn {
                         Menu {
                             Button("Paste the sign-in address", systemImage: "doc.on.clipboard") { pasted = ""; pasting = true }
                             Button("Reload", systemImage: "arrow.clockwise") { reload += 1 }

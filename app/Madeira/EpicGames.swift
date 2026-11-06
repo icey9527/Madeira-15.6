@@ -137,7 +137,7 @@ struct EpicSheets: ViewModifier {
             content
             // The library reappears after every session: downloads continue then.
             .onAppear { if EpicLibrary.enabled { epic.start(); epic.reconcileSession() } }
-            .onChange(of: scenePhase) { _, phase in if phase == .active && EpicLibrary.enabled { epic.reconcileSession() } }
+            .onChange(of: scenePhase) { phase in if phase == .active && EpicLibrary.enabled { epic.reconcileSession() } }
             .sheet(item: $sheets.epicGame) { selection in
                 EpicGameSheet(appName: selection.id) { entry in
                     // Let the download sheet finish dismissing before presenting the details page.
@@ -371,7 +371,7 @@ struct EpicGameSheet: View {
             .navigationTitle("Epic Games").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task(id: epic.downloads[appName]?.state) {
-                freeSpace = EpicDownloader.freeSpace(at: URL.documentsDirectory)
+                freeSpace = EpicDownloader.freeSpace(at: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
             }
             .confirmationDialog(epic.installed[appName] == nil ? "Cancel this download? Downloaded files are deleted." : "Stop this download?",
                                 isPresented: $confirmCancel, titleVisibility: .visible) {
@@ -539,8 +539,10 @@ struct EpicSignInView: View {
             .navigationTitle("Epic Games").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                if !epic.signedIn {
-                    ToolbarItem(placement: .primaryAction) {
+                // A plain `if` inside .toolbar needs ToolbarContentBuilder's
+                // buildIf (iOS 16+); the item is conditional on the body instead.
+                ToolbarItem(placement: .primaryAction) {
+                    if !epic.signedIn {
                         Menu {
                             Button("Paste a sign-in code", systemImage: "doc.on.clipboard") { pasted = ""; pasting = true }
                             Link(destination: EpicAPI.loginURL) { Label("Open the login page in Safari", systemImage: "safari") }

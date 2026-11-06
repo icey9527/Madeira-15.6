@@ -155,7 +155,7 @@ struct ItchSheets: ViewModifier {
             content
             // The library reappears after every session: downloads continue then.
             .onAppear { if ItchLibrary.enabled { itch.start(); itch.reconcileSession() } }
-            .onChange(of: scenePhase) { _, phase in if phase == .active && ItchLibrary.enabled { itch.reconcileSession() } }
+            .onChange(of: scenePhase) { phase in if phase == .active && ItchLibrary.enabled { itch.reconcileSession() } }
             .sheet(item: $sheets.itchGame) { selection in
                 ItchGameSheet(gameID: selection.id) { entry in
                     // Let the download sheet finish dismissing before presenting the details page.
@@ -398,7 +398,7 @@ struct ItchGameSheet: View {
             }
             .navigationTitle("itch.io").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .task(id: itch.downloads[gameID]?.state) { freeSpace = ItchLibrary.freeSpace(at: URL.documentsDirectory) }
+            .task(id: itch.downloads[gameID]?.state) { freeSpace = ItchLibrary.freeSpace(at: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]) }
             .task(id: gameID) { await itch.loadChoice(gameID) }
             .confirmationDialog("Cancel this download? What was downloaded is deleted.", isPresented: $confirmCancel, titleVisibility: .visible) {
                 Button("Cancel download", role: .destructive) { itch.cancel(gameID) }

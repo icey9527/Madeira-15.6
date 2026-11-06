@@ -674,7 +674,7 @@ final class ItchTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
             let folder = record?.folder ?? (Self.installRoot + "/" + Self.safeName(game.title))
             let target = Self.drive.appendingPathComponent(folder, isDirectory: true)
             try FileManager.default.createDirectory(at: Self.downloadsFolder, withIntermediateDirectories: true)
-            if let free = Self.freeSpace(at: URL.documentsDirectory), upload.size > 0 {
+            if let free = Self.freeSpace(at: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]), upload.size > 0 {
                 // The archive, and about as much again unpacked.
                 let needed = upload.size * (isExe ? 1 : 3) - free
                 if needed > 0 { throw ItchInstallError.diskSpace(needed: needed) }

@@ -136,7 +136,7 @@ struct GOGSheets: ViewModifier {
             content
             // The library reappears after every session: downloads continue then.
             .onAppear { if GOGLibrary.enabled { gog.start(); gog.reconcileSession() } }
-            .onChange(of: scenePhase) { _, phase in if phase == .active && GOGLibrary.enabled { gog.reconcileSession() } }
+            .onChange(of: scenePhase) { phase in if phase == .active && GOGLibrary.enabled { gog.reconcileSession() } }
             .sheet(item: $sheets.gogGame) { selection in
                 GOGGameSheet(productID: selection.id) { entry in
                     // Let the download sheet finish dismissing before presenting the details page.
@@ -385,7 +385,7 @@ struct GOGGameSheet: View {
             .navigationTitle("GOG").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task(id: gog.downloads[productID]?.state) {
-                freeSpace = GOGDownloader.freeSpace(at: URL.documentsDirectory)
+                freeSpace = GOGDownloader.freeSpace(at: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
             }
             .task(id: productID) { await gog.loadSize(productID) }
             .confirmationDialog(gog.installed[productID] == nil ? "Cancel this download? Downloaded files are deleted." : "Stop this download?",
@@ -618,8 +618,10 @@ struct GOGSignInView: View {
             .navigationTitle("GOG").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                if !gog.signedIn {
-                    ToolbarItem(placement: .primaryAction) {
+                // A plain `if` inside .toolbar needs ToolbarContentBuilder's
+                // buildIf (iOS 16+); the item is conditional on the body instead.
+                ToolbarItem(placement: .primaryAction) {
+                    if !gog.signedIn {
                         Menu {
                             Button("Paste the sign-in address", systemImage: "doc.on.clipboard") { pasted = ""; pasting = true }
                             Link(destination: GOGAPI.loginURL) { Label("Open the login page in Safari", systemImage: "safari") }

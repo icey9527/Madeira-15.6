@@ -550,7 +550,7 @@ struct LibraryGridPage: View {
                 steamGames.refresh()
                 if SteamOwnedLibrary.enabled { steam.start(); steam.reconcileSession() }
             }
-            .onChange(of: scenePhase) { _, phase in
+            .onChange(of: scenePhase) { phase in
                 if phase == .active { steamGames.refresh(); if SteamOwnedLibrary.enabled { steam.reconcileSession() } }
             }
             .sheet(item: $steamSheet) { selection in

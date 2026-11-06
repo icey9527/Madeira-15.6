@@ -3869,7 +3869,7 @@ struct LibraryView: View {
             }
         }
         .modifier(LibrarySheets(model: model, browser: $browser, selected: $selected, play: play, jit: jit))
-        .onChange(of: scenePhase) { _, phase in if phase == .active { model.refreshFlag() } }
+        .onChange(of: scenePhase) { phase in if phase == .active { model.refreshFlag() } }
         .onAppear {
             if focused == nil { focused = LibraryEntry.desktopID }
             GlassSkin.shared.start()
@@ -3946,13 +3946,13 @@ private struct LibrarySheets: ViewModifier {
                     }
                 })
             }
-            .onChange(of: model.current) { _, current in if current != nil { selected = nil } }
-            .onChange(of: model.error) { _, error in if error != nil { selected = nil } }
-            .onChange(of: model.restartNotice) { _, notice in if notice != nil { selected = nil } }
-            .onChange(of: model.jitNotice) { _, notice in if notice != nil { selected = nil } }
-            .onChange(of: model.cloudNotice) { _, notice in if notice != nil { selected = nil } }
-            .onChange(of: jit.showSetup) { _, show in if show { selected = nil } }
-            .onChange(of: model.showDetail) { _, id in
+            .onChange(of: model.current) { current in if current != nil { selected = nil } }
+            .onChange(of: model.error) { error in if error != nil { selected = nil } }
+            .onChange(of: model.restartNotice) { notice in if notice != nil { selected = nil } }
+            .onChange(of: model.jitNotice) { notice in if notice != nil { selected = nil } }
+            .onChange(of: model.cloudNotice) { notice in if notice != nil { selected = nil } }
+            .onChange(of: jit.showSetup) { show in if show { selected = nil } }
+            .onChange(of: model.showDetail) { id in
                 guard let id else { return }
                 model.showDetail = nil
                 selected = model.entries.first { $0.id == id }
@@ -5495,7 +5495,7 @@ struct GraphicsSettings: View {
         } header: { Text("Graphics") } footer: {
             Text("These write d3d9 / d3d11 / d3d12 / vulkan into madeira.cfg; changes apply at the next session start. Per-game overrides go in the game's custom config lines (Advanced › This game's config).")
         }
-        .onChange(of: refresh) { _, _ in reload() }
+        .onChange(of: refresh) { _ in reload() }
     }
 }
 
