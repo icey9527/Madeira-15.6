@@ -6930,14 +6930,6 @@ extension View {
         }
     }
 
-    /// iOS 15 compatible: persistentSystemOverlays (iOS 16+) - ignored on old systems.
-    @ViewBuilder func persistentSystemOverlays15(_ visibility: Visibility) -> some View {
-        if #available(iOS 16.0, *) {
-            self.persistentSystemOverlays(visibility)
-        } else {
-            self
-        }
-    }
 }
 
 // MARK: - Starting screen motion
