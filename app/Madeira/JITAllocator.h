@@ -82,7 +82,9 @@ typedef enum {
 void jit_set_requested_mode(int mode);   /* 0/1/2, out-of-range ignored */
 int  jit_requested_mode(void);
 int  jit_effective_mode(void);           /* JIT_MODE_TROLLSTORE or JIT_MODE_STIKDEBUG */
-int  jit_installation_type(void);        /* jit_installation_t */
+int  jit_installation_type(void);        /* jit_installation_t (cached for the app run) */
+/* Re-reads the _TrollStore/_TrollStoreLite markers; for the manual check. */
+int  jit_installation_type_refresh(void);
 bool jit_trollstore_available(void);     /* exactly one TrollStore marker exists */
 /* Last failure from the TrollStore allocation path, "" when none. For the UI. */
 const char *jit_last_error(void);

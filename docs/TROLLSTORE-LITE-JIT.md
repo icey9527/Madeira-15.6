@@ -11,15 +11,19 @@ Madeira 从应用容器根目录（`.app` 的 sibling）分别检查 `_TrollStor
 
 TrollStore 官方代码将 Lite 定义为切换 active marker；官方 RootHelper 的 JIT 路径仍使用 `ptrace` attach/detach。官方没有保证 Madeira 使用的 Mach RX/RW 双映射在 Lite 安装中兼容，因此本检查只验证本机映射行为，不推断代码执行可用。
 
-## Lite 启用门控
+## 本地 JIT 门控（标准 TrollStore 与 Lite 共用）
 
-启用时先检查 `CS_DEBUGGED`，然后用现有本地 RX allocator 创建一页 RX。探测通过 `vm_remap(copy=false)` 建立 RW alias、设置 RW 权限，并用 `vm_region` 读取两边权限：RX 必须可读可执行且不可写，RW 必须可读可写且不可执行。再用 `mach_vm_write` 写入测试值、用 `mach_vm_read_overwrite` 从 RX 读回验证共享 backing。
+标记只决定**用哪条分配路径**：仅 `_TrollStore` 走 `jit26_prepare_region` 的 BRK 协议（有调试器应答时由它分配，没有则回落到自分配），仅 `_TrollStoreLite` 走 `mach_make_memory_entry + vm_map` 自分配，两者同时存在则报冲突。分配之后的验证对两者完全相同。
+
+启用时先检查 `CS_DEBUGGED`，然后用该安装类型对应的分配器创建一页 RX。探测通过 `vm_remap(copy=false)` 建立 RW alias、设置 RW 权限，并用 `vm_region` 读取两边权限：RX 必须可读可执行且不可写，RW 必须可读可写且不可执行。再用 `mach_vm_write` 写入测试值、用 `mach_vm_read_overwrite` 从 RX 读回验证共享 backing。
 
 **最后一步是真执行**：通过 RW alias 写入 `mov x0, #42; ret`，刷新 icache 后从 RX 地址调用。只有返回 42 且没有收到信号才算通过。失败时临时装上的 `SIGSEGV`/`SIGBUS`/`SIGILL` 处理器会跳过该指令并记录信号号，调用方据此报错，而不是让应用崩溃。
 
 这一条来自对 MeloNX 的对比：它在 iOS 18 上只查 `csops` 的 `CS_DEBUGGED`（从不查 `P_TRACED`），并且会主动 detach 调试器后继续运行，说明“CS_DEBUGGED 但调试器已退出”在本机是可以执行代码的。此前 Madeira 额外要求 `dynamic-codesigning` 或调试器在线，把能用的设备拦掉了；现在以真执行结果为准，不再靠推断。
 
 任一阶段失败都会记录阶段和 `kr`，并释放本次 RW、RX 映射；RX allocator 在自身失败时释放 memory entry。通过结果只缓存到 `CS_DEBUGGED` 清除或安装类型变化，轮询 `ready` 不重复分配。池分配和 `jit26_prepare_region` 直接入口再次检查缓存状态；Lite 不会回落到 StikDebug BRK。
+
+**检测频率**：`jit_detect_installation()` 的标记读取在进程内缓存（标记位于容器外，运行期不会变化），`ready` 每 2 秒被库页徽标读取时只做一次 `csops`，**不会重跑探针**；探针只在 Play/启用/手动检查时运行，游戏运行期间不做任何 JIT 检测。
 
 **启用不再无限等待**：Lite 探测改在后台线程执行，结果回到主线程；`enableJIT()` 另有一个 15 秒看门狗，协调器不回调时把 `testing` 置为失败、清掉 `startingJIT` 并报错，避免 Play 永远停在“Starting JIT…”。
 

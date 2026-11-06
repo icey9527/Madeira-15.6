@@ -499,9 +499,25 @@ static bool jit_marker_exists(const char *marker) {
     return access(path, F_OK) == 0;
 }
 
+/* The markers cannot appear or vanish while the app runs (both live outside
+ * the container), so the answer is computed once. This matters because
+ * jit_trollstore_lite_ready() is polled every 2 s by the library badge and on
+ * every Play; the pair costs two _NSGetExecutablePath + access calls now
+ * instead of dozens a minute, and nothing runs while a game is playing. */
 static jit_installation_t jit_detect_installation(void) {
-    return jit_classify_markers(jit_marker_exists("/_TrollStore"),
-                                jit_marker_exists("/_TrollStoreLite"));
+    int cached = __atomic_load_n(&g_installation_kind, __ATOMIC_RELAXED);
+    if (cached < 0) {
+        cached = (int)jit_classify_markers(jit_marker_exists("/_TrollStore"),
+                                           jit_marker_exists("/_TrollStoreLite"));
+        __atomic_store_n(&g_installation_kind, cached, __ATOMIC_RELAXED);
+    }
+    return (jit_installation_t)cached;
+}
+
+/* The manual "check again" in Settings: re-reads the markers once. */
+int jit_installation_type_refresh(void) {
+    __atomic_store_n(&g_installation_kind, -1, __ATOMIC_RELAXED);
+    return (int)jit_detect_installation();
 }
 
 void jit_set_requested_mode(int mode) {
@@ -580,7 +596,12 @@ static void *jit_trollstore_allocate_rx(size_t size) {
     return (void *)address;
 }
 
-static volatile int g_lite_probe_passed;
+/* Set by jit_local_probe_with: the one-place answer for both local backends. */
+static volatile int g_local_probe_passed;
+static int g_local_probe_kind = -1;   /* installation type the cached result belongs to */
+/* jit_detect_installation()'s cached answer; -1 until first read, and again
+ * after jit_installation_type_refresh(). */
+static int g_installation_kind = -1;
 
 /* EXECUTION leg of the Lite probe.
  *
@@ -684,7 +705,13 @@ static bool jit_region_has_protection(void *address, size_t size, vm_prot_t requ
     return true;
 }
 
-static bool jit_trollstore_lite_probe(void) {
+/* One probe for every local backend. `allocate` is how this installation
+ * gets a page: the BRK protocol with a debugger for standard TrollStore, or
+ * mach_make_memory_entry + vm_map for TrollStore Lite. Everything after it --
+ * the RW alias, the protection checks and the execution test -- is the same
+ * question for both, and answering it once keeps the two paths from drifting
+ * (the Lite-only gate is what refused working devices). */
+static bool jit_local_probe_with(void *(*allocate)(size_t)) {
     const size_t size = JIT_PAGE_SIZE;
     mach_port_t task = mach_task_self();
     void *rx = NULL;
@@ -694,9 +721,9 @@ static bool jit_trollstore_lite_probe(void) {
     uint32_t expected = 0x4c495445u;
     uint32_t actual = 0;
     mach_vm_size_t copied = 0;
-    g_lite_probe_passed = 0;
+    g_local_probe_passed = 0;
 
-    rx = jit_trollstore_allocate_rx(size);
+    rx = allocate(size);
     if (!rx) goto failed;
 
     kr = vm_remap(task, &rw, size, 0, VM_FLAGS_ANYWHERE, task,
@@ -741,45 +768,66 @@ static bool jit_trollstore_lite_probe(void) {
 
     vm_deallocate(task, rw, size);
     vm_deallocate(task, (vm_address_t)rx, size);
-    g_lite_probe_passed = 1;
-    jit_log("[trollstore-lite] 双映射与代码执行检查均通过");
+    g_local_probe_passed = 1;
+    g_local_probe_kind = (int)jit_detect_installation();
+    jit_log("[trollstore] 双映射与代码执行检查均通过 (%s backend)",
+            jit_detect_installation() == JIT_INSTALL_TROLLSTORE_LITE ? "Lite" : "standard");
     return true;
 
 failed:
     if (rw) vm_deallocate(task, rw, size);
     if (rx) vm_deallocate(task, (vm_address_t)rx, size);
-    jit_log("[trollstore-lite] 映射检查失败：%s", g_last_error);
+    jit_log("[trollstore] 本地 JIT 检查失败：%s", g_last_error);
     return false;
 }
 
+/* A page from the standard backend: the BRK protocol hands one over when a
+ * debugger services it, and jit26_prepare_region falls back to the same
+ * self-allocated mapping when none does. */
+static void *jit_trollstore_brk_rx(size_t size) {
+    void *page = jit26_prepare_region(NULL, size);
+    if (!page) {
+        jit_set_last_error("%s", g_last_error[0] ? g_last_error
+                                                  : "TrollStore 本地 JIT 分配失败：没有调试器应答，也没有可用的 RX 页");
+    }
+    return page;
+}
+
+/* Whether this installation can run generated code; the local probe above is
+ * the whole answer. Both markers use it, and it repeats only when
+ * CS_DEBUGGED has cleared or the installation type changed. */
 bool jit_trollstore_lite_ready(void) {
     uint32_t flags = 0;
-    if (jit_detect_installation() != JIT_INSTALL_TROLLSTORE_LITE ||
+    jit_installation_t installation = jit_detect_installation();
+    if ((installation != JIT_INSTALL_TROLLSTORE && installation != JIT_INSTALL_TROLLSTORE_LITE) ||
         !jit_cs_status(&flags) || !(flags & CS_DEBUGGED)) {
-        g_lite_probe_passed = 0;
+        g_local_probe_passed = 0;
+        g_local_probe_kind = -1;
         return false;
     }
-    return g_lite_probe_passed != 0;
+    if (g_local_probe_kind != (int)installation) {   /* a different marker since the probe */
+        g_local_probe_passed = 0;
+        g_local_probe_kind = -1;
+        return false;
+    }
+    return g_local_probe_passed != 0;
 }
 
 bool jit_trollstore_probe(void) {
     g_last_error[0] = '\0';
     jit_installation_t installation = jit_detect_installation();
-    if (installation != JIT_INSTALL_TROLLSTORE_LITE || !jit_trollstore_lite_ready()) g_lite_probe_passed = 0;
     if (installation == JIT_INSTALL_CONFLICT || installation == JIT_INSTALL_NONE) {
+        g_local_probe_passed = 0;
         jit_set_marker_error();
         return false;
     }
     if (!jit_check_debugged()) {
+        g_local_probe_passed = 0;
         jit_set_last_error("CS_DEBUGGED 未设置：请通过 TrollStore 的 Open with JIT 启动 Madeira");
         return false;
     }
-    if (installation == JIT_INSTALL_TROLLSTORE_LITE) return jit_trollstore_lite_probe();
-
-    void *address = jit_trollstore_allocate_rx(JIT_PAGE_SIZE);
-    if (!address) return false;
-    vm_deallocate(mach_task_self(), (vm_address_t)address, JIT_PAGE_SIZE);
-    return true;
+    return jit_local_probe_with(installation == JIT_INSTALL_TROLLSTORE_LITE ? jit_trollstore_allocate_rx
+                                                                           : jit_trollstore_brk_rx);
 }
 
 bool jit_task_map_range(uint64_t *min_address, uint64_t *max_address) {
