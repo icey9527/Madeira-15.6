@@ -144,7 +144,11 @@ enum StikJITHelper {
     /// Lite uses a cached one-page mapping check; polling never allocates memory.
     static var ready: Bool {
         guard SigningStatus.current.debugged, !hasMarkerConflict else { return false }
-        if isTrollStoreLite { return jit_trollstore_lite_ready() }   /* mapping + one executed instruction */
+        // Lite: mapping plus one executed instruction, cached for the app run.
+        // Standard TrollStore grants execution itself, so it stays as before --
+        // requiring a probe here would hold a working installation until the
+        // user opened Settings.
+        if isTrollStoreLite { return jit_trollstore_lite_ready() }
         if installationType == 1 && usesTrollStore { return true }
         return !usesTrollStore && (!attachCheck || poolTaken || isDebuggerAttached())
     }
