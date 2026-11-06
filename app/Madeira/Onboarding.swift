@@ -806,7 +806,7 @@ struct SteamSettingsSection: View {
                 Text("设备语言（\(SteamLanguage.name(SteamLanguage.device))）").tag("")
                 ForEach(SteamLanguage.all, id: \.code) { Text($0.name).tag($0.code) }
             }
-            .pickerStyle(.navigationLink)
+            .pickerStyleNavigationLink15()
             .onChange(of: language) { value in SteamLanguage.choose(value.isEmpty ? nil : value) }
             Picker("下载服务器", selection: $serverMode) {
                 Text("自动（Valve 分配）").tag(ServerMode.auto)

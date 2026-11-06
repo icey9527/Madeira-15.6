@@ -32,6 +32,14 @@ on:
         options:
           - macos-26-intel
           - macos-26
+      app_only:
+        description: 只编译 App（跳过 FEX/Wine/LLVM，约 3 分钟，用来快速找 Swift 错误）
+        type: boolean
+        default: false
+      build:
+        description: 在 dev 上也构建（等同于提交信息带 [build]）
+        type: boolean
+        default: true
 
 concurrency:
   # dev 上只有带 [build] 的提交才真的构建（见下方 jobs.build.if）。被跳过的
@@ -50,7 +58,7 @@ env:
   # Phase 4（原生栈降级）时把 APP_ONLY 改回 '0' 跑完整流水线，
   # 届时 nightly 预发布步骤会自动开始产出可安装的 IPA。
   # PR 预检走 app-only 快车道（原生库用空桩，只验证 app 层能编过）。
-  APP_ONLY: '0'
+  APP_ONLY: ${{ inputs.app_only && '1' || '0' }}
   IPHONEOS_DEPLOYMENT_TARGET: '15.6'
 
 jobs:

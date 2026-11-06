@@ -6871,6 +6871,16 @@ extension View {
         return result
     }
 
+    /// iOS 15.6 兼容：`.pickerStyle(.navigationLink)`（iOS 16+）——低版本用
+    /// `.menu`，同样是点开后从列表里选一项。
+    @ViewBuilder func pickerStyleNavigationLink15() -> some View {
+        if #available(iOS 16.0, *) {
+            self.pickerStyle(.navigationLink)
+        } else {
+            self.pickerStyle(.menu)
+        }
+    }
+
     /// iOS 15.6 兼容：persistentSystemOverlays（iOS 16+）——隐藏状态栏区域外
     /// 的系统图标（Home 指示条等）。iOS 15 没有对应 API，保持系统默认。
     @ViewBuilder func persistentSystemOverlays15(_ visibility: Visibility) -> some View {

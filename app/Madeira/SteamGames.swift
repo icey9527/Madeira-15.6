@@ -1033,7 +1033,7 @@ struct SteamBranchPicker: View {
                 Picker("Version", selection: Binding(get: { current }, set: { choices.choose(appID, $0) })) {
                     ForEach(options, id: \.name) { Text(Self.label($0)).tag($0.name) }
                     if !options.contains(where: { $0.name == current }) { Text(current).tag(current) }
-                }.pickerStyle(.navigationLink)
+                }.pickerStyleNavigationLink15()
                 if let note = note(current, branches: branches) {
                     Text(note).font(.caption).foregroundStyle(current == SteamAppInfo.publicBranch ? Color.secondary : Color.orange)
                 }
