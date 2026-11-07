@@ -2620,27 +2620,13 @@ static void load_display_driver(void)
                         "(MADEIRA_GAME_WINDOWS=0 hides them)\n" );
         }
         winios_user_driver.pUpdateDisplayDevices = winios_UpdateDisplayDevices;
-        /* OpenGL behind WGL (opengl_ios.c).
-         *
-         * Installed only when the session really has a desktop GL backend:
-         * `gl-backend = zink` (Mesa OSMesa + MoltenVK present in the bundle's
-         * gl/ folder), or MADEIRA_GL_DRIVER=1 to force the GLES one. Installing
-         * the GLES driver unconditionally broke d3d9 games: Baldr Sky loads
-         * opengl32.dll while it starts, the GLES driver takes that call, and
-         * the DXMT d3d9 shim then never attaches -- device log 2026-11-07
-         * 21:59 has no "[unixlib] d3d9shim" line and zero d3d9 device calls,
-         * and the game quits after its first frame. With MADEIRA_NO_GL=1 the
-         * shim attaches and the game plays. A build without the gl/ dylibs
-         * therefore behaves exactly like 0.1.3 (every context creation fails).
-         * MADEIRA_NO_GL=1 still forces the GL-absent behaviour. */
-        {
-            const char *backend = getenv( "MADEIRA_GL_BACKEND" );
-            const char *force = getenv( "MADEIRA_GL_DRIVER" );   /* 1: install the GLES driver even without zink */
-            int install = backend && !strcmp( backend, "zink" );
-            if (force && force[0] == '1' && !force[1]) install = 1;
-            if (!getenv( "MADEIRA_NO_GL" ) && install)
-                winios_user_driver.pOpenGLInit = winios_OpenGLInit;
-        }
+        /* OpenGL behind WGL (opengl_ios.c). Always installed; winios_OpenGLInit
+         * itself decides at call time whether a backend exists, because the
+         * choice depends on env that is only complete once a program is
+         * running. It answers STATUS_NOT_IMPLEMENTED (the null driver's own
+         * answer) when there is none, which is what keeps d3d9 games on their
+         * d3d9 path -- see the note inside winios_OpenGLInit. */
+        winios_user_driver.pOpenGLInit = winios_OpenGLInit;
         /* Vulkan surfaces on Metal (vulkan_ios.c). win32u calls it only after a
          * Vulkan library was loaded, which needs MADEIRA_VULKAN_LIBRARY. */
         winios_user_driver.pVulkanInit = madeira_ios_VulkanInit;
