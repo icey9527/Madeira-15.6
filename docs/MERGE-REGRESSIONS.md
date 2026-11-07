@@ -165,6 +165,23 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 
 ---
 
+## 坑位 9：新的 GL 驱动会把 d3d9 游戏的 d3d9 顶掉（上游代码本身就有这个坑）
+
+| 项 | 内容 |
+|---|---|
+| **症状** | 某个 d3d9 游戏在旧包能玩，新包「画一帧就自己退出」——注意不是崩，是 `NtTerminateProcess(exit_code=0x0)`，调用来自游戏自己的代码 |
+| **实例** | Baldr Sky（`BaldrSky.exe`）在 S3c 能玩，在 S5 上画一帧后 30 秒自行退出 |
+| **决定性证据** | 同一台设备的两份日志：<br>S3c `[unixlib] opengl32 (GL-absent stub table)` → `[unixlib] d3d9shim -> wow64 table`、`[d3d9-native] ready: 324 slots`、79 条 `[d3d9-census]`<br>S5 `[unixlib] opengl32 (winios WGL)` → **一条 `[unixlib] d3d9shim` 都没有**、0 条 census |
+| **根因** | `build/win32u-unix/driver_ios.c` 里 `pOpenGLInit = winios_OpenGLInit` 是**无条件安装**的。游戏启动时加载 `opengl32.dll`，GLES 驱动在那一刻接管，之后 DXMT 的 d3d9 unix 垫片就再也接不上——d3d9 设备根本没创建，游戏等不到画面就退了 |
+| **开关验证** | 同一个 S5 包，`madeira.cfg` 加 `env.MADEIRA_NO_GL = 1`，BSD 立刻能玩。**配置层就能验证，不用重编** |
+| **权宜修复** | `S5b-gl-gate`：只有 `MADEIRA_GL_BACKEND=zink`（包里带了 `gl/libOSMesa.dylib` + `libMoltenVK.dylib`）或 `MADEIRA_GL_DRIVER=1` 才安装驱动；否则维持 0.1.3 的「创建 GL 上下文一律失败」 |
+| **根治方向** | **惰性初始化**：GL 驱动应当只在 guest 真正创建 WGL 上下文时才拉起，而不是 `opengl32` 一附着就把整个 GL 栈初始化。这样 d3d9 游戏根本碰不到它，加不加 zink 都不会互相干扰。**这条还没做，是真正的 bug** |
+| **上游状态** | **上游就是这段代码**，同一个坑。他们的发布包同样不带 `gl/` 那两个 dylib（`tools/build/prepare-graphics.sh` 是手动 bootstrap，`tools/build/build-ipa.sh` 不调用它），所以上游也只有 gles 后端 |
+
+**以后要把 zink/OSMesa 打进去时必须做的**：重测 d3d9 游戏。如果那时 d3d9 仍被顶掉，就说明根因不是「缺后端」，而是**驱动初始化与 d3d9 的 unixlib 附着互斥**——那才是要修的地方。
+
+---
+
 ## 待补充
 
 以下问题已确认存在但**尚未修复**，查明后请补进对应坑位：
@@ -176,3 +193,9 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 - **单独换 wineserver 会让整机变慢**（2026-11-07 实测，分支 `S4-wineserver`）：Eden 从秒进
   变 30 秒，Steam 一直加载。原因见坑位 8 的门铃那条——新服务端等 ntdll 敲 ring，
   旧 ntdll 不敲。**结论：wineserver 不能单独搬，必须和 ntdll 一起。**
+- **GL 驱动惰性初始化**（坑位 9 的根治方向，尚未动手）：让 `pOpenGLInit` 只在 guest
+  真正创建 WGL 上下文时才生效，而不是 `opengl32` 附着时就把 GL 栈拉起来。做完之后
+  才能安全地把 zink/OSMesa 打进包里，而不必担心顶掉 d3d9 游戏。
+- **BSD（Baldr Sky）在 S5 上自行退出**：已由 `S5b-gl-gate` 修复（就是坑位 9）。
+  若之后又出现同类「画一帧就退」，先查 `[unixlib] d3d9shim` 有没有出现，再查
+  `MADEIRA_NO_GL` / `MADEIRA_GL_BACKEND`。
