@@ -1748,6 +1748,24 @@ uint64_t madeira_shown_frame_count(void) {
     return r > l ? r : l;
 }
 
+/* developerHUDProperties is Apple's private CAMetalLayer property behind the
+ * Metal Performance HUD. It is not part of CAMetalLayer on iPadOS 15.6: there
+ * the selector does not exist at all, and sending it raises
+ * NSInvalidArgumentException, which terminates the app. Device log 2026-11-07
+ * 16:48:08, iPad13,4 on 15.6: Baldr Sky, Kara no Shoujo and Narcissu each died
+ * with "unrecognized selector sent to instance" the moment the first window
+ * layer drew, while 0.1.3 (which never touched the property) played them.
+ * Every use below goes through this check; the HUD switch simply does nothing
+ * where the property is missing. */
+static BOOL winios_metal_hud_property_available(CAMetalLayer *ml)
+{
+    if (!ml) return NO;
+    static BOOL has_setter = YES;
+    if (has_setter && ![ml respondsToSelector:NSSelectorFromString(@"setDeveloperHUDProperties:")])
+        has_setter = NO;
+    return has_setter && [ml respondsToSelector:NSSelectorFromString(@"developerHUDProperties")];
+}
+
 @interface MadeiraWindowMetalLayer : CAMetalLayer
 @property (nonatomic) uintptr_t madeiraHwnd;
 - (void)madeiraSetWindowHidden:(BOOL)hidden;
@@ -1769,7 +1787,9 @@ uint64_t madeira_shown_frame_count(void) {
     if (!__atomic_exchange_n(&_firstDrawableSaid, 1, __ATOMIC_RELAXED)) {
         @autoreleasepool {   /* once per layer: what Apple's Metal HUD is drawn into (MADEIRA_METAL_HUD_MAIN, below) */
             CGSize d = self.drawableSize, b = self.bounds.size;
-            NSString *hud = [self.developerHUDProperties[@"mode"] description];
+            NSString *hud = nil;
+            if (winios_metal_hud_property_available(self))
+                hud = [self.developerHUDProperties[@"mode"] description];
             fprintf(stderr, "[metal-hud] hwnd=0x%llx first drawable %.0fx%.0f px on %.0fx%.0f pt, "
                             "contentsScale %.1f, HUD mode %s\n",
                     (unsigned long long)self.madeiraHwnd, d.width, d.height, b.width, b.height,
@@ -1880,6 +1900,7 @@ static int winios_metal_hud_main_enabled(void) {
 extern CAMetalLayer *madeira_display_layer(void);
 
 static void winios_metal_hud_set(CAMetalLayer *ml, NSDictionary *want) {
+    if (!winios_metal_hud_property_available(ml)) return;   /* iPadOS 15.6 has no such property */
     NSDictionary *have = ml.developerHUDProperties;
     if (have != want && ![have isEqual:want]) ml.developerHUDProperties = want;
 }
