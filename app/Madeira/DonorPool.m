@@ -119,35 +119,3 @@ long MadeiraDonorPoolStart(long megabytes, int purgeable) {
     if (added) MPStartPressureSource();
     return added * 512;
 }
-
-// STAGE-S3-STUBS-BEGIN
-//
-// The three symbols below belong to build/ntdll-unix/virtual_ios.c: the donor
-// pool itself and the swap-tier figures the performance overlay reads. That
-// file is the ntdll stage, not this one, so on this staging branch they are
-// defined here instead, with the same signatures, so the app links.
-//
-// They are NOT weak: a weak definition in an app object keeps the linker from
-// pulling the strong one out of libntdll_unix.a, which would silently shadow
-// the real implementation. Delete this whole block in the commit that lands
-// build/ntdll-unix; keeping both is a duplicate-symbol link error, by design.
-int madeira_donor_pool_add(unsigned int entry, unsigned long long size)
-{
-    (void)entry; (void)size;
-    return 0;
-}
-
-void madeira_donor_pool_set_pressure(int level)
-{
-    (void)level;
-}
-
-void madeira_swap_overlay_stats(unsigned long long *file_mb, unsigned long long *donor_mb,
-                                unsigned long long *donor_pool_mb, unsigned long long *donor_guarded)
-{
-    if (file_mb) *file_mb = 0;
-    if (donor_mb) *donor_mb = 0;
-    if (donor_pool_mb) *donor_pool_mb = 0;
-    if (donor_guarded) *donor_guarded = 0;
-}
-// STAGE-S3-STUBS-END
