@@ -125,14 +125,16 @@ jobs:
             echo "configuration=Debug" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
           elif [ "${GITHUB_REF#refs/heads/}" != "${GITHUB_REF}" ] && [[ "${GITHUB_REF#refs/heads/}" == S* ]]; then
-            # A staged re-add branch publishes its own pre-release under a
-            # staging-<branch> tag, so the package is installable for a device
-            # test. Its tag is its own: it can never move "stable" or "nightly".
+            # A staged re-add branch publishes ONE pre-release under the fixed
+            # tag "staging", so the download link and the file name stay the
+            # same build after build (the previous staging release is deleted
+            # by the publish step above). The branch it came from is only in
+            # the title. "stable" and "nightly" are never touched.
             branch="${GITHUB_REF#refs/heads/}"
-            echo "tag=staging-$branch" >> "$GITHUB_OUTPUT"
+            echo "tag=staging" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=Madeira 分层验证 $branch" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-$branch.ipa" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira 分层验证（$branch）" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-staging.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           else
