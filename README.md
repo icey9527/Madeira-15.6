@@ -56,6 +56,9 @@ Wine's server runs as a thread instead of a separate program.
   on-screen touch controls.
 - **Keyboard, mouse and trackpad** passed through to games as real input.
 - **Video and audio** for cutscenes and music, through FFmpeg, VideoToolbox and AudioToolbox.
+- **Japanese locale** per game, for Japanese games and visual novels whose text
+  shows as squares or gibberish or that do not start: Shift-JIS (code page 932)
+  and a bundled Japanese font ([details](docs/JAPANESE.md)).
 
 ## Requirements
 
@@ -66,8 +69,10 @@ Wine's server runs as a thread instead of a separate program.
   helper. On iOS 27 the built-in helper can pair the iPhone itself, without a
   computer.
 - An **Apple ID** to sideload the app. A free account works; its signing
-  expires after 7 days, so the app needs refreshing weekly. Your games and
-  saves are kept across reinstalls.
+  expires after 7 days, so the app needs refreshing weekly with the installer
+  that signed it. Madeira's own refresh is off by default
+  ([details](docs/JIT.md#refreshing-the-signing)).
+  Your games and saves are kept across reinstalls.
 
 Because JIT needs a debugger, Madeira cannot be offered on the App Store.
 
@@ -81,6 +86,11 @@ Because JIT needs a debugger, Madeira cannot be offered on the App Store.
    [JIT setup](docs/JIT.md).
 4. In **Settings**, check that **JIT** and **Memory+** both show a green check:
    Madeira then says **Ready to play**.
+5. Add a game. Steam games come from **Sign in to Steam** in the library. For
+   a Windows game you already have, copy its whole folder into
+   **Madeira › wine › drive_c** with the Files app, then tap **+** in the
+   library and choose its `.exe`, `.bat` or `.cmd`; see
+   [Adding games](docs/LIBRARY.md#adding-games).
 
 Some 64-bit games need Microsoft's Visual C++ runtime, which is not included
 (see [Licensing](#licensing)).
@@ -96,6 +106,14 @@ git clone --recurse-submodules https://github.com/willfaust/Madeira.git
 (the Wine unix libraries, the ARM64EC Windows modules, FEX, DXMT and the app)
 and some inputs that are not in the repository, such as the toolchains.
 [`docs/BUILDING.md`](docs/BUILDING.md) walks through all of it.
+git clone --recurse-submodules <this repo>
+cd Madeira
+./tools/build-ipa.sh   # produces dist/Madeira.ipa
+
+See [`BUILDING.md`](BUILDING.md) for prerequisites, timing, and re-run notes.
+
+Note that `FEX`, `wine` and `research/dxmt` are submodules pointing at forks
+containing the iOS work; upstream clones will not build here.
 
 ### Repository layout
 
@@ -171,6 +189,7 @@ proposing anything to it.
 - **Jesse** ([@JesseLovelace](https://github.com/JesseLovelace)): Steam Cloud saves, faster game launches, and fixes that let more games run
 - **Dan Perks** ([@danperks](https://github.com/danperks)): in-app JIT without StikDebug, and pairing without a computer
 - **bahacan16** ([@bahacan16](https://github.com/bahacan16)): Direct3D 12 and DXMT fixes, game launcher windows, per-game settings, PlayStation controllers, and save backups
+- **thebcd69 / BCD** ([@thebcd69](https://github.com/thebcd69), also bahacan16 above): engine memory, exception, WoW64, win32u and D3D12 fixes, the memory-host extension experiment, host tests and tested game lists, taken from his [bcd-games](https://github.com/thebcd69/bcd-games) fork and from his pull requests #337 to #346 (credited late; see `THIRD-PARTY-NOTICES.md`)
 - **spitefulowl** ([@spitefulowl](https://github.com/spitefulowl)): Wine and FEX runtime fixes, DXMT texture and memory fixes, audio, the swap tier, and library launch options
 - **meshoklv** ([@meshoklv](https://github.com/meshoklv)): controller fixes for games that ship their own XInput or need focus, touch taps that stay off the mouse, and a crash-guard fix
 - **TheHadesc** ([@TheHadesc](https://github.com/TheHadesc)): Madeira Dock starts for games whose Steam launch entries do not start at zero, and a touch gamepad that survives the in-game keyboard
