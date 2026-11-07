@@ -8521,6 +8521,45 @@ static ULONG_PTR ios_wow_window_pick( unsigned *guard_owned )
          cand += IOS_WOW_WINDOW_SIZE)
         if (ios_wow_window_try( cand, guard_owned )) return cand;
 
+    /* SECOND PASS, below the band: iOS 18 keeps an untagged PROT_NONE
+     * reservation from 17.375 GB to 39.8 GB (device log, iPadOS 18.6), so on
+     * that map every candidate in [16, 40) GB sits in 1.375 GB of usable
+     * space and all of them fail. The hole ml1036 already reports between the
+     * JIT pool and 17.375 GB is 5.375 GB, and 12 GB inside it is 4 GB-aligned.
+     * Only walked after the normal band is exhausted, so a map where the band
+     * works (iOS 15.6 places at 16 GB) never sees a different placement.
+     * Every candidate is still checked free, and ios_wow_band_ok() still
+     * rejects anything below the JIT pool or on top of the image. */
+    {
+        const char *low_env = getenv( "MADEIRA_WOW_LOW_BAND" );   /* 0: never look below the band, as before */
+        int low_allowed = !(low_env && low_env[0] == '0' && !low_env[1]);
+        ULONG_PTR low_floor = (ULONG_PTR)0x200000000ULL;   /* 8 GB */
+        ULONG_PTR low_ceil  = floor;
+        int said = 0;
+
+        if (low_allowed && floor > low_floor)
+        {
+            for (cand = (low_floor + IOS_WOW_WINDOW_SIZE - 1) & ~(IOS_WOW_WINDOW_SIZE - 1);
+                 cand + IOS_WOW_WINDOW_SIZE <= low_ceil;
+                 cand += IOS_WOW_WINDOW_SIZE)
+            {
+                if (!said)
+                {
+                    said = 1;
+                    ERR( "[wow-window] band [%p,%p) has no free slot; retrying below it in "
+                         "[%p,%p) (MADEIRA_WOW_LOW_BAND=0 disables)\n", (void *)floor, (void *)ceil,
+                         (void *)low_floor, (void *)low_ceil );
+                }
+                if (ios_wow_window_try( cand, guard_owned ))
+                {
+                    ERR( "[wow-window] placed below the band at B=%p..%p\n",
+                         (void *)cand, (void *)(cand + IOS_WOW_WINDOW_SIZE) );
+                    return cand;
+                }
+            }
+        }
+    }
+
     /* the band is out of slots: a concurrent 32-bit process may trade the
      * [cage] holdback for one (see ios_wow_carve_holdback_slots) */
     if ((cand = ios_wow_carve_holdback_slots()) && ios_wow_window_try( cand, guard_owned ))
