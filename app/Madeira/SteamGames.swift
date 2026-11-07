@@ -363,11 +363,27 @@ enum SteamDirectStart {
     @Published private(set) var languages: [Int: String] = [:]
     /// The depots each of those install records holds.
     @Published private(set) var depots: [Int: Set<Int>] = [:]
+    /// The DLC each of those install records names (`dlcappid`), with their bytes.
+    @Published private(set) var installedDLC: [Int: [Int: Int64]] = [:]
+    /// The beta branch each of those install records names (`BetaKey`); none for public.
+    @Published private(set) var branches: [Int: String] = [:]
     private var scanning = false
     /// A refresh was asked for while a scan ran (an install record was just
     /// written): scan again once it ends.
     private var rescan = false
     private var lastCount = -1
+
+    /// The last scan's result, kept so the next launch's first page already has the installed games (their pills, sizes
+    /// and update badges) and the scan only confirms it.
+    private struct Snapshot: Codable { var games: [DockGame]; var builds: [Int: Int] }
+    private static let snapshotKey = "madeiraSteamInstalledSnapshot.v1"
+
+    private init() {
+        guard LibraryGridArm.enabled, MadeiraDock.enabled,
+              let data = UserDefaults.standard.data(forKey: Self.snapshotKey),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
+        games = snapshot.games; builds = snapshot.builds; lastCount = snapshot.games.count
+    }
 
     /// Reads the install records again, off the main thread.
     func refresh() {
@@ -378,23 +394,36 @@ enum SteamDirectStart {
         Task.detached(priority: .utility) {
             let found = MadeiraDock.games(drive: drive)
             var builds: [Int: Int] = [:], languages: [Int: String] = [:], depots: [Int: Set<Int>] = [:]
+            var dlc: [Int: [Int: Int64]] = [:], branches: [Int: String] = [:]
             for game in found where SteamInstallPaths.isManaged(library: game.library) && game.installed {
-                let steamApps = SteamInstallPaths.steamApps(drive: drive)
+                let steamApps = drive.appendingPathComponent(game.library, isDirectory: true)
                 if let build = SteamInstallFiles.buildID(appID: game.id, steamApps: steamApps) {
                     builds[game.id] = build
                 }
                 languages[game.id] = SteamInstallFiles.language(appID: game.id, steamApps: steamApps)
                 depots[game.id] = SteamInstallFiles.depots(appID: game.id, steamApps: steamApps)
+                dlc[game.id] = SteamInstallFiles.installedDLC(appID: game.id, steamApps: steamApps)
+                branches[game.id] = SteamInstallFiles.betaKey(appID: game.id, steamApps: steamApps)
             }
-            let recorded = builds, recordedLanguages = languages, recordedDepots = depots
+            let recorded = builds, recordedLanguages = languages, recordedDepots = depots, recordedDLC = dlc
+            let recordedBranches = branches
             await MainActor.run {
                 self.scanning = false
                 let again = self.rescan
                 self.rescan = false
                 if self.games != found { self.games = found }
                 if self.builds != recorded { self.builds = recorded }
+                if LibraryGridArm.enabled {
+                    let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+                    if let data = try? encoder.encode(Snapshot(games: found, builds: recorded)),
+                       data != UserDefaults.standard.data(forKey: Self.snapshotKey) {
+                        UserDefaults.standard.set(data, forKey: Self.snapshotKey)
+                    }
+                }
                 if self.languages != recordedLanguages { self.languages = recordedLanguages }
                 if self.depots != recordedDepots { self.depots = recordedDepots }
+                if self.installedDLC != recordedDLC { self.installedDLC = recordedDLC }
+                if self.branches != recordedBranches { self.branches = recordedBranches }
                 if found.count != self.lastCount {
                     self.lastCount = found.count
                     LogStore.shared.log("[steam-games] installed=\(found.count) ready=\(found.filter(\.installed).count)")
@@ -440,6 +469,7 @@ struct SteamGamesSection: View {
     @AppStorage("madeiraSteamShowUninstalled") private var showUninstalled = true
     @State private var selected: SteamGameSelection?
     @State private var showSignIn = false
+    @State private var showWorkshop = false
 
     /// MADEIRA_LIBRARY_COLLAPSE=0: the section titles do not collapse.
     static var collapsible: Bool { MadeiraConfig.flag("MADEIRA_LIBRARY_COLLAPSE") }
@@ -472,6 +502,22 @@ struct SteamGamesSection: View {
         SteamGamesModel.shared.refresh()
         if SteamOwnedLibrary.enabled && SteamOwnedLibrary.shared.signedIn {
             await SteamOwnedLibrary.shared.refreshLibrary(interactive: true)
+        }
+        // The GOG section refreshes with the same pull (GOGGames.swift).
+        if GOGLibrary.enabled && GOGLibrary.shared.signedIn {
+            await GOGLibrary.shared.refreshLibrary(interactive: true)
+        }
+        // The itch.io section refreshes with the same pull (ItchGames.swift).
+        if ItchLibrary.enabled && ItchLibrary.shared.signedIn {
+            await ItchLibrary.shared.refreshLibrary(interactive: true)
+        }
+        // The Epic Games section refreshes with the same pull (EpicGames.swift).
+        if EpicLibrary.enabled && EpicLibrary.shared.signedIn {
+            await EpicLibrary.shared.refreshLibrary(interactive: true)
+        }
+        // The EA app section refreshes with the same pull (EAGames.swift).
+        if EALibrary.enabled && EALibrary.shared.signedIn {
+            await EALibrary.shared.refreshLibrary(interactive: true)
         }
     }
 
@@ -523,6 +569,13 @@ struct SteamGamesSection: View {
                             }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("刷新 Steam 游戏库")
+                        }
+                        // 展示已安装游戏的 Steam 创意工坊项目。
+                        if SteamOwnedLibrary.workshopEnabled && signedIn && !installed.isEmpty {
+                            Button { showWorkshop = true } label: {
+                                Label("创意工坊", systemImage: "square.stack.3d.up").font(.subheadline)
+                            }
+                            .accessibilityLabel("Steam 创意工坊")
                         }
                     }
                     // Signed out: the account's games need a sign-in; say so here rather
@@ -586,7 +639,10 @@ struct SteamGamesSection: View {
             if libraryEnabled { steam.start(); steam.reconcileSession() }
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { model.refresh(); if libraryEnabled { steam.reconcileSession() } }
+            if phase == .active {
+                model.refresh()
+                if libraryEnabled { steam.reconcileSession(); steam.refreshAfterForeground() }
+            }
         }
         .sheet(item: $selected) { selection in
             SteamGameSheet(appID: selection.id) { entry in
@@ -595,6 +651,7 @@ struct SteamGamesSection: View {
             }
         }
         .sheet(isPresented: $showSignIn) { SteamSignInView() }
+        .sheet(isPresented: $showWorkshop) { SteamWorkshopHub() }
         .alert("Steam", isPresented: Binding(get: { steam.error != nil }, set: { if !$0 { steam.error = nil } })) {
             Button("好", role: .cancel) { steam.error = nil }
         } message: { Text(steam.error ?? "") }
@@ -715,7 +772,7 @@ private func formatBytes(_ bytes: Int64) -> String {
     ByteCountFormatter.string(fromByteCount: max(0, bytes), countStyle: .file)
 }
 
-private extension SteamOwnedLibrary.Download {
+extension SteamOwnedLibrary.Download {
     var transfer: SteamGamesRules.Transfer {
         switch state {
         case .queued: return .queued
@@ -739,7 +796,8 @@ struct SteamGameCell: View {
     var body: some View {
         let download = steam.downloads[item.id]
         let status = SteamGamesRules.status(installed: item.installed, transfer: download?.transfer,
-                                            updateAvailable: steam.updateAvailable(appID: item.id, installedBuild: games.builds[item.id]))
+                                            updateAvailable: steam.updateAvailable(appID: item.id, installedBuild: games.builds[item.id],
+                                                                                   installedBranch: games.branches[item.id]))
         // An installed game's format (bits, graphics API, size) is kept on its library entry.
         let entry = library.entries.first { $0.steamAppID == item.id }
         let notDownloaded = item.installed?.installed != true && download == nil
@@ -859,7 +917,20 @@ struct SteamDownloadStatus: View {
         VStack(alignment: .leading, spacing: 6) {
             ProgressView(value: download.progress.fraction)
             Text(caption).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            if let source { source.font(.caption).foregroundStyle(.secondary) }
         }
+    }
+    /// Where the bytes come from while downloading: the PC on this network
+    /// (Steam's local network game transfers) or Steam's servers.
+    private var source: Label<Text, Image>? {
+        let p = download.progress
+        guard case .active = download.state, p.phase == .downloading else { return nil }
+        if let pc = p.pcName {
+            if p.pcDropped { return Label("From Steam's servers (\(pc) stopped answering)", systemImage: "cloud") }
+            let sent = p.pcBytes > 0 ? " · \(formatBytes(Int64(p.pcBytes))) so far" : ""
+            return Label("From \(pc) on this network\(sent)", systemImage: "desktopcomputer")
+        }
+        return Label("From Steam's servers", systemImage: "cloud")
     }
     private var caption: String {
         let p = download.progress
@@ -869,14 +940,25 @@ struct SteamDownloadStatus: View {
         case .failed(let message): return message
         case .active:
             switch p.phase {
-            case .preparing: return "Preparing download…"
+            case .preparing:
+                switch p.step {
+                case .start: return "Preparing download…"
+                case .fileList: return "Getting the game's file list from Steam…"
+                case .files: return "Looking over the game's files…"
+                }
+            case .checking:
+                let done = p.checkTotal > 0 ? Int(Double(p.checkDone) / Double(p.checkTotal) * 100) : 0
+                return "Checking files already there: \(done)% · \(formatBytes(Int64(p.checkDone))) of \(formatBytes(Int64(p.checkTotal)))"
             case .finishing: return "Finishing…"
             case .downloading:
                 var parts = ["\(Int(p.fraction * 100))%", "\(formatBytes(Int64(p.doneBytes))) of \(formatBytes(Int64(p.totalBytes)))"]
+                // Files already on the drive are checked, not downloaded again.
+                if p.reusedBytes > 0 { parts.append("\(formatBytes(Int64(p.reusedBytes))) already there") }
                 if p.bytesPerSecond > 0 {
                     parts.append("\(formatBytes(Int64(p.bytesPerSecond)))/s")
                     let left = Double(p.totalBytes - min(p.doneBytes, p.totalBytes)) / p.bytesPerSecond
-                    if left.isFinite, left > 60 { parts.append("about \(Int(left / 60) + 1) min left") }
+                    // Unknown while files on the drive are still being checked.
+                    if left.isFinite, left > 60, p.reusedBytes == 0 { parts.append("about \(Int(left / 60) + 1) min left") }
                 }
                 return parts.joined(separator: " · ")
             }
@@ -919,6 +1001,125 @@ struct SteamGameLanguagePicker: View {
     }
 }
 
+// MARK: - Version (Steam branches)
+
+/// Tells the pages that show a game's version that the choice or the kept beta
+/// code changed (SteamBranch keeps them).
+final class SteamBranchChoices: ObservableObject {
+    static let shared = SteamBranchChoices()
+    @MainActor func choose(_ appID: Int, _ name: String) { SteamBranch.choose(name, for: appID); objectWillChange.send() }
+    @MainActor func forgetCode(_ appID: Int) { SteamBranch.setCode(nil, branches: [], for: appID); objectWillChange.send() }
+    @MainActor func changed() { objectWillChange.send() }
+}
+
+struct SteamBranchPicker: View {
+    let appID: Int
+    var installedBranch: String?
+    @ObservedObject private var steam = SteamOwnedLibrary.shared
+    @ObservedObject private var choices = SteamBranchChoices.shared
+    @State private var askingCode = false
+    @State private var code = ""
+    @State private var checking = false
+    @State private var codeResult: String?
+
+    var body: some View {
+        let branches = steam.game(appID)?.branches ?? []
+        let unlocked = Set(SteamBranch.unlocked(appID))
+        let options = branches.filter { !$0.passwordRequired || unlocked.contains($0.name) }
+        let current = SteamBranch.chosen(appID)
+        let hasPrivate = branches.contains(where: \.passwordRequired) || !unlocked.isEmpty
+        Group {
+            if branches.count > 1 || current != SteamAppInfo.publicBranch {
+                Picker("Version", selection: Binding(get: { current }, set: { choices.choose(appID, $0) })) {
+                    ForEach(options, id: \.name) { Text(Self.label($0)).tag($0.name) }
+                    if !options.contains(where: { $0.name == current }) { Text(current).tag(current) }
+                }.pickerStyleNavigationLink15()
+                if let note = note(current, branches: branches) {
+                    Text(note).font(.caption).foregroundStyle(current == SteamAppInfo.publicBranch ? Color.secondary : Color.orange)
+                }
+                if hasPrivate {
+                    if SteamBranch.code(appID) == nil {
+                        Button { code = ""; codeResult = nil; askingCode = true } label: { Label("Enter beta code", systemImage: "key") }
+                            .disabled(!steam.signedIn || checking)
+                    } else { Button("Remove beta code", role: .destructive) { choices.forgetCode(appID) } }
+                }
+                if checking { LabeledContent15("Checking the beta code") { ProgressView() } }
+                if let codeResult { Text(codeResult).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+        .alert("Beta code", isPresented: $askingCode) {
+            TextField("Code", text: $code).textInputAutocapitalization(.never).autocorrectionDisabled()
+            Button("Check") { check() }; Button("Cancel", role: .cancel) {}
+        } message: { Text("The code the game's developer gave for a private beta, as in Steam's Betas tab. Steam checks it.") }
+    }
+
+    static func label(_ branch: SteamAppInfo.Branch) -> String {
+        if branch.name == SteamAppInfo.publicBranch { return "Public (default)" }
+        return branch.description.isEmpty ? branch.name : "\(branch.name) – \(branch.description.prefix(60))"
+    }
+    private func note(_ current: String, branches: [SteamAppInfo.Branch]) -> String? {
+        let installed = installedBranch ?? SteamAppInfo.publicBranch
+        if installedBranch != nil, current != installed {
+            return current == SteamAppInfo.publicBranch ? "Installed: \(installed). Download below goes back to the public build." :
+                "Installed: \(installed == SteamAppInfo.publicBranch ? "public" : installed). Download below switches to \(current)."
+        }
+        guard current != SteamAppInfo.publicBranch else { return nil }
+        if branches.contains(where: { $0.name == current && $0.passwordRequired }), SteamBranch.code(appID) == nil { return "This beta needs its beta code." }
+        return "A beta build: it can be unstable, and its saves may not work on the public build."
+    }
+    private func check() {
+        let typed = code; checking = true; codeResult = nil
+        Task { @MainActor in
+            defer { checking = false }
+            let (opened, problem) = await steam.enterBetaCode(typed, appID: appID)
+            if let problem { codeResult = problem }
+            else if opened.isEmpty { codeResult = "Steam did not accept that code for this game." }
+            else { codeResult = "Opened: " + opened.joined(separator: ", ") + "."; if opened.count == 1 { choices.choose(appID, opened[0]) } else { choices.changed() } }
+        }
+    }
+}
+
+// MARK: - DLC
+
+final class SteamDLCChoices: ObservableObject {
+    static let shared = SteamDLCChoices()
+    @MainActor func set(_ dlcID: Int, on: Bool, for appID: Int) { SteamDLC.setOn(dlcID, on, for: appID); objectWillChange.send() }
+}
+
+struct SteamDLCRows: View {
+    let appID: Int
+    var installedDepots: Set<Int>?
+    var installedDLC: [Int: Int64] = [:]
+    @ObservedObject private var steam = SteamOwnedLibrary.shared
+    @ObservedObject private var choices = SteamDLCChoices.shared
+    var body: some View {
+        let off = SteamDLC.off(appID)
+        ForEach(steam.game(appID)?.dlc ?? []) { dlc in
+            if dlc.depots.isEmpty {
+                LabeledContent15 { Text("No download").foregroundColor(.secondary) } label: {
+                    Text(verbatim: dlc.name)
+                }
+            }
+            else {
+                Toggle(isOn: Binding(get: { !off.contains(dlc.id) }, set: { choices.set(dlc.id, on: $0, for: appID) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(dlc.name)
+                        let note = detail(dlc)
+                        if !note.isEmpty { Text(note).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+        }
+    }
+    private func detail(_ dlc: SteamOwnedDLC) -> String {
+        let size = dlc.downloadBytes > 0 ? "About " + formatBytes(Int64(clamping: dlc.downloadBytes)) : nil
+        guard let installedDepots else { return size ?? "" }
+        if let bytes = installedDLC[dlc.id] { return bytes > 0 ? "Installed, " + formatBytes(bytes) : "Installed" }
+        if Set(dlc.depots).isSubset(of: installedDepots) { return "Installed" }
+        return size.map { $0 + ", not installed" } ?? "Not installed"
+    }
+}
+
 // MARK: - Download sheet
 
 /// A game the account owns that is not installed: Install, Pause, Resume and
@@ -934,6 +1135,9 @@ struct SteamGameSheet: View {
     @State private var freeSpace: Int64?
     @State private var partial = false
     @State private var confirmCancel = false
+    @ObservedObject private var drives = ExternalDrives.shared
+    /// Where a new download goes (Install on); the setting's choice by default.
+    @State private var target: String?
 
     var body: some View {
         let owned = SteamOwnedLibrary.enabled ? steam.owned : []
@@ -970,7 +1174,15 @@ struct SteamGameSheet: View {
                         }
                     }
                     Section {
+                        let choices = drives.steamTargets
+                        if choices.count > 1, item.owned != nil, !games.games.contains(where: { $0.id == appID }) {
+                            Picker("安装位置", selection: Binding(get: { target ?? steam.library(for: appID) }, set: { target = $0 })) {
+                                ForEach(choices, id: \.library) { Text($0.name).tag($0.library) }
+                            }
+                            .disabled(steam.downloads[appID] != nil || partial)
+                        }
                         if item.installed == nil { SteamGameLanguagePicker(appID: appID) }
+                        if item.installed == nil { SteamBranchPicker(appID: appID) }
                         if item.installed == nil, let game = steam.game(appID) {
                             if let bytes = game.downloadBytes {
                                 LabeledContent15("下载大小", value: "约 " + formatBytes(Int64(clamping: bytes)))
@@ -983,9 +1195,18 @@ struct SteamGameSheet: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        if let freeSpace { LabeledContent15("此设备上的可用空间", value: formatBytes(freeSpace)) }
+                        if let freeSpace { LabeledContent15("目标位置可用空间", value: formatBytes(freeSpace)) }
                         Text(SteamGameSheet.downloadNote)
                             .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if item.installed == nil, SteamOwnedLibrary.dlcEnabled, let dlc = steam.game(appID)?.dlc, !dlc.isEmpty {
+                        Section {
+                            SteamDLCRows(appID: appID)
+                        } header: {
+                            Text("DLC")
+                        } footer: {
+                            Text("DLC you own downloads with the game, as in Steam. Turn one off to leave its files out; a change applies when the download next starts or resumes. The sizes above are the game's alone.")
+                        }
                     }
                     Section {
                         Link(destination: URL(string: "https://store.steampowered.com/app/\(appID)/")!) {
@@ -999,12 +1220,11 @@ struct SteamGameSheet: View {
             }
             .navigationTitle("Steam").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-            .task(id: steam.downloads[appID]?.state) {
+            .task(id: "\(String(describing: steam.downloads[appID]?.state))\(target ?? "")") {
                 partial = steam.hasPartialDownload(appID)
-                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            let values = try? docs?.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-                freeSpace = values?.volumeAvailableCapacityForImportantUsage
+                freeSpace = SteamOwnedLibrary.drive.appendingPathComponent(target ?? steam.library(for: appID)).freeSpace
             }
+            .task(id: appID) { await steam.refreshBranches(appID) }
             .confirmationDialog("确定要取消此次下载吗？已下载的文件也会被删除。", isPresented: $confirmCancel, titleVisibility: .visible) {
                 Button("取消下载", role: .destructive) {
                     steam.cancelInstall(appID, installed: games.games.contains { $0.id == appID })
@@ -1014,7 +1234,7 @@ struct SteamGameSheet: View {
         }
     }
 
-    static let downloadNote = "Games download directly from Steam with your account into C:\\Program Files (x86)\\Steam\\steamapps\\common. You can leave Madeira while it downloads: on iOS 26 and later iOS shows the download's progress and keeps it going; on earlier versions it pauses after a short while and continues when you return. A download pauses while a game is running and continues afterwards."
+    static let downloadNote = "Games download directly from Steam with your account, to this iPhone or to the drive picked under Install on. You can leave Madeira while it downloads: on iOS 26 and later iOS shows the download's progress and keeps it going; on earlier versions it pauses after a short while and continues when you return. A download pauses while a game is running and continues afterwards."
 
     @ViewBuilder private func primaryAction(_ item: SteamGamesRules.Item) -> some View {
         if let installed = item.installed {
@@ -1038,7 +1258,7 @@ struct SteamGameSheet: View {
                     .buttonStyle(.borderedProminent)
             }
         } else if item.owned != nil {
-            Button { steam.install(appID) } label: {
+            Button { steam.install(appID, library: partial ? nil : target) } label: {
                 steamActionLabel(partial ? "Resume download" : "Install", symbol: "arrow.down.circle.fill")
             }.buttonStyle(.borderedProminent).disabled(!steam.signedIn)
         }
@@ -1119,7 +1339,7 @@ struct SteamCloudQuitRow: View {
             guard on != oldValue else { return }
             MadeiraConfig.set("env.MADEIRA_STEAM_CLOUD", on ? nil : "0")
             SteamLog.event("[steam-cloud] setting on=\(on ? 1 : 0)")
-            if on { SteamOwnedLibrary.shared.cloudTurnedOn() } else { SteamOwnedLibrary.shared.objectWillChange.send() }
+            if on { SteamOwnedLibrary.shared.cloudTurnedOn() } else { SteamOwnedLibrary.shared.cloudTurnedOff() }
         }
     }
 }
@@ -1242,6 +1462,12 @@ struct SteamCloudSection: View {
 /// the game starts (Madeira Dock, the default, with its per-launch pool choice and
 /// one-time installs; or The game, its own program without Steam, SteamDirectStart),
 /// its update, a repair of its files and Uninstall.
+/// One row of Game details › Steam › Installed DLC.
+struct InstalledDLC: Identifiable, Equatable {
+    let id: Int
+    let bytes: Int64
+}
+
 struct SteamEntrySection: View {
     @Binding var entry: LibraryEntry
     /// The game was uninstalled: the page closes without saving.
@@ -1250,12 +1476,19 @@ struct SteamEntrySection: View {
     @ObservedObject private var steam = SteamOwnedLibrary.shared
     @ObservedObject private var games = SteamGamesModel.shared
     @ObservedObject private var languageChoices = SteamGameLanguageChoices.shared
+    @ObservedObject private var dlcChoices = SteamDLCChoices.shared
+    @ObservedObject private var branchChoices = SteamBranchChoices.shared
     @State private var confirmUninstall = false
     @State private var freeSpace: Int64?
     /// "The game": the install folder's programs (the Program picker) and whether
     /// Steam's launch configuration is being read.
     @State private var programs: [String] = []
     @State private var resolving = false
+    /// Madeira Dock's "Steam starts" choice (DockStartProgram); nil: Steam's own program.
+    @State private var dockProgram: String?
+    /// The DLC Steam's install record lists for this game (app ID, bytes), and their names.
+    @State private var installedDLC: [InstalledDLC]?
+    @State private var dlcNames: [Int: String] = [:]
 
     var body: some View {
         let appID = entry.steamAppID ?? 0
@@ -1295,6 +1528,18 @@ struct SteamEntrySection: View {
                     Text("Madeira Dock 需要 Valve 的客户端组件。请前往“设置”›“Steam”›“Madeira Dock”下载。")
                         .font(.caption).foregroundStyle(.orange)
                 }
+                // 允许选择 Steam 实际启动的程序，以适配会自行关闭启动器的游戏。
+                Picker("Steam 启动程序", selection: Binding(get: { dockProgram ?? "" }, set: { pickDockProgram($0) })) {
+                    Text("Steam 默认选择").tag("")
+                    ForEach(dockPrograms, id: \.self) { Text($0).tag($0) }
+                }.pickerStyle(.menu)
+                if dockProgram != nil {
+                    Text("Madeira 会在下次 Dock 启动时，用此程序替换 Steam 默认启动程序；启动器会保留，恢复默认选择后会还原。游戏仍由 Valve 客户端启动并验证许可证。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("如果游戏启动器会在启动游戏时关闭 Madeira（例如 Fallout: New Vegas），请选择游戏本身的程序。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("本次启动使用较小的 JIT 内存池（512 MB）", isOn: $dock.compactPool)
                 // The game's One-time installs choice (Madeira Dock, DockInstallers).
                 if DockInstallers.choiceEnabled, dock.installPrograms[appID] != nil {
@@ -1303,6 +1548,7 @@ struct SteamEntrySection: View {
                         Text("下次启动时运行").tag(true)
                         Text("跳过").tag(false)
                     }.pickerStyle(.menu)
+                    DockInstallRequestRows(dock: dock, appID: appID, name: entry.title)
                 }
             }
             if let download {
@@ -1311,7 +1557,7 @@ struct SteamEntrySection: View {
                 case .active, .queued: Button("暂停更新") { steam.pause(appID) }
                 case .paused, .failed: Button("继续更新") { steam.install(appID) }
                 }
-            } else if downloads, steam.updateAvailable(appID: appID, installedBuild: games.builds[appID]) {
+            } else if downloads, steam.updateAvailable(appID: appID, installedBuild: games.builds[appID], installedBranch: games.branches[appID]) {
                 Button { steam.install(appID) } label: { Label("有可用更新 — 下载", systemImage: "arrow.down.circle") }
                     .disabled(!steam.signedIn)
             }
@@ -1327,6 +1573,35 @@ struct SteamEntrySection: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if downloads {
+                let installedBranch = games.branches[appID] ?? SteamAppInfo.publicBranch
+                SteamBranchPicker(appID: appID, installedBranch: installedBranch)
+                let chosen = SteamBranch.chosen(appID)
+                if download == nil, chosen != installedBranch {
+                    Button { steam.install(appID) } label: {
+                        Label(chosen == SteamAppInfo.publicBranch ? "下载公开版本" : "下载 \(chosen)", systemImage: "arrow.triangle.branch")
+                    }.disabled(!steam.signedIn)
+                    Text("已存在的相同文件会保留，只下载有差异的内容。Steam 随后会以此版本启动游戏。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if downloads, SteamOwnedLibrary.dlcEnabled, let owned = steam.game(appID)?.dlc, !owned.isEmpty {
+                let installedDepots = games.depots[appID] ?? []
+                let installedDLC = games.installedDLC[appID] ?? [:]
+                DisclosureGroup("已拥有的 DLC（\(owned.count)）") {
+                    SteamDLCRows(appID: appID, installedDepots: installedDepots, installedDLC: installedDLC)
+                    Text("关闭的 DLC 会从下次更新或修复中排除；文件会保留，直到卸载游戏。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if download == nil, let missing = steam.game(appID)?.dlcToDownload(installedDepots: installedDepots, installedDLC: Set(installedDLC.keys)),
+                   !missing.isEmpty {
+                    Button { steam.repair(appID) } label: {
+                        Label(missing.count == 1 ? "下载 DLC：\(missing[0].name)" : "下载 \(missing.count) 个 DLC", systemImage: "puzzlepiece.extension")
+                    }.disabled(!steam.signedIn)
+                    Text("将 DLC 文件添加到游戏中。游戏本身的文件也会检查并保留，因此耗时会略长于只下载 DLC。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if downloads, download == nil {
                 Button { steam.repair(appID) } label: { Label("修复已安装的文件", systemImage: "arrow.triangle.2.circlepath") }
                     .disabled(!steam.signedIn)
@@ -1334,7 +1609,24 @@ struct SteamEntrySection: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             LabeledContent15("应用 ID", value: String(appID))
-            if let freeSpace { LabeledContent15("此设备上的可用空间", value: formatBytes(freeSpace)) }
+            if let dlc = installedDLC {
+                if dlc.isEmpty {
+                    LabeledContent15("已安装 DLC", value: "无")
+                } else {
+                    DisclosureGroup {
+                        ForEach(dlc) { item in
+                            LabeledContent15 {
+                                Text(item.bytes > 0 ? formatBytes(item.bytes) : "").foregroundColor(.secondary)
+                            } label: {
+                                Text(verbatim: dlcNames[item.id] ?? "DLC \(item.id)")
+                            }
+                        }
+                    } label: {
+                        LabeledContent15("已安装 DLC", value: String(dlc.count))
+                    }
+                }
+            }
+            if let freeSpace { LabeledContent15("安装位置可用空间", value: formatBytes(freeSpace)) }
             if let status = dock.status {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("上次 Dock 启动结果").font(.caption).foregroundStyle(.secondary)
@@ -1353,13 +1645,13 @@ struct SteamEntrySection: View {
                 Text("Madeira Dock 会通过 Valve 自家的 Steam 客户端启动游戏，无需打开 Steam 桌面窗口。Valve 客户端会登录你的账户，并判断游戏是否可以运行。")
             }
         }
-        .onAppear { dock.refresh(); games.refresh() }
-        .task(id: download?.state) {
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            let values = try? docs?.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            freeSpace = values?.volumeAvailableCapacityForImportantUsage
+        .onAppear { dock.refresh(); games.refresh(); dockProgram = DockStartProgram.chosen(appID) }
+        .task(id: "\(String(describing: download?.state)) \(installed?.library ?? steam.library(for: appID))") {
+            freeSpace = SteamOwnedLibrary.drive.appendingPathComponent(installed?.library ?? steam.library(for: appID)).freeSpace
         }
         .task(id: "\(entry.steamStart ?? "dock") \(installed?.installed == true) \(download == nil)") { await resolveProgram() }
+        .task(id: "\(installed?.installed == true) \(download == nil) \(games.builds[appID] ?? 0)") { await loadDLC() }
+        .task(id: appID) { if downloads { await steam.refreshBranches(appID) } }
         .confirmationDialog("确定要卸载 \(entry.title) 吗？此设备上下载的文件将被删除，存储在其他位置的存档会保留。",
                             isPresented: $confirmUninstall, titleVisibility: .visible) {
             Button("卸载", role: .destructive) {
@@ -1367,6 +1659,23 @@ struct SteamEntrySection: View {
                 uninstalled()
             }
         }
+    }
+
+    /// "Steam starts" rows: the folder's programs, and a kept choice that is not among them.
+    private var dockPrograms: [String] {
+        guard let chosen = dockProgram, !programs.contains(chosen) else { return programs }
+        return [chosen] + programs
+    }
+
+    /// Madeira Dock's "Steam starts": the next Dock start puts the program in place
+    /// (or the kept launcher back for Steam's choice).
+    private func pickDockProgram(_ program: String) {
+        guard let appID = entry.steamAppID else { return }
+        let next: String? = program.isEmpty ? nil : program
+        guard next != dockProgram else { return }
+        dockProgram = next
+        DockStartProgram.setChosen(appID, next)
+        LogStore.shared.log("[dock-start-program] app=\(appID) chosen=\(next ?? "steam")")
     }
 
     /// The Program picker's rows: the folder's programs, and a kept choice that is not among them.
@@ -1393,14 +1702,33 @@ struct SteamEntrySection: View {
         LogStore.shared.log("[steam-start] app=\(entry.steamAppID ?? 0) program=choice")
     }
 
+    /// Game details › Steam › Installed DLC: the install record's DLC depots, by DLC app.
+    private func loadDLC() async {
+        guard let appID = entry.steamAppID, let game = games.games.first(where: { $0.id == appID }), game.installed else {
+            installedDLC = nil
+            return
+        }
+        let steamApps = MadeiraDock.drive.appendingPathComponent(game.library, isDirectory: true)
+        let found = await Task.detached(priority: .utility) {
+            SteamInstallFiles.installedDLC(appID: appID, steamApps: steamApps)
+        }.value
+        let list = found.map { InstalledDLC(id: $0.key, bytes: $0.value) }.sorted { $0.id < $1.id }
+        installedDLC = list
+        LogStore.shared.log("[steam-dlc] app=\(appID) installed-dlc=\(list.count)")
+        guard !list.isEmpty else { return }
+        dlcNames = await steam.names(ofDLC: list.map(\.id), gameAppID: appID)
+    }
+
     /// "The game": lists the install folder's programs and, unless the user picked one that
     /// is still there, takes Steam's launch configuration for the app (SteamDirectStart.choose);
     /// failing that, the only program when there is exactly one.
     private func resolveProgram() async {
-        guard entry.startsSteamGameDirectly, let appID = entry.steamAppID else { return }
+        guard let appID = entry.steamAppID else { return }
         let folder = LibraryModel.drive.appendingPathComponent(entry.relativePath, isDirectory: true)
         let found = await Task.detached(priority: .userInitiated) { SteamDirectStart.programs(in: folder) }.value
         programs = found
+        // Madeira Dock's "Steam starts" needs only the list.
+        guard entry.startsSteamGameDirectly else { return }
         if entry.steamProgramSource == "choice", let program = entry.steamProgram, found.contains(program) { return }
         resolving = true
         let options = await steam.launchOptions(appID: appID) ?? []

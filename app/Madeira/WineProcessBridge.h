@@ -11,6 +11,22 @@ extern "C" {
 // Returns 0 on success, -1 on error.
 int wine_process_start(const char *prefix_path);
 
+/* Guest stdin. -1 until the pipe is enabled via Documents/madeira-stdin.txt. */
+extern int madeira_stdin_master;
+int  madeira_stdin_is_open(void);
+long madeira_stdin_write(const void *buf, unsigned long len);
+void madeira_stdin_close(void);
+
+/* Guest stdout. Closed until Documents/madeira-stdout.txt enables the
+ * pipe; with it, the guest's stdout is separated from the runtime's log.
+ *
+ * Deliberately a function rather than the extern global the stdin half also
+ * avoids: Swift 6 rejects a C global `var` as shared mutable state, so the
+ * global stays internal to the .m and callers ask through here. Read returns
+ * bytes read, 0 at EOF, or -1 with errno EAGAIN when nothing is pending. */
+int  madeira_stdout_is_open(void);
+long madeira_stdout_read(void *buf, unsigned long len);
+
 // Check if Wine process is running
 int wine_process_is_running(void);
 
@@ -25,8 +41,13 @@ int wine_process_exit_code(void);
 // (0xC...) since the last reset.
 void wine_launched_process_did_exit(int status);
 int wine_crash_exit_status(uint32_t *status);
-// Forget the recorded status; called when a session begins.
+// Forget the recorded status (and the Steam request below); called when a session begins.
 void wine_exit_status_reset(void);
+// A game in a Madeira Dock session asked Steam to start another game
+// (steam://run/<App ID>). ntdll calls wine_steam_run_requested(); returns 1
+// and fills *appid when one was asked since the last reset.
+void wine_steam_run_requested(unsigned int appid);
+int wine_steam_run_request(uint32_t *appid);
 
 // Steam S0 net-test VPN gate: write C:\madeira-continue.flag into the
 // prefix's drive_c so the paused winhttp-test.exe resumes to the Steam
