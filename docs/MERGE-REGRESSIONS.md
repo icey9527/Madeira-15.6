@@ -174,7 +174,8 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 | **决定性证据** | 同一台设备的两份日志：<br>S3c `[unixlib] opengl32 (GL-absent stub table)` → `[unixlib] d3d9shim -> wow64 table`、`[d3d9-native] ready: 324 slots`、79 条 `[d3d9-census]`<br>S5 `[unixlib] opengl32 (winios WGL)` → **一条 `[unixlib] d3d9shim` 都没有**、0 条 census |
 | **根因** | `build/win32u-unix/driver_ios.c` 里 `pOpenGLInit = winios_OpenGLInit` 是**无条件安装**的。游戏启动时加载 `opengl32.dll`，GLES 驱动在那一刻接管，之后 DXMT 的 d3d9 unix 垫片就再也接不上——d3d9 设备根本没创建，游戏等不到画面就退了 |
 | **开关验证** | 同一个 S5 包，`madeira.cfg` 加 `env.MADEIRA_NO_GL = 1`，BSD 立刻能玩。**配置层就能验证，不用重编** |
-| **权宜修复** | `S5b-gl-gate`：只有 `MADEIRA_GL_BACKEND=zink`（包里带了 `gl/libOSMesa.dylib` + `libMoltenVK.dylib`）或 `MADEIRA_GL_DRIVER=1` 才安装驱动；否则维持 0.1.3 的「创建 GL 上下文一律失败」 |
+| **权宜修复** | `S5b-gl-gate`：**默认完全不安装** `pOpenGLInit`，维持 0.1.3 的「创建 GL 上下文一律失败」；只有进程环境里 `MADEIRA_GL_DRIVER=1` 才装上用于测试 |
+| **踩过的弯路** | 第一次把门控放在「安装处」，用 `MADEIRA_GL_BACKEND` 判断——**安装时这个变量还不存在**（bridge 还没跑），门控等于没做。第二次改成「装上去、在 `winios_OpenGLInit` 里按调用时的 env 决定返回 `STATUS_NOT_IMPLEMENTED`」——**也不行**，因为决定权不在返回值上：`pOpenGLInit` 非空本身就让 opengl32 在 DLL 加载时初始化它的 unix 侧，d3d9 路径在那时就没了。**结论：判断必须在安装处，不能靠返回值** |
 | **根治方向** | **惰性初始化**：GL 驱动应当只在 guest 真正创建 WGL 上下文时才拉起，而不是 `opengl32` 一附着就把整个 GL 栈初始化。这样 d3d9 游戏根本碰不到它，加不加 zink 都不会互相干扰。**这条还没做，是真正的 bug** |
 | **上游状态** | **上游就是这段代码**，同一个坑。他们的发布包同样不带 `gl/` 那两个 dylib（`tools/build/prepare-graphics.sh` 是手动 bootstrap，`tools/build/build-ipa.sh` 不调用它），所以上游也只有 gles 后端 |
 
