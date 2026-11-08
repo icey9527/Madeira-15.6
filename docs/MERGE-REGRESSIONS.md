@@ -184,6 +184,37 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 
 ---
 
+## 坑位 10：vendored 源码直接改，别打补丁
+
+判断标准只有一条：**这份源码归谁。**
+
+| 源码 | 归属 | 做法 |
+|---|---|---|
+| `build/*-unix/`、`app/Madeira/` | 我们自己的树 | **直接改**，不建补丁 |
+| `dxmt/` | **vendored**（整棵树在仓库里） | **直接改 vendored 文件**，不建补丁 |
+| `FEX/`、`wine/` | 子模块（别人的 fork） | 补丁是合理做法；更彻底是把改动推进 fork 的引脚 |
+| `mesa` / `dxvk` / `vkd3d` / `vulkan` | 第三方源码包（构建时下载 tar） | 只能打补丁 |
+
+**为什么**：补丁按上下文行匹配。vendored 树一旦换版本，补丁就**静默对不上**；`patch --fuzz` 会把它塞进错误位置，产生一串级联编译错误——看起来像「代码有 bug」，实际是补丁错位。
+
+**踩过的实例**：`build/dxmt-patches/0001-d3d9-index-range-per-draw.patch` 是照较新的 dxmt 写的，我们的 vendored 树缺 `m_direct` / `BuildDrawCapture(begin,end)`，`patch --fuzz` 塞进去后报 `function definition is not allowed here`、`no member named 'm_direct'`，最后只能 `.disabled`。
+
+**现状**：`dxmt-patches` 只剩 `apply.sh` 被 `build/windows-runtime/build.sh` 调用，而**主 CI 流程不调用 windows-runtime**，等于没用。应转成 vendored 树里的直接修改，然后删掉该目录。
+
+**不要误删**（这些是真在用的）：`build/fex-patches/`（子模块，`fex-wow64`/`fex-arm64ec` 会 apply）、`build/dxvk/patches`、`build/mesa-*/patches`、`build/vulkan-ios/patches`（第三方 tar）。
+
+**`patches/wine-opengl-winios.patch` 不是补丁，是出处记录**：它记的是 wine fork 里已经合进去的改动，没有任何构建脚本 apply 它。删了会丢许可证归属信息，保留。
+
+**自查命令**：
+
+```bash
+grep -rn 'apply.sh\|\.patch' build/*/build.sh
+```
+
+只有被列出来的才是真正被应用的补丁。
+
+---
+
 ## 待补充
 
 以下问题已确认存在但**尚未修复**，查明后请补进对应坑位：
@@ -201,3 +232,6 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 - **BSD（Baldr Sky）在 S5 上自行退出**：已由 `S5b-gl-gate` 修复（就是坑位 9）。
   若之后又出现同类「画一帧就退」，先查 `[unixlib] d3d9shim` 有没有出现，再查
   `MADEIRA_NO_GL` / `MADEIRA_GL_BACKEND`。
+- **把 `build/dxmt-patches` 转成 vendored 树的直接修改**（坑位 10）：当前的
+  `0001-d3d9-index-range-per-draw.patch` 已 `.disabled` 且主流程不调用，转化后删掉该目录，
+  避免以后有人再拿它去 `patch --fuzz`。
