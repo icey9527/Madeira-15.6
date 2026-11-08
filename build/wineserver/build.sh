@@ -12,13 +12,6 @@ SHIMS_DIR="$REPO_ROOT/build/ntdll-unix/shims"
 OBJ_DIR="$BUILD_DIR/obj"
 mkdir -p "$OBJ_DIR"
 
-# Copy the base library if we don't have one yet
-if [ ! -f "$OBJ_DIR/libwineserver.a" ]; then
-    if [ -f "$APP_LIB" ]; then
-        cp "$APP_LIB" "$OBJ_DIR/libwineserver.a"
-    fi
-fi
-
 CC_FLAGS=(
     -arch arm64 -isysroot "$SDK" -miphoneos-version-min="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}" -O2
     -I"$WINE_SRC/include" -I"$WINE_SRC/include/wine"
@@ -84,6 +77,8 @@ PATCHED_FILES=(
     "window:$BUILD_DIR/window_ios.c:window.o"
     "user:$WINE_SRC/server/user.c:user.o"
     "mapping:$BUILD_DIR/mapping_ios.c:mapping.o"
+    # Madeira: GC64 LuaJIT substitution, called from mapping_ios.c (both lists).
+    "luajit_compat:$BUILD_DIR/luajit_compat.c:luajit_compat.o"
     "class:$WINE_SRC/server/class.c:class.o"
     "region:$WINE_SRC/server/region.c:region.o"
     "queue:$BUILD_DIR/queue_ios.c:queue.o"
@@ -108,28 +103,34 @@ PATCHED_FILES=(
     # replacements: both lists, as for every entry here.
     "hidpad_ios:hidpad_ios.c:hidpad_ios.o"
     "hidparse_ios:$REPO_ROOT/build/hidpad/hidparse_ios.c:hidparse_ios.o"
+    "storage_device_ios:storage_device_ios.c:storage_device_ios.o"
 )
 
+# Reuse a cached app archive when available; otherwise compile the unchanged
+# Wine server sources listed by Makefile.in with this script's iOS flags.
 BUILD_FAILURES=0
 if [ ! -f "$OBJ_DIR/libwineserver.a" ]; then
-    [ "${1:-all}" = all ] || { echo "A clean wineserver build requires 'all'"; exit 1; }
-    echo "=== Building wineserver base from source ==="
-    BASE_OBJECTS=()
-    for source in "$WINE_SRC/server/"*.c; do
-        base_name="$(basename "$source" .c)"
-        replaced=0
-        for entry in "${PATCHED_FILES[@]}"; do
-            if [ "${entry##*:}" = "$base_name.o" ]; then replaced=1; break; fi
-        done
-        [ "$replaced" = 0 ] || continue
-        if compile_one "$source" "$base_name"; then
-            BASE_OBJECTS+=("$OBJ_DIR/$base_name.o")
-        else
-            BUILD_FAILURES=$((BUILD_FAILURES + 1))
-        fi
-    done
-    [ "${#BASE_OBJECTS[@]}" -gt 0 ] || { echo "No wineserver base sources found"; exit 1; }
-    if [ "$BUILD_FAILURES" = 0 ]; then
+    if [ -f "$APP_LIB" ]; then
+        cp "$APP_LIB" "$OBJ_DIR/libwineserver.a"
+    else
+        [ "${1:-all}" = all ] || { echo "ERROR: build all sources first (run without arguments)"; exit 1; }
+        echo "=== Building wineserver base from source ==="
+        BASE_OBJECTS=()
+        while read -r file; do
+            name="${file%.c}"
+            replaced=0
+            for entry in "${PATCHED_FILES[@]}"; do
+                [ "${entry##*:}" != "$name.o" ] || replaced=1
+            done
+            [ "$replaced" = 0 ] || continue
+            if compile_one "$WINE_SRC/server/$file" "$name"; then
+                BASE_OBJECTS+=("$OBJ_DIR/$name.o")
+            else
+                BUILD_FAILURES=$((BUILD_FAILURES + 1))
+            fi
+        done < <(sed -nE 's/^[[:space:]]+([[:alnum:]_]+\.c)[[:space:]\\]*$/\1/p' "$WINE_SRC/server/Makefile.in")
+        [ "${#BASE_OBJECTS[@]}" -gt 0 ] || { echo "ERROR: no Wine server sources found"; exit 1; }
+        [ "$BUILD_FAILURES" = 0 ] || { echo "Wineserver base: $BUILD_FAILURES compilation failures"; exit 1; }
         ar rcs "$OBJ_DIR/libwineserver.a" "${BASE_OBJECTS[@]}"
     fi
 fi
@@ -196,6 +197,7 @@ REPLACEMENTS=(
     "region.o:region.o"
     "queue.o:queue.o"
     "mapping.o:mapping.o"
+    "luajit_compat.o:luajit_compat.o"
     "winstation.o:winstation.o"
     "thread.o:thread.o"
     "sock.o:sock.o"
@@ -211,6 +213,7 @@ REPLACEMENTS=(
     "inproc_sync.o:inproc_sync.o"   # ml1058
     "hidpad_ios.o:hidpad_ios.o"     # ml2101
     "hidparse_ios.o:hidparse_ios.o" # ml2101
+    "storage_device_ios.o:storage_device_ios.o"
 )
 
 for entry in "${REPLACEMENTS[@]}"; do
@@ -230,10 +233,11 @@ echo "=== Renaming colliding symbols in every .o (objcopy sweep) ==="
 # references uniformly, so cross-file calls inside wineserver still
 # resolve. Externals (win32u, etc.) only see the ws_-prefixed names.
 OBJCOPY="${LLVM_OBJCOPY:-$(command -v llvm-objcopy || true)}"
-if [ ! -x "$OBJCOPY" ]; then
-    OBJCOPY="$(brew --prefix llvm)/bin/llvm-objcopy"
+if [ ! -x "$OBJCOPY" ] && command -v brew >/dev/null 2>&1; then
+    LLVM_PREFIX="$(brew --prefix llvm 2>/dev/null || true)"
+    [ -z "$LLVM_PREFIX" ] || OBJCOPY="$LLVM_PREFIX/bin/llvm-objcopy"
 fi
-[ -x "$OBJCOPY" ] || { echo "llvm-objcopy is required for wineserver symbol renaming"; exit 1; }
+[ -x "$OBJCOPY" ] || { echo "ERROR: llvm-objcopy not found (install LLVM or set LLVM_OBJCOPY)" >&2; exit 1; }
 COLLISIONS=(
     alloc_user_handle free_user_handle get_virtual_screen_rect
     destroy_thread_windows get_window_thread is_desktop_class

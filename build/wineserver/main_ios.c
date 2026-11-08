@@ -6,6 +6,7 @@
 #undef main
 
 extern void madeira_hidpad_init( void );
+extern void madeira_storage_device_init( void );
 
 /* Our replacement that adds logging */
 int wineserver_main(int argc, char *argv[])
@@ -52,6 +53,9 @@ int wineserver_main(int argc, char *argv[])
      * Before wineserver_ready, so the device exists before the first Wine
      * process publishes its registry entries (server_ios.c). */
     madeira_hidpad_init();
+    /* madeira-bcd: PhysicalDrive0 disk metadata (storage_device_ios.c), also
+     * before wineserver_ready. */
+    madeira_storage_device_init();
     /* The app starts Wine on this, not after a fixed pause. Not earlier:
      * init_registry fchdir()s the whole process to the config dir to load
      * system.reg, userdef.reg and user.reg by relative path, and the thread
@@ -68,3 +72,23 @@ int wineserver_main(int argc, char *argv[])
     ws_log("[wineserver] main_loop returned");
     return 0;
 }
+
+/* STAGE-S4-STUBS-BEGIN
+ * These two belong to build/ntdll-unix (the ntdll stage), not to the server:
+ *
+ *   ios_hang_kill_pid        signal_arm64_ios.c publishes the pid of a process
+ *                            whose iOS thread is wedged; the server's main loop
+ *                            takes it and kills it. A zero value means "nothing
+ *                            to kill", which is correct while the detector is
+ *                            not part of this build.
+ *   madeira_dircache_changed the ntdll directory cache's invalidation hook,
+ *                            called after the server changes a directory. With
+ *                            no cache to invalidate it does nothing.
+ *
+ * Defined here so the server links without the ntdll stage. Delete this block
+ * in the commit that lands build/ntdll-unix: keeping both is a duplicate
+ * symbol error, by design.
+ */
+volatile unsigned int ios_hang_kill_pid;
+void madeira_dircache_changed( void ) {}
+/* STAGE-S4-STUBS-END */
