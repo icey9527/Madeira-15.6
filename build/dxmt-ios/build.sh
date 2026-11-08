@@ -9,7 +9,6 @@ BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
 DXMT_SRC="$REPO_ROOT/dxmt/src"
 DXMT_ROOT="$REPO_ROOT/dxmt"
-
 # One tree, one copy of every file — decided here, before any -I path is built.
 #
 # The iOS port's edits live in dxmt/src itself since 2026-10-29 (dxmt is
@@ -17,6 +16,9 @@ DXMT_ROOT="$REPO_ROOT/dxmt"
 # straight from it. winemetal_unix.c now includes madeira_cfg.h by name, which
 # is why -I$REPO_ROOT/build below replaces the four-levels-up path that used to
 # resolve only from the old dxmt/build-src merged tree.
+# Keep the idempotent patch hook for repository changes that are still carried
+# outside the vendored source tree.
+bash "$REPO_ROOT/build/dxmt-patches/apply.sh"
 LLVM_SRC="$REPO_ROOT/toolchains/llvm-project/llvm"
 LLVM_BUILD="$REPO_ROOT/toolchains/llvm-ios-build"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -126,6 +128,19 @@ compile_objc() {
     fi
 }
 
+compile_c() {
+    local src=$1 name=$2 extra="${3:-}"
+    # MADEIRA_ONLY=<name>: recompile one object only.
+    if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then return 0; fi
+    printf "  %-40s " "$name"
+    if xcrun -sdk iphoneos clang $COMMON_FLAGS -std=c11 -Wall $extra \
+        -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
+        echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
+    else
+        echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
+    fi
+}
+
 compile_cxx() {
     local src=$1 name=$2 extra="${3:-}"
     local relative="${src#"$DXMT_SRC/"}"
@@ -146,6 +161,7 @@ compile_madeira_cxx() {
     local src=$1 name=$2 extra="${3:-}" origin=""
     local relative="${src#"$DXMT_SRC/"}"
     extra="$extra -I$(dirname "$src")"
+    if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then return 0; fi
     printf "  %-40s " "$name"
     if xcrun -sdk iphoneos clang++ $COMMON_FLAGS $MADEIRA_CXX_FLAGS $MADEIRA_WARNINGS \
         $MADEIRA_INCLUDES $INCLUDES_DIRECTX $INCLUDES_SHADERS $MADEIRA_DEFS $extra \
@@ -158,6 +174,7 @@ compile_madeira_cxx() {
 
 compile_madeira_c() {
     local src=$1 name=$2 extra="${3:-}"
+    if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then return 0; fi
     printf "  %-40s " "$name"
     if xcrun -sdk iphoneos clang $COMMON_FLAGS -std=c11 $MADEIRA_WARNINGS \
         $MADEIRA_INCLUDES $INCLUDES_DIRECTX $INCLUDES_SHADERS $MADEIRA_DEFS $extra \
@@ -225,6 +242,9 @@ if [[ -f "$BUILD_DIR/../madeira-d3d12/deps.sh" ]] && \
     # ml1149: AMD AGS 64-bit atomics -> native SM6.6 atomics, a DXIL rewrite on
     # the LLVM 15 that airconv already links (bitcode reader + writer).
     compile_cxx "$REPO_ROOT/madeira-d3d12/src/unix/madeira_ags.cpp" madeira_ags
+    # madeira-bcd: the packed shader cache (madeira.cfg d3d12-shader-pack),
+    # plain C so tests/host/check-shader-pack.py builds and runs it on Linux.
+    compile_c "$REPO_ROOT/madeira-d3d12/src/unix/madeira_sc_pack.c" madeira_sc_pack
 else
     # Without madeira_ir_unix every D3D12 shader fails to convert (DXIL and DXBC
     # alike), so an app built past this point cannot run a D3D12 game. deps.sh
@@ -239,6 +259,19 @@ fi
 echo "=== winemetal unix (Objective-C) ==="
 compile_objc "$DXMT_SRC/winemetal/unix/winemetal_unix.c" winemetal_unix
 compile_objc "$DXMT_SRC/winemetal/unix/cache.c"          cache
+
+echo "=== airconv shader headers ==="
+DXMT_METAL_STD="${DXMT_METAL_STD:-metal3.1}"
+mkdir -p "$BUILD_DIR/shader-headers"
+for name in air_msad air_samplepos air_tessellation; do
+    src="$DXMT_SRC/airconv/shaders/$name.metal"
+    dst="$BUILD_DIR/shader-headers/$name.h"
+    if [ ! -f "$dst" ] || [ "$src" -nt "$dst" ] || [ "$0" -nt "$dst" ]; then
+        xcrun -sdk macosx metal -std="$DXMT_METAL_STD" --target=air64-apple-macos14.0 \
+            -o "$BUILD_DIR/shader-headers/$name.air" -c "$src"
+        xxd -n "$name" -i "$BUILD_DIR/shader-headers/$name.air" "$dst"
+    fi
+done
 
 echo "=== airconv (C++ 20, needs LLVM headers) ==="
 for cpp in airconv_context.cpp air_type.cpp air_signature.cpp air_operations.cpp \
@@ -265,6 +298,7 @@ compile_cxx "$BUILD_DIR/metal_probe.mm" metal_probe "-x objective-c++"
 echo "=== DXBCParser (uses exceptions — override) ==="
 for cpp in BlobContainer.cpp DXBCUtils.cpp ShaderBinary.cpp; do
     name=dxbc_$(basename "$cpp" .cpp)
+    if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then continue; fi
     # ShaderBinary uses `throw`, so we can't use -fno-exceptions from CXX_FLAGS.
     printf "  %-40s " "$name"
     if xcrun -sdk iphoneos clang++ $COMMON_FLAGS -std=c++20 -fno-rtti \
@@ -418,7 +452,9 @@ echo "Built: $OUT_LIB ($(wc -c < "$OUT_LIB" | tr -d ' ') bytes)"
 # build would look clean. Replace our members in place and re-index.
 COMBINED="$BUILD_DIR/libdxmt_combined.a"
 echo "=== Combining DXMT and iOS LLVM archives ==="
-xcrun -sdk iphoneos libtool -static -o "$COMBINED" "$OUT_LIB" "$LLVM_BUILD/lib/"*.a
+LLVM_ARCHIVES=("$LLVM_BUILD"/lib/libLLVM*.a)
+[ -f "${LLVM_ARCHIVES[0]}" ] || { echo "ERROR: build the iOS LLVM libraries first"; exit 1; }
+xcrun -sdk iphoneos libtool -static -o "$COMBINED" "$OUT_LIB" "${LLVM_ARCHIVES[@]}"
 APP_COPY="$REPO_ROOT/app/Madeira/libdxmt_combined.a"
 cp "$COMBINED" "$APP_COPY"
 echo "Staged: $APP_COPY ($(wc -c < "$APP_COPY" | tr -d ' ') bytes)"

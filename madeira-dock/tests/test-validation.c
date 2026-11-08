@@ -84,7 +84,11 @@ int main(void)
     assert(!sh_decode_ceg_reply(job, 8, 29, &ceg));
     struct sh_ceg_progress progress = {0};
     assert(sh_ceg_request_step(10, 0, &progress) == SH_CEG_RETRY);
-    assert(sh_ceg_request_step(1, 0, &progress) == SH_CEG_FAIL && progress.failure == 0);
+    /* OK with no job started: already prepared. */
+    progress = (struct sh_ceg_progress){5, 3, 7};
+    assert(sh_ceg_request_step(1, 0, &progress) == SH_CEG_DONE && progress.expected == 0 &&
+           progress.finished == 0 && progress.failure == 0);
+    assert(sh_ceg_record_job(&progress, 1) == SH_CEG_FAIL);
     assert(sh_ceg_request_step(2, 0, &progress) == SH_CEG_FAIL && progress.failure == 2);
     assert(sh_ceg_request_step(55, 3, &progress) == SH_CEG_FAIL && progress.failure == 55);
     assert(sh_ceg_request_step(1, UINT32_MAX, &progress) == SH_CEG_FAIL);
