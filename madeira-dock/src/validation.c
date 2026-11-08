@@ -121,12 +121,17 @@ enum sh_ceg_step sh_ceg_request_step(int32_t result, uint32_t jobs, struct sh_ce
 {
     if (!progress) return SH_CEG_FAIL;
     if (result == 10) return SH_CEG_RETRY;
-    if (result != 1 || !jobs || jobs > SH_CEG_MAX_JOBS) {
+    if (result != 1 || jobs > SH_CEG_MAX_JOBS) {
         progress->failure = result == 1 ? 0 : result;
         return SH_CEG_FAIL;
     }
     *progress = (struct sh_ceg_progress){jobs, 0, 0};
-    return SH_CEG_WAIT;
+    /* OK with no job started: Valve's client found nothing left to prepare.
+     * It answers so once it has produced this account's executables (every
+     * request after the first successful one, until the files are replaced
+     * again); the game's own check of them is untouched. An unset count
+     * (UINT32_MAX) still fails above. */
+    return jobs ? SH_CEG_WAIT : SH_CEG_DONE;
 }
 
 enum sh_ceg_step sh_ceg_record_job(struct sh_ceg_progress *progress, int32_t result)
