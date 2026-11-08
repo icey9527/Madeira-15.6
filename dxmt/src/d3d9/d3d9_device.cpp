@@ -1821,6 +1821,15 @@ MTLD3D9Device::QueryInterface(REFIID riid, void **ppvObject) {
     *ppvObject = static_cast<dxmt::IDxmtDiag9 *>(this);
     return S_OK;
   }
+  // MADEIRA diag (2026-11-08): name what a caller asked for and did not get.
+  // ANGLE's libEGL asserts on a bare `((HRESULT)(result)) >= 0` with no output
+  // of its own (Display.cpp:514, Don't Starve on iPadOS 15.6), so a refused
+  // interface is invisible unless it is said here.
+  if (riid == __uuidof(IDirect3DDevice9Ex))
+    Logger::warn("d3d9: QueryInterface(IDirect3DDevice9Ex) refused -- this device "
+                 "was created through plain IDirect3D9, not IDirect3D9Ex");
+  else
+    Logger::warn("d3d9: QueryInterface refused an interface this device does not expose");
   return E_NOINTERFACE;
 }
 
