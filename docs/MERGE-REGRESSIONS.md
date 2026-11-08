@@ -169,15 +169,16 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 
 | 项 | 内容 |
 |---|---|
-| **症状** | 某个 d3d9 游戏在旧包能玩，新包「画一帧就自己退出」——注意不是崩，是 `NtTerminateProcess(exit_code=0x0)`，调用来自游戏自己的代码 |
-| **实例** | Baldr Sky（`BaldrSky.exe`）在 S3c 能玩，在 S5 上画一帧后 30 秒自行退出 |
+| **症状** | 某个 d3d9 游戏在旧包能玩，新包启动即退出。日志尾是 `loader_init "opengl32.dll" failed to initialize, aborting` + `NtTerminateProcess exit_code=0xc0000142`（STATUS_DLL_INIT_FAILED）。早期版本里表现为「画一帧后自己退（exit_code=0）」，那是同一条路径的另一种收尾 |
+| **实例** | Baldr Sky（`BaldrSky.exe`）在 S3c 能玩，在 S5 上失败 |
 | **决定性证据** | 同一台设备的两份日志：<br>S3c `[unixlib] opengl32 (GL-absent stub table)` → `[unixlib] d3d9shim -> wow64 table`、`[d3d9-native] ready: 324 slots`、79 条 `[d3d9-census]`<br>S5 `[unixlib] opengl32 (winios WGL)` → **一条 `[unixlib] d3d9shim` 都没有**、0 条 census |
-| **根因** | `build/win32u-unix/driver_ios.c` 里 `pOpenGLInit = winios_OpenGLInit` 是**无条件安装**的。游戏启动时加载 `opengl32.dll`，GLES 驱动在那一刻接管，之后 DXMT 的 d3d9 unix 垫片就再也接不上——d3d9 设备根本没创建，游戏等不到画面就退了 |
-| **开关验证** | 同一个 S5 包，`madeira.cfg` 加 `env.MADEIRA_NO_GL = 1`，BSD 立刻能玩。**配置层就能验证，不用重编** |
-| **权宜修复** | `S5b-gl-gate`：**默认完全不安装** `pOpenGLInit`，维持 0.1.3 的「创建 GL 上下文一律失败」；只有进程环境里 `MADEIRA_GL_DRIVER=1` 才装上用于测试 |
-| **踩过的弯路** | 第一次把门控放在「安装处」，用 `MADEIRA_GL_BACKEND` 判断——**安装时这个变量还不存在**（bridge 还没跑），门控等于没做。第二次改成「装上去、在 `winios_OpenGLInit` 里按调用时的 env 决定返回 `STATUS_NOT_IMPLEMENTED`」——**也不行**，因为决定权不在返回值上：`pOpenGLInit` 非空本身就让 opengl32 在 DLL 加载时初始化它的 unix 侧，d3d9 路径在那时就没了。**结论：判断必须在安装处，不能靠返回值** |
-| **根治方向** | **惰性初始化**：GL 驱动应当只在 guest 真正创建 WGL 上下文时才拉起，而不是 `opengl32` 一附着就把整个 GL 栈初始化。这样 d3d9 游戏根本碰不到它，加不加 zink 都不会互相干扰。**这条还没做，是真正的 bug** |
-| **上游状态** | **上游就是这段代码**，同一个坑。他们的发布包同样不带 `gl/` 那两个 dylib（`tools/build/prepare-graphics.sh` 是手动 bootstrap，`tools/build/build-ipa.sh` 不调用它），所以上游也只有 gles 后端 |
+| **根因（最终）** | 决定性的地方在 **`build/ntdll-unix/virtual_ios.c`：opengl32 绑哪一张 unix 表**。默认绑真表（`opengl32 (winios WGL)`），只有设了 `MADEIRA_NO_GL` 才绑 `GL-absent stub table`。真表在本机**初始化失败**：<br>`loader_init "opengl32.dll" failed to initialize, aborting`<br>`NtTerminateProcess exit_code=0xc0000142`（STATUS_DLL_INIT_FAILED）<br>**整个游戏进程被带走。** d3d9 垫片没附着只是它死之前的连带现象，不是原因 |
+| **决定性证据（最终）** | 四次运行的对照：<br>`22:17` → `opengl32 (GL-absent stub table, MADEIRA_NO_GL)`，**无 dllinit 失败**，d3d9 垫片附着、53 条 census<br>`21:59` / `22:11` / `01:35` → `opengl32 (winios WGL)`，**每次都 `failed to initialize, aborting` + `c0000142`**，垫片 0 条 |
+| **开关验证** | `env.MADEIRA_NO_GL = 1` 走 stub 表 → 进程存活。这就解释了之前所有「加开关就好了」的现象 |
+| **权宜修复** | `S5b`：**默认绑 stub 表**——只有 `MADEIRA_GL_BACKEND=zink`（包里带 OSMesa/MoltenVK）或 `MADEIRA_GL_DRIVER=1` 才绑真表；`MADEIRA_NO_GL=1` 仍强制 stub。win32u 侧的 `pOpenGLInit` 走同一条规则（默认不装） |
+| **踩过的弯路** | ① 只在 win32u 的安装处门控——没用，**绑定发生在 ntdll**；② 在 `winios_OpenGLInit` 里按调用时 env 拒绝——没用，真表的初始化在 DLL 加载时就失败，根本走不到那个函数；③ 以为是「d3d9 被顶掉」——那是症状，真因是 `STATUS_DLL_INIT_FAILED` |
+| **根治方向** | 真表**为什么**初始化失败还没查：guest 在 `0x302fdc` 越界读（`[lowalloc] REFUSED`），像是 unix_wgl 初始化时的指针问题。修好之后才能默认开 GL（以及 Fate 需要的 zink） |
+| **上游状态** | 上游同一段代码、同样的默认值。他们的包里也不带 `gl/` 两个 dylib（`prepare-graphics.sh` 手动、`build-ipa.sh` 不调用），所以上游同样绑真表——**同一个坑**，只是没被这个游戏撞上 |
 
 **以后要把 zink/OSMesa 打进去时必须做的**：重测 d3d9 游戏。如果那时 d3d9 仍被顶掉，就说明根因不是「缺后端」，而是**驱动初始化与 d3d9 的 unixlib 附着互斥**——那才是要修的地方。
 
