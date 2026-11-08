@@ -1,3 +1,5 @@
+/* Portions copyright 2026 thebcd69 (BCD): code taken from https://github.com/thebcd69/bcd-games
+ * under GPL-3.0-or-later and modified for Madeira in October and November 2026. See THIRD-PARTY-NOTICES.md. */
 /*
  * Ntdll environment functions
  *
@@ -28,6 +30,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <locale.h>
+#include <limits.h>
 #include <langinfo.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -61,6 +64,8 @@
 #include "ios_wow.h"
 #include "locale_private.h"
 #include "error.h"
+#define MADEIRA_REDACT_WINE
+#include "../madeira_redact.h"   /* the command line is logged with credential-like values redacted */
 
 #ifdef WINE_IOS
 #include <os/log.h>
@@ -95,6 +100,27 @@ const WCHAR system_dir[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','
 
 static CPTABLEINFO unix_cp = { CP_UTF8, 4, '?', 0xfffd, '?', '?' };
 
+/* NLS-EXTRA, opt-in: env.MADEIRA_NLS_EXTRA = 1 lets a code page table that is missing from nls/ be taken from
+ * nls/extra/<name>.nls (Wine's own c_932, c_936, c_949, c_950, c_874, c_1250 ... c_1258, when the bundle carries them
+ * there). Without the switch such a request fails as it always did (NtGetNlsSectionPtr returns
+ * STATUS_OBJECT_NAME_NOT_FOUND, so GetCPInfo and MultiByteToWideChar fail for that code page). Many programs, the Steam
+ * client among them, ask for these pages and cope without them, so the extra tables are offered only to a program whose
+ * own config sets the switch; a program that dereferences the missing table is the case it is for. The variable is read
+ * at every request, not cached. Log tag [nls-extra]. */
+static char *nls_extra_path( const char *dir, const char *name, char *path )
+{
+    static unsigned int reports;
+    const char *e = getenv( "MADEIRA_NLS_EXTRA" );
+    char *extra;
+
+    if (!e || strcmp( e, "1" ) || !access( path, R_OK )) return path;
+    if (asprintf( &extra, "%s/nls/extra/%s.nls", dir, name ) == -1) return path;
+    if (access( extra, R_OK )) { free( extra ); return path; }
+    if (reports++ < 16) dprintf( 2, "[nls-extra] %s.nls comes from nls/extra (MADEIRA_NLS_EXTRA=1)\n", name );
+    free( path );
+    return extra;
+}
+
 static char *get_nls_file_path( UINT type, UINT id )
 {
     const char *dir = build_dir ? build_dir : data_dir;
@@ -119,6 +145,7 @@ static char *get_nls_file_path( UINT type, UINT id )
     }
     if (!name) return NULL;
     if (asprintf( &path, "%s/nls/%s.nls", dir, name ) == -1) return NULL;
+    if (type == NLS_SECTION_CODEPAGE) path = nls_extra_path( dir, name, path );
     return path;
 }
 
@@ -898,7 +925,7 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
         /* iOS DIAGNOSTIC: log env vars containing "Steam" or known Thumper-relevant keys */
         if (STARTS_WITH(str, "Steam") || STARTS_WITH(str, "SteamAppPath") ||
             STARTS_WITH(str, "SteamGameId") || STARTS_WITH(str, "SteamAppId") ||
-            STARTS_WITH(str, "FNA3D_") || STARTS_WITH(str, "MONO_") ||
+            STARTS_WITH(str, "FNA3D_") || STARTS_WITH(str, "MONO_") || STARTS_WITH(str, "LOVE_") ||
             STARTS_WITH(str, "MADEIRA_JIT_WRITE_OFFSET"))
             fprintf(stderr, "[iOS env] processing: %s\n", str);
 
@@ -931,7 +958,7 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
 
         ptr += ntdll_umbstowcs( str, strlen(str) + 1, ptr, end - ptr );
         if (STARTS_WITH(str, "Steam") || STARTS_WITH(str, "FNA3D_") || STARTS_WITH(str, "MONO_") ||
-            STARTS_WITH(str, "MADEIRA_JIT_WRITE_OFFSET"))
+            STARTS_WITH(str, "LOVE_") || STARTS_WITH(str, "MADEIRA_JIT_WRITE_OFFSET"))
             fprintf(stderr, "[iOS env] INCLUDED: %s\n", str);
     }
     *pos = ptr - env;
@@ -1447,6 +1474,31 @@ static void get_initial_console( RTL_USER_PROCESS_PARAMETERS *params )
         params->hStdOutput = (HANDLE)((UINT_PTR)params->hStdOutput | 1);
         output_fd = 1;
     }
+    /* iOS denies pty allocation, so isatty() above can never
+     * be true and every console-only session lands on
+     * CONSOLE_HANDLE_SHELL_NO_WINDOW -- the one value init_console excludes
+     * from every console-creating branch (kernelbase/console.c:2400).
+     *
+     * is_tty_handle() is only a pointer-tag test, and conhost --unix takes its
+     * tty from its own std handles, so tagging a pipe works as well as tagging
+     * a terminal. Opt-in because it makes Wine spawn conhost.exe, which is
+     * unproven in an ARM64EC session. */
+    if (!params->ConsoleHandle)
+    {
+        const char *force = getenv( "MADEIRA_FORCE_CONSOLE" );
+        if (force && *force == '1' && params->hStdInput && params->hStdOutput)
+        {
+            params->ConsoleHandle = CONSOLE_HANDLE_SHELL;
+            params->hStdInput  = (HANDLE)((UINT_PTR)params->hStdInput  | 1);
+            params->hStdOutput = (HANDLE)((UINT_PTR)params->hStdOutput | 1);
+            /* TIOCGWINSZ below fails on a pipe, and conhost --unix accepts 0,
+             * but a real size gives the guest something sane to render into. */
+            if (!params->dwXCountChars) params->dwXCountChars = 80;
+            if (!params->dwYCountChars) params->dwYCountChars = 24;
+            output_fd = 1;
+        }
+    }
+
     if (!params->ConsoleHandle)
         params->ConsoleHandle = CONSOLE_HANDLE_SHELL_NO_WINDOW;
 
@@ -1484,19 +1536,24 @@ static WCHAR *get_initial_directory(void)
         if (madeira_cwd && *madeira_cwd)
         {
             size_t len = strlen(madeira_cwd);
-            ret = malloc((len + 8) * sizeof(WCHAR));
-            /* Format: \??\<path>[\] */
-            ret[0] = '\\'; ret[1] = '?'; ret[2] = '?'; ret[3] = '\\';
-            for (size_t i = 0; i < len; i++) ret[4 + i] = madeira_cwd[i];
-            ret[4 + len] = 0;
-            /* ensure trailing backslash */
-            if (len && ret[4 + len - 1] != '\\')
+            unsigned int written;
+
+            /* The bridge supplies UTF-8, not bytes in the Windows code page.
+             * Leave room for the NT prefix, an optional separator and NUL. */
+            if (len <= UINT_MAX / sizeof(WCHAR) - 6 &&
+                (ret = malloc((len + 6) * sizeof(WCHAR))))
             {
-                ret[4 + len] = '\\';
-                ret[4 + len + 1] = 0;
+                if (!utf8_mbstowcs(ret + 4, len, &written, madeira_cwd, len))
+                {
+                    ret[0] = '\\'; ret[1] = '?'; ret[2] = '?'; ret[3] = '\\';
+                    if (written && ret[4 + written - 1] != '\\') ret[4 + written++] = '\\';
+                    ret[4 + written] = 0;
+                    os_log(OS_LOG_DEFAULT, "[Wine] get_initial_directory: MADEIRA_INITIAL_CWD override = %s", madeira_cwd);
+                    return ret;
+                }
+                free(ret);
+                ret = NULL;
             }
-            os_log(OS_LOG_DEFAULT, "[Wine] get_initial_directory: MADEIRA_INITIAL_CWD override = %s", madeira_cwd);
-            return ret;
         }
     }
 
@@ -2079,8 +2136,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     static const WCHAR valueW[] = {'1',0};
     static const WCHAR pathW[] = {'P','A','T','H'};
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
-    SIZE_T size, env_pos, env_size;
-    WCHAR *dst, *cmdline, *path, *bootstrap;
+    SIZE_T size, curdir_size, env_pos, env_size;
+    WCHAR *dst, *cmdline, *path, *bootstrap, *dos_curdir;
 #ifdef WINE_IOS
     os_log(OS_LOG_DEFAULT, "[Wine] build_initial_params: get_initial_environment...");
 #endif
@@ -2235,10 +2292,13 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     cmdline = build_command_line( main_wargv );
 
     TRACE( "image %s cmdline %s dir %s\n",
-           debugstr_w(main_wargv[0]), debugstr_w(cmdline), debugstr_w(curdir) );
+           debugstr_w(main_wargv[0]), madeira_debugstr_cmdline_w(cmdline), debugstr_w(curdir) );
 
+    /* Leave the following strings after the entire CWD, including its NUL. */
+    dos_curdir = get_dos_path( curdir );
+    curdir_size = max( MAX_PATH * sizeof(WCHAR), (wcslen( dos_curdir ) + 1) * sizeof(WCHAR) );
     size = (sizeof(*params)
-            + MAX_PATH * sizeof(WCHAR)  /* curdir */
+            + curdir_size
             + (wcslen( cmdline ) + 1) * sizeof(WCHAR)  /* command line */
             + (wcslen( main_wargv[0] ) + 1) * sizeof(WCHAR) * 2 /* image path + window title */
             + env_pos * sizeof(WCHAR));
@@ -2254,10 +2314,10 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     params->ProcessGroupId  = GetCurrentProcessId();
 
     params->CurrentDirectory.DosPath.Buffer = (WCHAR *)(params + 1);
-    wcscpy( params->CurrentDirectory.DosPath.Buffer, get_dos_path( curdir ));
+    wcscpy( params->CurrentDirectory.DosPath.Buffer, dos_curdir );
     params->CurrentDirectory.DosPath.Length = wcslen(params->CurrentDirectory.DosPath.Buffer) * sizeof(WCHAR);
-    params->CurrentDirectory.DosPath.MaximumLength = MAX_PATH * sizeof(WCHAR);
-    dst = params->CurrentDirectory.DosPath.Buffer + MAX_PATH;
+    params->CurrentDirectory.DosPath.MaximumLength = curdir_size;
+    dst = (WCHAR *)((char *)params->CurrentDirectory.DosPath.Buffer + curdir_size);
 
     put_unicode_string( main_wargv[0], &dst, &params->ImagePathName );
     put_unicode_string( cmdline, &dst, &params->CommandLine );
@@ -2296,7 +2356,7 @@ void unix_init_startup_info(void)
     WCHAR *src, *dst, *env;
     void *module = NULL;
     unsigned int status;
-    SIZE_T size, info_size, env_size, env_pos;
+    SIZE_T size, curdir_size, info_size, env_size, env_pos;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     struct startup_info_data *info;
     UNICODE_STRING nt_name;
@@ -2341,8 +2401,9 @@ void unix_init_startup_info(void)
     is_prefix_bootstrap = !!find_env_var( env, env_pos, bootstrapW, ARRAY_SIZE(bootstrapW) );
     env[env_pos++] = 0;
 
+    curdir_size = max( MAX_PATH * sizeof(WCHAR), info->curdir_len + sizeof(WCHAR) );
     size = (sizeof(*params)
-            + MAX_PATH * sizeof(WCHAR)  /* curdir */
+            + curdir_size
             + info->dllpath_len + sizeof(WCHAR)
             + info->imagepath_len + sizeof(WCHAR)
             + info->cmdline_len + sizeof(WCHAR)
@@ -2388,8 +2449,8 @@ void unix_init_startup_info(void)
 
     /* curdir is special */
     copy_unicode_string( &src, &dst, &params->CurrentDirectory.DosPath, info->curdir_len );
-    params->CurrentDirectory.DosPath.MaximumLength = MAX_PATH * sizeof(WCHAR);
-    dst = params->CurrentDirectory.DosPath.Buffer + MAX_PATH;
+    params->CurrentDirectory.DosPath.MaximumLength = curdir_size;
+    dst = (WCHAR *)((char *)params->CurrentDirectory.DosPath.Buffer + curdir_size);
 
     if (info->dllpath_len) copy_unicode_string( &src, &dst, &params->DllPath, info->dllpath_len );
     copy_dos_path_string( &src, &dst, &params->ImagePathName, &nt_name, info->imagepath_len );
@@ -2613,7 +2674,15 @@ NTSTATUS WINAPI NtGetNlsSectionPtr( ULONG type, ULONG id, void *unknown, void **
         if (!path) return STATUS_OBJECT_NAME_NOT_FOUND;
         status = open_nls_data_file( path, type == NLS_SECTION_SORTKEYS ? sortdirW : system_dir, &file );
         free( path );
-        if (status) return status;
+        if (status)
+        {
+            /* [nls-missing], log only: which code page tables were asked for and not found (at most 8 lines per session). */
+            static unsigned int missing_reports;
+            if (type == NLS_SECTION_CODEPAGE && missing_reports++ < 8)
+                dprintf( 2, "[nls-missing] code page %u has no table (status %08x); env.MADEIRA_NLS_EXTRA = 1 supplies the extra tables\n",
+                         id, (unsigned int)status );
+            return status;
+        }
         attr.Attributes = OBJ_OPENIF | OBJ_PERMANENT;
         status = NtCreateSection( &handle, SECTION_MAP_READ, &attr, NULL, PAGE_READONLY, SEC_COMMIT, file );
         NtClose( file );

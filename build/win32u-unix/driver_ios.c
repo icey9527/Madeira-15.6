@@ -27,6 +27,7 @@
 
 #include <assert.h>
 #include <pthread.h>
+#include <string.h>   /* strcmp, for the MADEIRA_GL_BACKEND check below */
 
 #include "ntstatus.h"
 #include "ntgdi_private.h"
@@ -2619,9 +2620,28 @@ static void load_display_driver(void)
                         "(MADEIRA_GAME_WINDOWS=0 hides them)\n" );
         }
         winios_user_driver.pUpdateDisplayDevices = winios_UpdateDisplayDevices;
-        /* OpenGL ES behind WGL (opengl_ios.c). MADEIRA_NO_GL=1 restores the
-         * GL-absent behaviour (every context creation fails). */
-        if (!getenv( "MADEIRA_NO_GL" )) winios_user_driver.pOpenGLInit = winios_OpenGLInit;
+        /* OpenGL behind WGL (opengl_ios.c): NOT installed by default.
+         *
+         * What matters is whether pOpenGLInit is null, not what the driver
+         * answers when a context is asked for: with it installed, opengl32
+         * initialises its unix side at DLL load and a d3d9 game loses its
+         * d3d9 path there and then -- device log 2026-11-07 21:59/00:53
+         * (Baldr Sky) has no "[unixlib] d3d9shim" line and zero d3d9 device
+         * calls, while the same build with the driver absent attaches the
+         * shim and plays. Our staging packages carry no gl/ dylibs, so the
+         * usable backend would be the GLES one, which is what costs d3d9
+         * games their d3d9; 0.1.3 had no driver here at all.
+         *
+         * So the default is 0.1.3's behaviour: the null driver answers
+         * STATUS_NOT_IMPLEMENTED and every context creation fails.
+         * MADEIRA_GL_DRIVER=1 (in the process environment, not madeira.cfg,
+         * which does not exist yet at this point) installs it for testing;
+         * once the zink dylibs ship, gate on their presence instead. */
+        {
+            const char *force = getenv( "MADEIRA_GL_DRIVER" );   /* 1: install the GLES driver */
+            if (force && force[0] == '1' && !force[1])
+                winios_user_driver.pOpenGLInit = winios_OpenGLInit;
+        }
         /* Vulkan surfaces on Metal (vulkan_ios.c). win32u calls it only after a
          * Vulkan library was loaded, which needs MADEIRA_VULKAN_LIBRARY. */
         winios_user_driver.pVulkanInit = madeira_ios_VulkanInit;

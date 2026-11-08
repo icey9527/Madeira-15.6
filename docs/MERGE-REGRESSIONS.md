@@ -165,6 +165,25 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 
 ---
 
+## 坑位 9：新的 GL 驱动会把 d3d9 游戏的 d3d9 顶掉（上游代码本身就有这个坑）
+
+| 项 | 内容 |
+|---|---|
+| **症状** | 某个 d3d9 游戏在旧包能玩，新包启动即退出。日志尾是 `loader_init "opengl32.dll" failed to initialize, aborting` + `NtTerminateProcess exit_code=0xc0000142`（STATUS_DLL_INIT_FAILED）。早期版本里表现为「画一帧后自己退（exit_code=0）」，那是同一条路径的另一种收尾 |
+| **实例** | Baldr Sky（`BaldrSky.exe`）在 S3c 能玩，在 S5 上失败 |
+| **决定性证据** | 同一台设备的两份日志：<br>S3c `[unixlib] opengl32 (GL-absent stub table)` → `[unixlib] d3d9shim -> wow64 table`、`[d3d9-native] ready: 324 slots`、79 条 `[d3d9-census]`<br>S5 `[unixlib] opengl32 (winios WGL)` → **一条 `[unixlib] d3d9shim` 都没有**、0 条 census |
+| **根因（最终）** | 决定性的地方在 **`build/ntdll-unix/virtual_ios.c`：opengl32 绑哪一张 unix 表**。默认绑真表（`opengl32 (winios WGL)`），只有设了 `MADEIRA_NO_GL` 才绑 `GL-absent stub table`。真表在本机**初始化失败**：<br>`loader_init "opengl32.dll" failed to initialize, aborting`<br>`NtTerminateProcess exit_code=0xc0000142`（STATUS_DLL_INIT_FAILED）<br>**整个游戏进程被带走。** d3d9 垫片没附着只是它死之前的连带现象，不是原因 |
+| **决定性证据（最终）** | 四次运行的对照：<br>`22:17` → `opengl32 (GL-absent stub table, MADEIRA_NO_GL)`，**无 dllinit 失败**，d3d9 垫片附着、53 条 census<br>`21:59` / `22:11` / `01:35` → `opengl32 (winios WGL)`，**每次都 `failed to initialize, aborting` + `c0000142`**，垫片 0 条 |
+| **开关验证** | `env.MADEIRA_NO_GL = 1` 走 stub 表 → 进程存活。这就解释了之前所有「加开关就好了」的现象 |
+| **权宜修复** | `S5b`：**默认绑 stub 表**——只有 `MADEIRA_GL_BACKEND=zink`（包里带 OSMesa/MoltenVK）或 `MADEIRA_GL_DRIVER=1` 才绑真表；`MADEIRA_NO_GL=1` 仍强制 stub。win32u 侧的 `pOpenGLInit` 走同一条规则（默认不装） |
+| **踩过的弯路** | ① 只在 win32u 的安装处门控——没用，**绑定发生在 ntdll**；② 在 `winios_OpenGLInit` 里按调用时 env 拒绝——没用，真表的初始化在 DLL 加载时就失败，根本走不到那个函数；③ 以为是「d3d9 被顶掉」——那是症状，真因是 `STATUS_DLL_INIT_FAILED` |
+| **根治方向** | 真表**为什么**初始化失败还没查：guest 在 `0x302fdc` 越界读（`[lowalloc] REFUSED`），像是 unix_wgl 初始化时的指针问题。修好之后才能默认开 GL（以及 Fate 需要的 zink） |
+| **上游状态** | 上游同一段代码、同样的默认值。他们的包里也不带 `gl/` 两个 dylib（`prepare-graphics.sh` 手动、`build-ipa.sh` 不调用），所以上游同样绑真表——**同一个坑**，只是没被这个游戏撞上 |
+
+**以后要把 zink/OSMesa 打进去时必须做的**：重测 d3d9 游戏。如果那时 d3d9 仍被顶掉，就说明根因不是「缺后端」，而是**驱动初始化与 d3d9 的 unixlib 附着互斥**——那才是要修的地方。
+
+---
+
 ## 待补充
 
 以下问题已确认存在但**尚未修复**，查明后请补进对应坑位：
@@ -176,3 +195,9 @@ grep -q 'madeira_force_gbk_codepage' app/Madeira/WineProcessBridge.m \
 - **单独换 wineserver 会让整机变慢**（2026-11-07 实测，分支 `S4-wineserver`）：Eden 从秒进
   变 30 秒，Steam 一直加载。原因见坑位 8 的门铃那条——新服务端等 ntdll 敲 ring，
   旧 ntdll 不敲。**结论：wineserver 不能单独搬，必须和 ntdll 一起。**
+- **GL 驱动惰性初始化**（坑位 9 的根治方向，尚未动手）：让 `pOpenGLInit` 只在 guest
+  真正创建 WGL 上下文时才生效，而不是 `opengl32` 附着时就把 GL 栈拉起来。做完之后
+  才能安全地把 zink/OSMesa 打进包里，而不必担心顶掉 d3d9 游戏。
+- **BSD（Baldr Sky）在 S5 上自行退出**：已由 `S5b-gl-gate` 修复（就是坑位 9）。
+  若之后又出现同类「画一帧就退」，先查 `[unixlib] d3d9shim` 有没有出现，再查
+  `MADEIRA_NO_GL` / `MADEIRA_GL_BACKEND`。
