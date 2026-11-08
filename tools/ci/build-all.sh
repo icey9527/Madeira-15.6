@@ -274,6 +274,22 @@ stage_native() {
     if [ -n "${GITHUB_OUTPUT:-}" ]; then
       echo "wine-sha=$(git -C wine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
     fi
+
+    # iOS 的 32 位 OpenGL 靠这份补丁：make_opengl 生成 thunk 时把 32 位 guest
+    # 指针用 ios_wow_host_ptr() 转成 host 地址（窗口基址 B + 偏移）。没有它，
+    # 32 位程序一进 opengl32 的 DllMain 就把 guest 指针当宿主地址解引用，
+    # 在低地址 SEGV（issue #58：Baldr Sky 读 0x302fdc，而正确形式是
+    # 0x400302000）。子模块是只读引脚，所以在这里按 CI 的方式补上，
+    # 与 build/fex-patches/apply.sh 同一个做法；幂等。
+    step "wine：应用 iOS 32 位 OpenGL 补丁"
+    if git -C wine apply --reverse --check ../patches/wine-opengl-winios.patch 2>/dev/null; then
+      echo "  已在（工作树已带该补丁）"
+    elif git -C wine apply --check ../patches/wine-opengl-winios.patch 2>/dev/null; then
+      git -C wine apply ../patches/wine-opengl-winios.patch
+      echo "  已应用"
+    else
+      die "patches/wine-opengl-winios.patch 无法应用到当前 wine 引脚，先更新它"
+    fi
   fi
 
   step "Python 依赖（FEX 配置期脚本需要 packaging）"
