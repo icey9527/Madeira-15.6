@@ -121,7 +121,7 @@ jobs:
             echo "tag=nightly" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "title=nightly" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-dev.ipa" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-nightly.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Debug" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
           elif [ "${GITHUB_REF#refs/heads/}" != "${GITHUB_REF}" ] && [[ "${GITHUB_REF#refs/heads/}" == S* ]]; then
@@ -134,7 +134,7 @@ jobs:
             echo "tag=staging" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "title=staging" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-staging.ipa" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-staging.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           else
@@ -145,8 +145,8 @@ jobs:
             [ -n "$version" ] || { echo "::error::MARKETING_VERSION not found in project.pbxproj"; exit 1; }
             echo "tag=v$version" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "title=v$version" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-v$version.ipa" >> "$GITHUB_OUTPUT"
+            echo "title=$version" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-$version.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           fi
