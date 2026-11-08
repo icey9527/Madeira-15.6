@@ -187,6 +187,9 @@ cpu = 'i686'
 endian = 'little'
 EOF
     cd "$D"
+    # Adds metal_sdk / metal_target to dxmt's meson options (upstream hardcodes
+    # -sdk macosx). The same helper the arm64ec build uses; it is idempotent.
+    python3 "$R/build/dxmt-pe/prepare-meson.py" "$D"
     if [ ! -f build-pe-i386/build.ninja ]; then
         SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
         meson setup --cross-file "$X" --native-file build-osx.txt --buildtype release \
