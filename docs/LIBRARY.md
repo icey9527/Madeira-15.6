@@ -57,6 +57,11 @@ Removing an entry never removes the game's files or saves.
   installed games, Sort by apply to every section. Pull down to read the
   Steam install records and the account's library again. Without Madeira
   Dock the games you added are one grid.
+- Store tabs: with Group by Platform and two or more sections, a segmented control at
+  the top of the page shows **All** of them or one at a time (**Steam**, **Other** for the
+  games you added, **GOG**, **itch.io**, **Epic**, **EA**). Only the sections the page shows
+  get a tab; the choice is remembered, and a tab whose store is turned off shows All. When
+  the segments do not fit across, they become capsules that scroll sideways.
 - Grid cards: a game that is not installed shows its artwork darkened, with a
   download glyph on a soft circle of blur. Every grid card throws ambient
   light on the page around it, like an LED strip behind a TV: its artwork's own
@@ -73,7 +78,8 @@ Removing an entry never removes the game's files or saves.
   shown in Settings (Ready to play) and in the developer interface's status row.
 - **Settings**: JIT and memory status, Enable JIT, JIT method and setup
   (StikDebug or the built-in helper), extended logging, pointer
-  mode (Absolute, Relative or Touch) and touch sensitivity, **Display** (hold
+  mode (Absolute, Relative or Touch) and touch sensitivity, **Graphics** (see
+  below), **Display** (hold
   the display at its maximum rate, off by default), **Memory & sync** (swap tier
   Off/1/2/4 GB, off by default; sync engine, Fastsync by default), the interface
   switch and **Credits** (the last section). Display applies from the next session or FPS limit change; Memory &
@@ -91,6 +97,21 @@ Removing an entry never removes the game's files or saves.
   cap, checked when a block is backed).
   Without the key, `swap-mode = 2` in madeira.cfg means broad and the picker
   shows it; choosing large allocations then writes `classic` explicitly.
+- **Graphics** (below Pointer; `GraphicsSettings` in `Library.swift`) puts the
+  graphics routes on the Settings page itself instead of All settings:
+  **Direct3D 9** (DXMT, the default; DXMT's native frontend for 32-bit games,
+  `d3d9 = native`; or Wine's wined3d on OpenGL, `d3d9 = wined3d`,
+  experimental, needs the Zink backend), **Direct3D 12** (madeira-d3d12, the
+  default; or vkd3d-proton on Vulkan, `d3d12 = vkd3d`, experimental, x64
+  only), **Vulkan driver** (Automatic: off, MoltenVK when vkd3d-proton is
+  chosen; `vulkan = moltenvk`; or `vulkan = kosmickrisp`, iOS 26 on an A14 or
+  newer, offered only when the bundle has `gl/libvulkan_kosmickrisp.dylib`). Each control
+  writes its key in `Documents/madeira.cfg` and the default removes it;
+  **Reset to defaults** removes all four. They apply at the next session
+  start. The rows show the global file; a game's **Advanced › This game's
+  config** lines still win for that game. While the section is shown, All
+  settings and the Settings search leave the four keys out;
+  `env.MADEIRA_GRAPHICS_SETTINGS = 0` hides it and puts them back.
 
 ## Game details
 
@@ -146,18 +167,37 @@ and check-frontend fails if a setting is hidden from it. A profile holds:
   when DXMT has its 40 FPS cap (`madeira_dxmt_has_40_cap`) and the panel reaches
   120 Hz, which is held while it runs (25 ms is three 120 Hz refreshes but
   rounds to 33 ms at 60 Hz); a saved 40 runs as 60 otherwise;
-- reduced-precision x87: off by default, as in FEX; only an explicit choice
-  exports `FEX_X87REDUCEDPRECISION=1`;
+- x87 precision: Automatic by default, which exports nothing, so FEX's own
+  default applies (reduced precision for 32-bit games, ml950, full for 64-bit
+  ones) along with any madeira.cfg line; Reduced exports
+  `FEX_X87REDUCEDPRECISION=1`, Full exports `0`. Full precision on a 32-bit
+  game costs 20-50 % of its CPU (Fallout: New Vegas fell to about 15 FPS);
 - **AVX and AVX2**: off by default, as in FEX's iOS build; only an explicit
   choice exports `MADEIRA_FEX_AVX=1`, which makes the ARM64EC FEX module report
   and emulate AVX/AVX2 for a game built for AVX processors (64-bit games; WOW64
   has no AVX);
+- **Large memory reservations**: off by default; turned on, it adds
+  `oversize-reserve = 1` to the game's config lines (see **This game's config**
+  below), and ntdll serves a reservation of 64 GB or more that the app's
+  address map cannot hold with a real part (`oversize-reserve-mb`, 16 GB) and
+  reports the size that was asked for. It is for a game that quits at start
+  because such a reservation fails (Final Fantasy Tactics - The Ivalice
+  Chronicles reserves 256 GB); a program that falls back to a smaller
+  reservation when a huge one fails is better off without it;
+- **Pause threads fully** (Automatic, On or Off): `MADEIRA_REAL_SUSPEND` for
+  the session (ml730: a Wine SuspendThread really stops the thread instead of
+  only snapshotting it). Automatic follows madeira.cfg's `real-suspend` when
+  set, otherwise turns it on when `GameAssembly.dll` is in the game's folder
+  (Unity IL2CPP, whose garbage collector scans suspended threads' stacks:
+  Megabonk crashed while loading without it). The launch unsets it when
+  nothing chooses it, and wineserver reads it on every call;
 - **CPU cores reported** (Automatic, 1, 2, 4 or 6) and **D3D9 anisotropic
   filtering** (Application default, up to 1×, 2×, 4× or 8×): only a choice
   other than the default exports `MADEIRA_CPU_COUNT` (wine) or
   `DXMT_D9_ANISO_LIMIT` (DXMT); the defaults export nothing. AVX above, frame
   generation below and the game's own config lines are the library's other
-  engine switches;
+  engine switches. The anisotropic filtering picker shows only for a game that
+  already has a limit, so it can be set back to Application default;
 - **Frame generation (experimental)**, off by default: exports
   `MADEIRA_FRAMEGEN=1`, and DXMT's present path (D3D11 and D3D12 alike) shows a
   MetalFX-interpolated frame between every two game frames; FPS limits do not
@@ -173,6 +213,16 @@ and check-frontend fails if a setting is hidden from it. A profile holds:
 - performance overlay, live logs and touch controls for the session, with the
   controls' **opacity** and overall **size**. The touch layout itself is saved
   per game from the in-game editor;
+- **Settings files** (games only; the Desktop has no folder of its own): the
+  game's own .ini files, edited in the app instead of the Files app. **Add
+  .ini file** lists the .ini files in the game's folder and in
+  `Documents/My Games`; the editor shows each section's settings as switches,
+  numbers and text, with an ⓘ that says what a setting does (a sentence for
+  well-known Bethesda settings, otherwise what its name's type letter means).
+  Saving rewrites only the changed values and keeps line endings, encoding,
+  comments and order; a file the game rewrote since it was saved here is
+  noted when it opens. Close the game before saving, or it may write over the
+  change. `tests/host/check-ini-editor.py` covers the parser and the save.
 - **Advanced › This game's config**: lines in madeira.cfg's syntax for this
   game only. Each launch writes them to `Application Support/madeira-game.cfg`
   and exports `MADEIRA_CFG_GAME` (unset when there are none): a key set there
@@ -185,7 +235,8 @@ and check-frontend fails if a setting is hidden from it. A profile holds:
 
 A switch the game's page exports for a launch (the x87, AVX, CPU core,
 anisotropy and frame generation choices, the fastsync switches, the
-DirectInput controller choice) wins over the same `env.` key in madeira.cfg:
+DirectInput controller choice, and the launch's desktop mode) wins over the same
+`env.` key in madeira.cfg:
 that cfg line is skipped and logged as `[madeira-env] ml1184 KEY=... kept`.
 These keys are unset when the session ends (ml1184). The game's own config
 lines come after both and win.
@@ -204,6 +255,19 @@ and command are Dock's:
   shows. A `.bat`/`.cmd` runs as `cmd.exe /c "<file>"` directly, or
   `cmd /c "<file>"` inside the desktop. For **The game** the program is Steam's
   (or the one chosen under **Program**) with Steam's arguments.
+  Directly exports `MADEIRA_DESKTOP=0`, and the Wine desktop exports `1`, so a
+  global `env.MADEIRA_DESKTOP` cannot undo the choice. The game's own config
+  still wins over both. Desktop mode shows GDI windows; Directly presents
+  DirectX to the game display. A small window stays small inside the desktop:
+  choose fullscreen or a higher resolution in the game itself to enlarge it.
+  Enlarging the desktop alone does not increase the game's rendering resolution.
+  For a direct-mode game which draws in monitor pixels but leaves its original
+  small Windows client unchanged, its own config can set
+  `env.MADEIRA_DIRECT_WINDOW_SIZE = 1`. After creating its Metal view, Madeira
+  asks the window's owner thread to size its client to the selected resolution,
+  preserving its border widths, and repeats this if the engine shrinks it
+  again after startup. This is opt-in: ordinary windowed games keep
+  their requested size and use client-coordinate input mapping.
 - **Working folder** (`workingDirectory`): a `C:\` folder; empty means Steam's
   working folder for **The game**, else the program's own folder. It is
   exported as `MADEIRA_WORKDIR` (the bridge reads and clears it) whenever what
@@ -244,13 +308,20 @@ frames arrive (Metal presents or a desktop surface); after 30 seconds it offers
 until the game's own window is shown, and adds **Show desktop**
 (`docs/MADEIRA_DOCK.md`, "Starting screen"). A row of round glyph-only buttons (their words are
 VoiceOver labels) holds **Show live log**, which shows the most recent log lines.
+Lines known to be harmless in a normal session (Wine's other display drivers,
+Windows' sign-in packages, Steam's optional modules such as SDL3 and
+steamservice, the WoW64 CPU fallback, FEX's code-buffer mprotect note) show in
+grey as "harmless: …" instead of as errors; out of memory (c0000017) never does
+(`tests/host/check-harmless-warnings.py`).
 
 The small menu button (drag to move; it fades after three seconds) opens the
 in-game menu:
 
 1. touch controls on/off, their **Controller layout** (the built-in Xbox
    controller, the user's custom layouts, **Create new layout**; remembered per
-   game), their **Opacity** and **Size**, **Edit controls**
+   game), their **Opacity** and **Size**, their **Button style** (Glass, the
+   system's Liquid Glass, or Solid, a plain opaque disc; remembered for every
+   game, also in Settings › Appearance), **Edit controls**
    (the existing editor) and the **Keyboard** (its own key window, with an
    Esc/Ctrl/Shift/Alt/Tab/Enter/arrow row; modifiers latch);
 2. the FPS limit, **Aspect & scaling**, **Eco mode** (the developer overlay's
@@ -258,7 +329,10 @@ in-game menu:
    pointer settings;
 3. the performance overlay and its fields (FPS, average frame time, CPU load
    with the busiest thread, GPU load with GPU time per frame, memory
-   footprint, battery, and the thermal state: Cool, Warm, Hot or Critical; a
+   footprint, JIT memory (the JIT pool's use from its own log lines, such as
+   "JIT 374/560 MB", "(small)" when iPadOS gave the pool less room at launch,
+   "FULL" once a DLL did not fit; counted with Live logs off too), battery,
+   and the thermal state: Cool, Warm, Hot or Critical; a
    change is logged as `[thermal]` while the overlay is shown), then
    **Diagnostics**: **Capture the next frame** and **GPU sync** F1/F6/F5/F0,
    the developer overlay's CAP and F pills, for Direct3D 12 games (shown only with
@@ -308,7 +382,9 @@ reaches the device through it; **Get LocalDevVPN** opens the App Store, and
 Madeira checks again with `canOpenURL` whenever it comes back to the front),
 **Set up JIT**, **Sign in to Steam**, **Prepare Madeira Dock**
 (Valve's client components, about 73 MB, only when Dock is available),
-**Add .NET Framework support** (Wine Mono, only when the device has none), done.
+**Add .NET Framework support** (Wine Mono, only when the device has none),
+**Install the Visual C++ runtime** (the DLLs out of Microsoft's installers, only
+while the device lacks the pinned version), done.
 The JIT page offers three ways in, **In-app** (iOS 27 and later),
 **In-app with pairing file** and **StikDebug**, or **I'll do this later**.
 Each way opens numbered steps that tick off as they are done, with **Back to
@@ -324,7 +400,8 @@ that finished it before revisions (`madeiraOnboardingDone`). After an update,
 setup shows only the pages added since the revision the device last saw
 (`Step.introduced`), under **New in Madeira**: revision 3 adds Wine Mono, so an
 install that finished revision 2 sees just that page, and nothing at all when
-it already has Wine Mono. A new install and **Run setup again** show every page.
+it already has Wine Mono; revision 4 adds the Visual C++ runtime the same way.
+A new install and **Run setup again** show every page.
 The JIT page is always available; Steam pages follow their feature
 switches. Setup never opens over a running session.
 
@@ -342,6 +419,39 @@ build made after `build/wine-mono/fetch.sh`) or, failing that, to the download.
 Settings can remove it again. `tests/host/check-wine-mono.py` runs the installer
 code on the real tarball. Log tag: `[wine-mono]`.
 
+**Visual C++ runtime** (`app/Madeira/VCRedist.swift`, `CabinetReader.c`). Many
+games need Microsoft's Visual C++ 2015-2022 runtime. Builds made with
+`tools/fetch-vcruntime.sh` carry its x64 DLLs in the app bundle and link them
+over Wine's builtins at every session (`WineProcessBridge.m`, 64-bit games only;
+`Documents/vcruntime` is consulted first). Setup's **Install the Visual C++
+runtime** page and **Settings › Visual C++ runtimes** get the runtime onto any
+build, for 64-bit and 32-bit games, without a Windows session: the app downloads
+Microsoft's two installers (`VC_redist.x64.exe` and `VC_redist.x86.exe`, version
+14.44.35211.0, about 38 MB) from their versioned
+`download.visualstudio.microsoft.com` URLs, pinned with their sizes and SHA-256
+sums (`VCRedistPin`; a new runtime version is a new pin), and reads the DLLs out
+of them on the device. Each installer is a WiX Burn bundle: its attached cabinet
+holds the packages, and the packages' own cabinets hold the DLLs as
+`<name>.dll_amd64` / `<name>.dll_x86` entries, all MSZIP, which
+`CabinetReader.c` (a reader written from the Cabinet File Format specification,
+on zlib) unpacks. The 14 names of the bundled set are taken (13 for x86:
+Microsoft ships no 32-bit `vcruntime140_1.dll`); MFC's language DLLs and the
+managed `mfcm140` are not. Every DLL is checked (PE machine, a signature
+directory, the pinned version) and kept byte for byte as Microsoft shipped it,
+under Microsoft's licence terms, in `Documents/vcruntime` (x64) and
+`Documents/vcruntime32` (x86), written to a staging folder and swapped in at once,
+excluded from backups. The bridge links the x64 folder as before, with the two
+exemptions in force (`vcruntime140.dll` and `msvcp140.dll` stay Wine's ARM64EC
+builtins for the SEH and C++ exception paths); `madeira_overlay_vcruntime32`
+links the x86 folder over Wine's i386 builtins in `syswow64`, after the farm links,
+so removing the folder brings the builtins back at the next session. Installed
+means every expected DLL is present in a folder, one version, at least the pinned
+one. Nothing restarts: the next game start uses the files. Install and remove are
+refused while a session runs. `tests/host/check-vcredist.py` compiles the reader
+and the pin, PE and install code, runs the extraction over the real installers
+when they are cached or downloadable, and checks the wiring. Log tags:
+`[vcredist]`, `[WineProc] Symlinked ... MS VC++ x86 runtime DLLs`.
+
 Setup starts no Wine session and allocates no JIT pool. It stores the selected
 JIT method and may store a validated pairing file (paired on the device or
 imported) in the Keychain (docs/JIT.md). On iOS 27, a Connect automatically
@@ -353,8 +463,22 @@ configuration.
 **Settings › JIT** and **Settings › Steam** both show **Run setup again**.
 **Settings › .NET Framework** shows Wine Mono's state, with **Download Wine
 Mono** or **Remove Wine Mono** (hidden in a build that carries it).
+**Settings › Web pages in programs** does the same for **Wine Gecko**
+(`app/Madeira/WineGecko.swift`), the HTML engine Wine's mshtml (Internet
+Explorer's web view) loads for installers and launchers that show web
+pages. Wine's own "Wine Gecko Installer" window downloaded it
+through Wine's networking and hung at 8%. Madeira instead fetches the same two
+MSIs from WineHQ with iOS networking (x86 for 32-bit programs, x86_64 for 64-bit
+ones: clang defines `__x86_64__` for ARM64EC, so Wine's 64-bit side asks for it), by itself on app start when on Wi-Fi (not on
+cellular or in Low Data Mode; without Wi-Fi the next start tries again), checks
+them against the SHA-256s in Wine's `appwiz.cpl`, and keeps them in Application
+Support/WineGecko. Every session links them into the prefix's Wine download
+cache (`$HOME/.cache/wine`, `[wine-gecko]` log lines), so Wine installs Gecko
+from there the first time a program needs it, without the download window.
+After **Remove Wine Gecko** they are not fetched again on its own.
 Settings › Steam also shows the signed-in account with **Sign out of Steam**
-(or **Sign in to Steam**), **Madeira Dock** (Dock's sheet, with the last Dock
+(or **Sign in to Steam**), the **Steam Cloud saves** switch
+(`docs/STEAM_CLOUD.md`), **Madeira Dock** (Dock's sheet, with the last Dock
 result under it). A game started from the Dock sheet here runs as a library
 session: full-screen view, starting screen, in-game menu, and the
 one-session-per-run rule. That session is not added to the library.
@@ -386,6 +510,20 @@ Log tags: `[onboarding]` (`shown reason=… steps=…`, `step=…`, `done`,
 (`native-steam=… sections=… collapse=…`, flags only) and the library and download
 tags of `docs/STEAM_LIBRARY.md`. No account name, token or path is logged.
 
+## Memory+ status
+
+The **Memory+** badge in Settings reads the signed app's Increased Memory
+Limit entitlement (`com.apple.developer.kernel.increased-memory-limit`).
+It is separate from JIT and cannot be enabled by an in-app switch. When it is
+unavailable, the status explains that the signing tool must grant this
+capability to Madeira. Sign and install the updated copy over the existing
+app; do not delete the app and its game data to change this status.
+
+A green badge confirms the entitlement, not that every game will launch or
+that a particular amount of memory is available. The signing-method-specific
+reports in [issue #256](https://github.com/willfaust/Madeira/issues/256) are
+individual results, not a universal workaround.
+
 ## Controllers
 
 Player 1's controller navigates the library through `GamepadInput`: D-pad or
@@ -404,17 +542,21 @@ menu owns input, the game sees a connected pad at rest.
 | `MADEIRA_FRONTEND` | unset | `env.MADEIRA_FRONTEND = 0/1` picks the interface when nothing was chosen in the app |
 | `MADEIRA_FRONTEND_CONTROLLER` | on | no controller navigation |
 | `MADEIRA_ONE_SESSION_PER_RUN` | on | a second session is attempted anyway |
+| `MADEIRA_VCREDIST` | on | setup and Settings do not offer Microsoft's Visual C++ runtime |
+| `MADEIRA_VCREDIST_X86` | on | 32-bit programs keep Wine's own C++ runtime instead of the downloaded Microsoft x86 runtime |
 | `MADEIRA_EXIT_REPORT` | on | no message when a session ends by itself |
 | `MADEIRA_LIBRARY_HIDE_ENDED_DESKTOP` | on | the ended desktop's surface is left as it was |
 | `MADEIRA_BUILD_LABEL` | on | no build label (the `[build]` log line stays) |
 | `MADEIRA_UI_LOG_IDLE` | on | the log view keeps parsing while hidden |
 | `MADEIRA_LOG_VIA_STDERR` | on | Swift log lines use their own file handle |
 | `MADEIRA_RUNTIME_SETTINGS` | on | no Display and Memory & sync sections in Settings |
+| `MADEIRA_GRAPHICS_SETTINGS` | on | no Graphics section in Settings; `d3d9`, `d3d12`, `vulkan` and `windowed` are back in All settings |
 | `MADEIRA_SESSION_TOOLS` | on | no Aspect & scaling (a session does not save it) and no Diagnostics in the in-game menu |
 | `MADEIRA_SESSION_DIAGNOSTICS` | off | `1` shows the in-game menu's Diagnostics: frame capture (render-target pixels to `Documents/capture`) and GPU sync, for Direct3D 12 games |
 | `MADEIRA_FRONTEND_KEYBOARD` | on | Keyboard opens the game view's own keyboard instead of the key window |
 | `MADEIRA_ONBOARDING` | on | first-run setup never opens, and Settings › JIT/Steam have no **Run setup again** |
 | `MADEIRA_LIBRARY_COLLAPSE` | on | the **Steam** and **Other games** titles do not collapse (**Not installed** still folds) |
+| `MADEIRA_LIBRARY_TABS` | on | no store tabs: every section on one page |
 | `MADEIRA_LIBRARY_AMBIENT` | on | no ambient light around the library's grid cards |
 
 Opt-in (`env.NAME = 1`), off by default:
@@ -422,11 +564,23 @@ Opt-in (`env.NAME = 1`), off by default:
 | Switch | `1` means |
 | --- | --- |
 | `MADEIRA_PROMOTE` | the display link also holds the panel at its maximum rate in the 60 FPS cap (Settings › Display) |
+| `MADEIRA_THERMAL_CAP` | while iOS reports the device as serious or critical, a session at the 60 cap, MAX or RAW runs at the 40 cap (30 where 40 is not offered) and returns to its own mode at nominal; a cap chosen during the session is kept. Logs `[thermal-cap]` |
 | `MADEIRA_DEVICE_STATS` | a `[device-load]` line (thermal state, low power, screen capture) every 10 s while Wine runs |
 
 Log tags: `[frontend]`, `[library]` (ml1163: each game's start mode, batch, services and working folder), `[display]`, `[display-shape]`, `[frontend-pointer]`, `[launch-view]`, `[startup-log]`, `[exit-report]`,
 `[session-once]`, `[library-surface]`, `[library-metadata]`, `[onboarding]`,
-`[frontend-controller]`, `[frontend-keyboard]`, `[device-load]`, `[promote]`.
+`[frontend-controller]`, `[frontend-keyboard]`, `[device-load]`, `[promote]`, `[thermal-cap]`.
+
+**Session summary.** When a session returns to the library (or when Madeira
+goes to the background), `LogSummary` reads the log once and writes
+`Documents/madeira-summary.txt`: the program, the programs started and how
+each ended (exit code, or the Windows error in plain words and where it
+crashed), the JIT pool's size and use and whether it ran out, out-of-memory
+and wrong-architecture DLLs, other missing DLLs minus a known-harmless list,
+Quit game and force close, iPadOS refusing a second 32-bit program, and Madeira
+Dock's result in words. A session that never got back is summarised at the
+next launch from `madeira-log.prev.txt`. `tests/host/check-log-summary.py`
+covers it on synthetic logs.
 
 ## Tests
 
@@ -438,10 +592,15 @@ math, controller commands, the exit hook, and the presence of the details and
 in-game menu options), `tests/host/check-runtime-settings.py`
 (`MadeiraConfig.set` and the Settings defaults) and
 `tests/host/check-library-api.py` (renderer detection and the badge).
+`tests/host/check-jit-pool-meter.py` covers the JIT memory field's parsing
+(split pools, the small-pool note) and that it counts with Live logs off.
 `tests/host/check-onboarding.py` covers first-run setup: the JIT choices,
 pairing import, pages with and without Dock, the done key, the
 `MADEIRA_ONBOARDING` switch, and the wiring (no Wine session, no pool or
 engine switch; JIT, sign-in and Dock through their public pieces).
+`tests/host/check-vcredist.py` covers the Visual C++ runtime: the pins, the
+cabinet reader over the real installers, the PE checks, the staged install and
+the wiring.
 `tests/host/check-steam-games.py` covers the library's Steam section: Dock's
 discovery on a synthetic drive_c laid out as Steam writes it, the merge of
 installed and owned games, the section, status, card pill, search, Play and

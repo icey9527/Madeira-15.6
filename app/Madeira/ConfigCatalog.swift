@@ -72,7 +72,7 @@ struct AllSettingsView: View {
         AppNavigationView {
             List {
                 Section {
-                    Text("Madeira 从 madeira.cfg 读取其他所有选项。JIT 内存池、显存、交换内存等级、同步引擎和节能模式位于“设置”›“内存与同步”。大多数选项会在 Madeira 启动时读取，修改后请从应用切换器中彻底关闭并重新打开。选择“默认”会将该选项从文件中移除。向左轻扫某一行可将其重置。")
+                    Text("Madeira 从 madeira.cfg 读取其他所有选项。JIT 内存池、显存、交换内存等级、同步引擎和节能模式位于“设置”›“内存与同步”；Direct3D 9/12 路径、Vulkan 驱动和窗口模式位于“设置”›“图形”。大多数选项会在 Madeira 启动时读取，修改后请从应用切换器中彻底关闭并重新打开。选择“默认”会将该选项从文件中移除。向左轻扫某一行可将其重置。")
                         .font(.footnote).foregroundStyle(.secondary)
                     if changed {
                         Text("请从应用切换器中彻底关闭并重新打开 Madeira，以应用更改。").font(.footnote).foregroundStyle(.orange)
@@ -184,7 +184,7 @@ struct ConfigOptionRow: View {
 }
 
 /// Settings search: the All settings options that match, editable in place.
-/// The options with a row of their own in Settings › Memory & sync are left out.
+/// The options with a row of their own in Settings › Memory & sync or Settings › Graphics are left out.
 struct SettingsSearchResults: View {
     let query: String
     /// Bumped when a Settings sheet closes, so the rows re-read madeira.cfg.

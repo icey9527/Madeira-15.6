@@ -78,19 +78,22 @@ require('SteamEntrySection(entry: $entry)' in detail and 'if entry.steamAppID !=
         'Game details: the Steam section for a Steam game')
 for label in ['"Start with"', '"Madeira Dock"', '"Smaller JIT pool (512 MB) for this launch"', '"One-time installs"',
               '"Run at next start"', '"Skip"', '"Repair installed files"', '"Uninstall"', '"App ID"',
-              '"Free space on this device"', '"Pause update"', '"Resume update"', '"The game"', '"Program"', '"Choose…"']:
+              '"Free space where the game is installed"', '"Pause update"', '"Resume update"', '"The game"', '"Program"', '"Choose…"']:
     require(label in steam_section, f'Steam section: {label}')
 for label in ['"Library details"', '"Choose cover image"', '"Use Steam artwork"', '"Display"', '"Resolution"',
-              '"Aspect & scaling"', '"Compatibility & performance"', '"Reduced-precision x87"', '"CPU cores reported"',
+              '"Aspect & scaling"', '"Compatibility & performance"', '"x87 precision"', '"CPU cores reported"',
               '"D3D9 anisotropic filtering"', '"On screen"', '"Performance overlay"', '"Live logs"', '"Touch controls"',
               '"Control opacity"', '"Control size"', '"Executable"', '"Game details"']:
     require(label in detail, f'Game details: {label}')
-require('if entry.desktop != true && entry.steamAppID == nil {' in detail,
-        "no Launch arguments for a Steam game: Dock starts Steam's own launch option")
+require('if entry.anisotropyLimit != nil {\n                Picker("D3D9 anisotropic filtering"' in detail,
+        'Game details: D3D9 anisotropic filtering only for a game that already has a limit (to set it back)')
+# #461: every library entry but the Desktop has Launch arguments, Steam games too.
+require('if entry.desktop != true {\n            Section {\n                TextField("Launch arguments"' in detail,
+        'Launch arguments for every entry but the Desktop, Steam games included (#461)')
 entries_start = library.index('private var entries: [LibraryEntry] {')
 require('$0.steamAppID == nil' in library[entries_start:library.index('var body: some View {', entries_start)],
         'Steam games are listed in the Steam section only, not also under Games')
-# A card's pills: an installed game shows a library game's (32-bit or 64-bit, graphics API, size), no
+# A card's pills: an installed game shows a library game's (its size), no
 # "Madeira Dock" or "Steam" pill; "Update" joins them; any other state keeps its own pill.
 cell = games[games.index('struct SteamGameCell: View {'):games.index('/// Progress, speed and the state of one download.')]
 require('@ViewBuilder private func pills(_ status: SteamGamesRules.Status, _ entry: LibraryEntry?) -> some View {' in cell and
@@ -101,9 +104,11 @@ require('@ViewBuilder private func pills(_ status: SteamGamesRules.Status, _ ent
         "an installed game's card shows the library pills (and Update), any other state its own pill, in all three "
         "layouts (dense list, list, grid); no Dock or Steam pill")
 badges = library[library.index('struct LibraryBadges: View {'):library.index('struct LibraryStatus: View {')]
-require(badges.index('badge("\\(entry.bits)-bit")') < badges.index('LibraryRendererBadge.compact(entry.graphicsAPI)') <
-        badges.index('if let note { badge(note) }') < badges.index('private var size'),
-        'the pills in order: bits, graphics API, Update, then the size')
+# The pills' texts are one rule (LibraryBadges.formatTexts, also the zoomable grid's measured labels).
+# No bitness or graphics API pill: both were read from the program before it ran and were often wrong.
+require('entry.bits' not in badges and 'graphicsAPI' not in badges and 'if let note { texts.append(note) }' in badges and
+        badges.index('ForEach(Self.formatTexts(entry, note: note)') < badges.index('private var size'),
+        'the pills: no bitness or graphics API pill; Update, then the size')
 require('await library.refreshSteamMetadata(game, title: item.name)' in cell and 'if status.showsFormat, let game = item.installed' in cell,
         "an installed game's card reads its format through its library entry")
 steam_meta = library[library.index('    func refreshSteamMetadata('):]
@@ -122,11 +127,11 @@ require('stored?.steamProgramSource == "choice" ? stored?.steamProgram : nil' in
         'LibraryMetadataScanner.shared.scan(program.url, drive: drive, countBytes: false)' in steam_meta,
         'the program is the one "The game" starts; bits from its PE header, the API as for any library game')
 require(steam_meta.count('Task.detached(priority: .utility)') == 3 and 'updated.folderBytes = record.size ?? updated.folderBytes' in steam_meta
-        and 'guard !Task.isCancelled else { return }' in steam_meta and 'save(updated)' in steam_meta,
+        and 'guard !Task.isCancelled else { return }' in steam_meta and 'landSteamMetadata(updated)' in steam_meta,
         "file reads off the main thread; the size is the install record's; the result is kept on the game's entry")
 require('LogStore.shared.log("[steam-games] metadata app=\\(game.id) bits=\\(updated.bits) api=\\(api ?? "unknown")")' in steam_meta
         and steam_meta.count('LogStore') == 1, '[steam-games] metadata logs the App ID, bits and API only')
-save_body = library[library.index('    func save(_ entry: LibraryEntry) {'):library.index('    func remove(_ id: UUID) {')]
+save_body = library[library.index('    func save(_ entry: LibraryEntry, metadata: Bool = false) {'):library.index('    func remove(_ id: UUID) {')]
 require('next.firstIndex(where: { entry.steamAppID != nil && $0.steamAppID == entry.steamAppID })' in save_body and
         'entry.bits = next[i].bits; entry.steamMetadataInstall = next[i].steamMetadataInstall' in save_body,
         "a Steam game keeps one entry, and a details page saved later keeps the card's newer format")
@@ -189,6 +194,7 @@ head = dock[dock.index('enum DockPerformancePolicy {'):dock.index('enum MadeiraD
 body = (dock[dock.index('enum MadeiraDock {'):dock.index('    @MainActor private static var lastReport =')] +
         dock[dock.index("    /// The host's environment for one launch."):])
 stubs = r'''
+enum ExternalDrives { static var steamLibraries: [String] { [] } }
 import Foundation
 #if canImport(Glibc)
 import Glibc
@@ -199,6 +205,12 @@ enum SteamSignIn {
     static func flag(_ name: String, default fallback: Bool) -> Bool { getenv(name).map { String(cString: $0) != "0" } ?? fallback }
 }
 enum SteamLog { static func event(_ m: String) {}; static func trace(_ m: @autoclosure () -> String) {} }
+// SteamLanguage (SteamAppInfo.swift) reads and writes the madeira.cfg language key.
+enum MadeiraConfig {
+    static func get(_ key: String) -> String? { nil }
+    static func set(_ key: String, _ value: String?) {}
+    static func gameValue(_ key: String) -> String? { nil }
+}
 enum SteamRuntimeFiles {
     static let relativeRoot = "Program Files (x86)/Steam"
     static let windowsRoot = "C:\\Program Files (x86)\\Steam"
@@ -276,6 +288,42 @@ func record(_ appID: Int, _ name: String, _ folder: String, flags: Int) -> Strin
             return SteamOwnedGame(SteamAppInfo.parse(appID: UInt32(id), from: Data(vdf.utf8))!)
         }
         let owned = [own(4242, "Fixture Game"), own(5001, "Beta"), own(5000, "Alpha"), own(5002, "Gamma")]
+
+        // Owned DLC (SteamDLC): its depots come along only when chosen, by the game's own rules.
+        let dlcGameVDF = "\"appinfo\" { \"common\" { \"name\" \"DLC Host\" \"type\" \"Game\" \"oslist\" \"windows\" } " +
+            "\"extended\" { \"listofdlc\" \"7101, 7102,7103,0,x\" } \"config\" { \"installdir\" \"DLC Host\" } " +
+            "\"depots\" { \"7001\" { \"manifests\" { \"public\" { \"gid\" \"1\" \"download\" \"10\" } } } " +
+            "\"7002\" { \"dlcappid\" \"7101\" \"manifests\" { \"public\" { \"gid\" \"2\" \"download\" \"20\" \"size\" \"25\" } } } " +
+            "\"7003\" { \"dlcappid\" \"7101\" \"config\" { \"language\" \"german\" } \"manifests\" { \"public\" { \"gid\" \"3\" } } } " +
+            "\"7004\" { \"dlcappid\" \"7104\" \"manifests\" { \"public\" { \"gid\" \"4\" \"download\" \"40\" } } } " +
+            "\"branches\" { \"public\" { \"buildid\" \"9\" } } } }"
+        var dlcHost = SteamAppInfo.parse(appID: 7000, from: Data(dlcGameVDF.utf8))!
+        func dlcApp(_ id: UInt32, _ name: String, parent: UInt32?) -> SteamAppInfo {
+            let p = parent.map { "\"parent\" \"\($0)\"" } ?? ""
+            return SteamAppInfo.parse(appID: id, from: Data("\"appinfo\" { \"common\" { \"name\" \"\(name)\" \"type\" \"DLC\" \(p) } }".utf8))!
+        }
+        require(dlcHost.dlcList == [7101, 7102, 7103] && dlcHost.knownDLC == [7101, 7102, 7103, 7104], "the DLC an app lists and its depots name: \(dlcHost.knownDLC)")
+        require(dlcHost.installDepots().map(\.depotID) == [7001], "no DLC licensed: the game's own depots only")
+        require(dlcHost.downloadSize(for: "windows") == 10, "the game's size leaves DLC out")
+        require(dlcHost.dlcDepots(7101, language: "english").map(\.depotID) == [7002], "a DLC's depots follow the game's language rule")
+        require(dlcHost.installDepots(language: "english", ownedDLC: [7002, 7004]).map(\.depotID) == [7001, 7002, 7004], "licensed DLC depots come along")
+        dlcHost.dlcOff = [7104]
+        require(dlcHost.installDepots(language: "english", ownedDLC: [7002, 7004]).map(\.depotID) == [7001, 7002], "a DLC turned off is left out")
+        require(dlcHost.depotSelectionSummary(language: "english", ownedDLC: [7002, 7004]).contains("7004[-]dlc"), "a turned-off DLC depot is logged as dlc")
+        let ownedDLC: [UInt32: SteamAppInfo] = [7101: dlcApp(7101, "Expansion", parent: 7000), 7102: dlcApp(7102, "Skin Pack", parent: nil),
+                                                7200: dlcApp(7200, "Other Game DLC", parent: 9999)]
+        let dlcGame = SteamOwnedGame(SteamAppInfo.parse(appID: 7000, from: Data(dlcGameVDF.utf8))!, ownedDLC: ownedDLC)
+        require(dlcGame.dlc?.map(\.id) == [7101, 7102], "owned DLC of the game only, by name: \(String(describing: dlcGame.dlc?.map(\.id)))")
+        require(dlcGame.dlc?.first?.downloadBytes == 20 && dlcGame.dlc?.first?.installBytes == 25 && dlcGame.dlc?.last?.depots == [],
+                "sizes per DLC, and a DLC without files has no depots")
+        require(SteamDLC.offApps(7000).isEmpty, "every owned DLC is on by default")
+        require(dlcGame.dlcToDownload(installedDepots: [7001]).map(\.id) == [7101] && dlcGame.dlcToDownload(installedDepots: [7001, 7002]).isEmpty &&
+                dlcGame.dlcToDownload(installedDepots: [7001], installedDLC: [7101]).isEmpty,
+                "an installed game lacking a DLC's depots offers it")
+        SteamDLC.setOn(7101, false, for: 7000)
+        require(SteamDLC.offApps(7000) == [7101] && dlcGame.dlcToDownload(installedDepots: [7001]).isEmpty, "a DLC turned off is not taken or offered")
+        SteamDLC.setOn(7101, true, for: 7000)
+        require(SteamDLC.off(7000).isEmpty, "turning it back on forgets the choice")
         let merged = R.items(installed: found, owned: owned, search: "")
         require(merged.map(\.id) == [4242, 4343, 5000, 5001, 5002], "installed games first, then owned ones, each by name: \(merged.map(\.id))")
         require(merged.first { $0.id == 4242 }.map { $0.installed != nil && $0.owned != nil } == true, "a game both installed and owned is one item")
@@ -471,7 +519,7 @@ with tempfile.TemporaryDirectory(prefix='madeira-steam-games-') as tmp:
     build = subprocess.run([SWIFTC, '-parse-as-library', '-swift-version', '5', '-sanitize=address', '-o', str(exe),
                             str(tmp / 'stubs.swift'), str(tmp / 'dock.swift'), str(tmp / 'rules.swift'),
                             str(tmp / 'checks.swift'), str(tmp / 'owned.swift'), str(app / 'SteamKeyValues.swift'),
-                            str(app / 'SteamInstall.swift'), str(app / 'SwiftSteam/Library/SteamAppInfo.swift')],
+                            str(app / 'SteamInstall.swift'), str(app / 'ExternalStorage.swift'), str(app / 'SwiftSteam/Library/SteamAppInfo.swift')],
                            capture_output=True, text=True)
     require(build.returncode == 0, 'production Steam games rules and Dock discovery compile on the host')
     if build.returncode:

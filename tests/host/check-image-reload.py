@@ -67,13 +67,13 @@ assert re.search(r'if \(choice == 1\)\s*\{\s*reload_jit = ios_jit_mappings\[i\]\
                  r'\s*if \(choice == 2\) continue;', early), 'in-place: leave the loop; new copy: skip the entry'
 
 alloc = native[native.index('size_t alloc_size = image_alloc + tramp_prealloc'):]
-alloc = alloc[:alloc.index('if (offset == (size_t)-1)')]
+alloc = alloc[:alloc.index('\n            if (offset == (size_t)-1)\n            {')]
 assert re.search(r'if \(reload_jit && reload_pe == image_base && reload_size == image_size &&\s*'
                  r'ios_pool_ledger_holds\( \(size_t\)\(\(char \*\)reload_jit - \(char \*\)jit_rx_base\),\s*'
                  r'image_alloc \+ tramp_prealloc, ios_jit_current_peb\(\) \)\)', alloc), \
     'in place only inside this process\'s own ledger record'
 assert 'offset = (size_t)((char *)reload_jit - (char *)jit_rx_base);' in alloc
-assert alloc.index('reload_jit = NULL;') < alloc.index('offset = ios_pool_alloc_range(')
+assert alloc.index('reload_jit = NULL;') < alloc.index('offset = ios_pool_alloc_range_tagged(')
 assert 'if (!reload_jit && offset != (size_t)-1 && data_delta)' in alloc, 'no second data-align shift'
 
 # --- behaviour ----------------------------------------------------------------
@@ -101,6 +101,7 @@ static kern_return_t mach_vm_read_overwrite(int task, mach_vm_address_t a, mach_
 }
 #define IOS_JIT_MAX_MAPPINGS 8
 '''
+code += re.search(r'^#define IOS_JIT_MAX_CODE_RANGES .*$', native, re.MULTILINE).group(0) + '\n'
 code += struct(native, 'ios_jit_mapping')
 code += r'''
 static struct ios_jit_mapping ios_jit_mappings[IOS_JIT_MAX_MAPPINGS];

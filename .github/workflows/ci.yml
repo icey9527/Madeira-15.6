@@ -17,7 +17,9 @@ on:
     # dev is the test channel: every push there builds and publishes a
     # pre-release, so day-to-day testing never needs a merge. port/ios15.6
     # publishes the stable release on merge.
-    branches: [port/ios15.6, dev]
+    # S*-*: staged re-add branches (dev's work taken back one layer at a time).
+    # They build and upload an artifact but never publish a release.
+    branches: [port/ios15.6, dev, 'S*-*']
   # A weekly no-change build keeps the action caches alive: GitHub drops cache
   # entries unused for 7 days, and the first build after that rebuilds the iOS
   # LLVM toolchain from scratch (15+ minutes) instead of restoring it.
@@ -105,6 +107,7 @@ jobs:
           case "$GITHUB_REF" in
             refs/heads/port/ios15.6) echo "分支正确（正式通道）: $GITHUB_REF" ;;
             refs/heads/dev) echo "分支正确（测试通道）: $GITHUB_REF" ;;
+            refs/heads/S*-*) echo "分支正确（分层验证分支）: $GITHUB_REF" ;;
             *) echo "::error::CI 只允许在 port/ios15.6 分支运行（当前 $GITHUB_REF），不要拿原版分支跑构建"; exit 1 ;;
           esac
 
@@ -121,6 +124,19 @@ jobs:
             echo "file=Madeira-15.6-dev.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Debug" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF#refs/heads/}" != "${GITHUB_REF}" ] && [[ "${GITHUB_REF#refs/heads/}" == S* ]]; then
+            # A staged re-add branch publishes ONE pre-release under the fixed
+            # tag "staging", so the download link and the file name stay the
+            # same build after build (the previous staging release is deleted
+            # by the publish step above). The branch it came from is only in
+            # the title. "stable" and "nightly" are never touched.
+            branch="${GITHUB_REF#refs/heads/}"
+            echo "tag=staging" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira staging ($branch)" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-staging.ipa" >> "$GITHUB_OUTPUT"
+            echo "configuration=Release" >> "$GITHUB_OUTPUT"
+            echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           else
             echo "tag=stable" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
@@ -814,7 +830,7 @@ jobs:
       # 仅完整流水线（APP_ONLY=0）发布——app-only 构建链接的是空桩原生库，
       # 产物不可运行，发出去会误导人。Phase 4 完成后自动生效。
       - name: Delete the old release for this channel
-        if: env.APP_ONLY != '1'
+        if: env.APP_ONLY != '1' && steps.channel.outputs.publish != 'false'
         uses: cb80/delrel@latest
         with:
           tag: ${{ steps.channel.outputs.tag }}
@@ -822,7 +838,7 @@ jobs:
         continue-on-error: true
 
       - name: Publish nightly pre-release
-        if: env.APP_ONLY != '1'
+        if: env.APP_ONLY != '1' && steps.channel.outputs.publish != 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.channel.outputs.tag }}

@@ -1,5 +1,4 @@
 app/Frameworks/StikJIT.xcframework/** -whitespace
-
 # 保持脚本类文件为 LF，避免 Windows autocrlf 破坏 bash 脚本（AI 协作规范，见 tools/ai-commit.sh）
 *.sh text eol=lf
 .githooks/** text eol=lf
@@ -10,3 +9,7 @@ app/Madeira/i386-windows/** binary -text -diff -merge
 app/Madeira/aarch64-windows/** binary -text -diff -merge
 app/Madeira/arm64ec-windows/** binary -text -diff -merge
 app/Madeira/d3d12/** binary -text -diff -merge
+
+# Unified-diff context markers precede upstream tabs and blank lines. Check the
+# applied source separately; these two diagnostics are artifacts in patch text.
+build/vulkan-ios/patches/*.patch whitespace=-blank-at-eol,-space-before-tab

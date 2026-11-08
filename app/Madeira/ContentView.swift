@@ -51,8 +51,15 @@ final class MetalHostView: UIView {
         // silently dropping them (presentedTime==0 on all but occasional
         // frames) at our sub-1Hz game present cadence. MeloNX (shipping
         // Switch emulator) sets exactly this pair on its layer.
+        // ml2021 A/B (env.MADEIRA_DISPLAY_SYNC = 1): leave the layer in display-sync
+        // scheduling. Log 74 ran a 32-bit title with the 120 Hz link honoured (the link
+        // itself ticked at 120 Hz) and still parked 18-72 ms a frame in nextDrawable with
+        // the GPU idle; a layer taken OUT of display sync is one of the two remaining
+        // suspects for drawables that come back late (the other is MADEIRA_PROMOTE_KICK).
         let syncSel = NSSelectorFromString("setDisplaySyncEnabled:")
-        if metalLayer.responds(to: syncSel) {
+        if MadeiraConfig.flag("MADEIRA_DISPLAY_SYNC", fallback: false) {
+            LogStore.shared.log("MetalLayer: displaySyncEnabled left on (env.MADEIRA_DISPLAY_SYNC = 1)")
+        } else if metalLayer.responds(to: syncSel) {
             metalLayer.perform(syncSel, with: NSNumber(value: false))
             LogStore.shared.log("MetalLayer: displaySyncEnabled=false (private API, MeloNX pattern)")
         }
@@ -133,6 +140,19 @@ final class MetalBackedView: UIView {
     // Run) directly instead of relying on the browse list.
     static weak var keyboardTarget: MetalBackedView?
     override var canBecomeFirstResponder: Bool { true }
+    override var keyCommands: [UIKeyCommand]? {
+        let command = UIKeyCommand(input: "v", modifierFlags: .command, action: #selector(paste(_:)))
+        command.wantsPriorityOverSystemBehavior = true
+        return [command]
+    }
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)) { return HardwareInput.shared.canPaste && UIPasteboard.general.hasStrings }
+        return super.canPerformAction(action, withSender: sender)
+    }
+    override func paste(_ sender: Any?) {
+        HardwareInput.shared.pasteClipboard()
+    }
+
     static func toggleKeyboard() {
         guard let v = keyboardTarget else { return }
         if v.isFirstResponder { v.resignFirstResponder() }
@@ -175,12 +195,22 @@ final class MetalBackedView: UIView {
     /// really resizes it, so it is read back on every use rather than taken
     /// from MADEIRA_SCREEN_W/H once; a mode change re-lays-out through
     /// `observeModeChanges`. It is 1024x768 unless a session chose otherwise.
-    private func guestSize() -> CGSize {
+    func guestSize() -> CGSize {
         Self.observeModeChanges()
         var w: Int32 = 0, h: Int32 = 0
         winios_screen_size(&w, &h)
         guard w > 0, h > 0 else { return CGSize(width: 1024, height: 768) }
         return CGSize(width: CGFloat(w), height: CGFloat(h))
+    }
+
+    /// Windows screen coordinates represented by the fullscreen game layer.
+    /// A windowed game's client can be smaller than its rendered backbuffer.
+    func pointerRect() -> CGRect {
+        var x: Int32 = 0, y: Int32 = 0, w: Int32 = 0, h: Int32 = 0
+        if winios_game_client_rect(&x, &y, &w, &h) != 0 {
+            return CGRect(x: Int(x), y: Int(y), width: Int(w), height: Int(h))
+        }
+        return CGRect(origin: .zero, size: guestSize())
     }
 
     /// The layout used for the presented layer and for touch mapping: a
@@ -195,7 +225,7 @@ final class MetalBackedView: UIView {
     /// presented into it (before that it is the 800x600 seed or the last
     /// session's size, and Aspect would letterbox against the wrong shape).
     private func drawableAspect() -> CGSize {
-        guard madeira_get_present_count() != Self.presentCountAtLaunch else { return .zero }
+        guard madeira_frame_count() != Self.presentCountAtLaunch else { return .zero }
         let d = MetalHostView.shared.metalLayer.drawableSize
         return (d.width > 0 && d.height > 0) ? d : .zero
     }
@@ -222,7 +252,6 @@ final class MetalBackedView: UIView {
     /// Present, so a tap during a mode change must land on the frame the user can
     /// see rather than on the one that is about to appear.
     private static var appliedRect: CGRect = .zero
-    private static var appliedGuest: CGSize = .zero
 
     /// Sizes the presented layer's host view to gameRect(). `[display] apply`
     /// is logged when the result changes.
@@ -238,7 +267,6 @@ final class MetalBackedView: UIView {
                           mode.rawValue, guest.width, guest.height, bounds.width, bounds.height,
                           r.minX, r.minY, r.width, r.height)
         Self.appliedRect = r
-        Self.appliedGuest = guest
         if line != Self.lastApplied {
             Self.lastApplied = line
             fputs("[display] apply reason=\(reason) \(line)\n", stderr)
@@ -333,7 +361,7 @@ final class MetalBackedView: UIView {
     /// Same mapping for any point (a multi-finger midpoint, a touch's down
     /// point). In a desktop session the compositor letterboxes the desktop in
     /// its own frame, so it does the mapping.
-    private func mapPoint(_ p: CGPoint) -> (Int32, Int32) {
+    func mapPoint(_ p: CGPoint) -> (Int32, Int32) {
         if desktopMode {
             let w = convert(p, to: nil)
             var px: Int32 = 0, py: Int32 = 0
@@ -341,10 +369,11 @@ final class MetalBackedView: UIView {
             Self.cursor = CGPoint(x: CGFloat(px), y: CGFloat(py))   // keep the trackpad cursor in step
             return (px, py)
         }
-        let guest = Self.appliedGuest == .zero ? guestSize() : Self.appliedGuest
-        let g = GameSurfaceLayout.map(point: p, guest: guest, aspect: drawableAspect(),
-                                      bounds: bounds, mode: effectiveDisplayMode())
-        return (Int32(g.x), Int32(g.y))
+        let client = pointerRect()
+        let visibleRect = Self.appliedRect == .zero ? gameRect() : Self.appliedRect
+        let g = GameSurfaceLayout.map(point: p, guest: client.size, aspect: drawableAspect(),
+                                      bounds: visibleRect, mode: effectiveDisplayMode())
+        return (Int32(client.minX + g.x), Int32(client.minY + g.y))
     }
 
     // ==================================================================
@@ -397,15 +426,15 @@ final class MetalBackedView: UIView {
         tmResolved = true
         tmDragTouch = t
         let (x, y) = mapPoint(tmGestureDownPoint)
-        winios_post_touch_down(x, y)
+        postSurfaceTouchDown(x, y)
     }
 
     /// Right/middle click at a guest position: winios_post_touch_* are
     /// left-button only, so these go through winios_pointer with ABSOLUTE.
     private func tmAbsoluteClick(down: UInt32, up: UInt32, at p: CGPoint) {
         let (x, y) = mapPoint(p)
-        winios_pointer(x, y, down | F_ABS, 0)
-        winios_pointer(x, y, up | F_ABS, 0)
+        postSurfacePointer(x, y, down | F_ABS)
+        postSurfacePointer(x, y, up | F_ABS)
     }
 
     private func touchModeBegan(_ touches: Set<UITouch>) {
@@ -442,9 +471,9 @@ final class MetalBackedView: UIView {
             tmScrollAccum += dy
             let (mx, my) = mapPoint(avg)
             while tmScrollAccum <= -14 { tmScrollAccum += 14
-                winios_pointer(mx, my, F_WHEEL, UInt32(bitPattern: Int32(-120))) }
+                postSurfacePointer(mx, my, F_WHEEL, data: UInt32(bitPattern: Int32(-120))) }
             while tmScrollAccum >= 14 { tmScrollAccum -= 14
-                winios_pointer(mx, my, F_WHEEL, UInt32(bitPattern: Int32(120))) }
+                postSurfacePointer(mx, my, F_WHEEL, data: UInt32(bitPattern: Int32(120))) }
             return
         }
         for t in touches {
@@ -453,7 +482,7 @@ final class MetalBackedView: UIView {
             if tmResolved {
                 guard t === tmDragTouch else { continue }
                 let (x, y) = mapPoint(p)
-                winios_post_touch_move(x, y)
+                postSurfaceTouchMove(x, y)
                 continue
             }
             guard tmDownPoints.count == 1 else {
@@ -464,7 +493,7 @@ final class MetalBackedView: UIView {
                 tmSlopBroken = true
                 tmCommitDrag(t)                  // button down at the ORIGINAL point
                 let (x, y) = mapPoint(p)
-                winios_post_touch_move(x, y)
+                postSurfaceTouchMove(x, y)
             }
         }
     }
@@ -472,7 +501,7 @@ final class MetalBackedView: UIView {
     private func touchModeEnded(_ touches: Set<UITouch>, _ event: UIEvent?) {
         if tmResolved, let d = tmDragTouch, touches.contains(d) {
             let (x, y) = mapPoint(d.location(in: self))
-            winios_post_touch_up(x, y)
+            postSurfaceTouchUp(x, y)
             tmResetGesture()
             return
         }
@@ -484,8 +513,8 @@ final class MetalBackedView: UIView {
         switch peak {
         case 1:
             let (x, y) = mapPoint(mid)
-            winios_post_touch_down(x, y)
-            winios_post_touch_up(x, y)
+            postSurfaceTouchDown(x, y)
+            postSurfaceTouchUp(x, y)
         case 2: tmAbsoluteClick(down: F_RDOWN, up: F_RUP, at: mid)
         case 3: tmAbsoluteClick(down: F_MDOWN, up: F_MUP, at: mid)
         default: break
@@ -495,7 +524,7 @@ final class MetalBackedView: UIView {
     private func touchModeCancelled(_ touches: Set<UITouch>) {
         if tmResolved, let d = tmDragTouch, touches.contains(d) {
             let (x, y) = mapPoint(d.location(in: self))
-            winios_post_touch_up(x, y)   // never leave the button held
+            postSurfaceTouchUp(x, y)   // never leave the button held
             tmResetGesture()
             return
         }
@@ -552,7 +581,36 @@ final class MetalBackedView: UIView {
         return i
     }
     private func postPointer(_ flags: UInt32, data: Int32 = 0) {
-        winios_pointer(Int32(Self.cursor.x), Int32(Self.cursor.y), flags, UInt32(bitPattern: data))
+        postSurfacePointer(Int32(Self.cursor.x), Int32(Self.cursor.y), flags, data: UInt32(bitPattern: data))
+    }
+
+    private func postSurfacePointer(_ x: Int32, _ y: Int32, _ flags: UInt32, data: UInt32 = 0) {
+        guard let event = HardwareInput.shared.surfacePointerEvent(x: x, y: y, flags: flags, data: data) else { return }
+        winios_pointer(event.x, event.y, event.flags, event.data)
+    }
+
+    private func postSurfaceTouchDown(_ x: Int32, _ y: Int32) {
+        if HardwareInput.shared.hardwareOwnsRelativeMotion {
+            postSurfacePointer(x, y, F_MOVE | F_LDOWN | F_ABS)
+        } else {
+            winios_post_touch_down(x, y)
+        }
+    }
+
+    private func postSurfaceTouchMove(_ x: Int32, _ y: Int32) {
+        if HardwareInput.shared.hardwareOwnsRelativeMotion {
+            postSurfacePointer(x, y, F_MOVE | F_ABS)
+        } else {
+            winios_post_touch_move(x, y)
+        }
+    }
+
+    private func postSurfaceTouchUp(_ x: Int32, _ y: Int32) {
+        if HardwareInput.shared.hardwareOwnsRelativeMotion {
+            postSurfacePointer(x, y, F_LUP | F_ABS)
+        } else {
+            winios_post_touch_up(x, y)
+        }
     }
     private func avgPoint(_ touches: [UITouch]) -> CGPoint {
         var x: CGFloat = 0, y: CGFloat = 0
@@ -595,7 +653,7 @@ final class MetalBackedView: UIView {
         guard desktopMode else {
             guard let t = touches.first else { return }
             let (x, y) = mapTouch(t)
-            winios_post_touch_down(x, y)
+            postSurfaceTouchDown(x, y)
             return
         }
         let now = Date().timeIntervalSinceReferenceDate
@@ -642,7 +700,7 @@ final class MetalBackedView: UIView {
         guard desktopMode else {
             guard let t = touches.first else { return }
             let (x, y) = mapTouch(t)
-            winios_post_touch_move(x, y)
+            postSurfaceTouchMove(x, y)
             return
         }
         let active = activeTouches(event)
@@ -702,7 +760,7 @@ final class MetalBackedView: UIView {
             let iy = Int32(max(-30000, min(30000, relCarryY)))
             relCarryX -= CGFloat(ix)
             relCarryY -= CGFloat(iy)
-            if ix != 0 || iy != 0 { winios_pointer(ix, iy, F_MOVE, 0) }
+            if ix != 0 || iy != 0 { postSurfacePointer(ix, iy, F_MOVE) }
             return
         }
 
@@ -724,7 +782,7 @@ final class MetalBackedView: UIView {
         guard desktopMode else {
             guard let t = touches.first else { return }
             let (x, y) = mapTouch(t)
-            winios_post_touch_up(x, y)
+            postSurfaceTouchUp(x, y)
             return
         }
         let now = Date().timeIntervalSinceReferenceDate
@@ -768,7 +826,7 @@ final class MetalBackedView: UIView {
         guard desktopMode else {
             guard let t = touches.first else { return }
             let (x, y) = mapTouch(t)
-            winios_post_touch_up(x, y)
+            postSurfaceTouchUp(x, y)
             return
         }
         fputs("[trackpad] CANCELLED (dragActive=\(dragActive))\n", stderr)
@@ -856,6 +914,7 @@ enum JoystickPadHost {
             host.view.backgroundColor = .clear
             host.view.isUserInteractionEnabled = false
             w.rootViewController = host
+            PointerLock.register(host)
             overlay = w
         }
         overlay?.frame = scene.coordinateSpace.bounds
@@ -1118,40 +1177,15 @@ struct JoystickKeyView: View {
 extension MetalBackedView: UIKeyInput {
     var hasText: Bool { false }
 
-    // US-keyboard VK + shift for a character. Returns nil for chars we can't map.
     static func vkForChar(_ ch: Character) -> (Int32, Bool)? {
-        if ch == "\n" || ch == "\r" { return (0x0D, false) }   // VK_RETURN
-        if ch == "\t" { return (0x09, false) }                 // VK_TAB
-        if ch == " " { return (0x20, false) }                  // VK_SPACE
-        if ch.isLetter, let up = ch.uppercased().first?.asciiValue, up >= 0x41, up <= 0x5A {
-            return (Int32(up), ch.isUppercase)                 // VK_A..VK_Z
-        }
-        if let a = ch.asciiValue, a >= 0x30, a <= 0x39 {
-            return (Int32(a), false)                           // VK_0..VK_9 (unshifted)
-        }
-        let table: [Character: (Int32, Bool)] = [
-            "!": (0x31, true), "@": (0x32, true), "#": (0x33, true), "$": (0x34, true),
-            "%": (0x35, true), "^": (0x36, true), "&": (0x37, true), "*": (0x38, true),
-            "(": (0x39, true), ")": (0x30, true),
-            "-": (0xBD, false), "_": (0xBD, true),
-            "=": (0xBB, false), "+": (0xBB, true),
-            "[": (0xDB, false), "{": (0xDB, true),
-            "]": (0xDD, false), "}": (0xDD, true),
-            "\\": (0xDC, false), "|": (0xDC, true),
-            ";": (0xBA, false), ":": (0xBA, true),
-            "'": (0xDE, false), "\"": (0xDE, true),
-            ",": (0xBC, false), "<": (0xBC, true),
-            ".": (0xBE, false), ">": (0xBE, true),
-            "/": (0xBF, false), "?": (0xBF, true),
-            "`": (0xC0, false), "~": (0xC0, true),
-        ]
-        return table[ch]
+        PasteText.key(for: ch)
     }
 
     func insertText(_ text: String) {
         // A hardware keyboard's presses reach Wine raw (HardwareInput); UIKit
         // also delivers them here as text, which would type every key twice.
         if HardwareInput.shared.handlesTyping { return }
+        HardwareInput.shared.cancelPaste()
         for ch in text {
             guard let (vk, shift) = MetalBackedView.vkForChar(ch) else { continue }
             if shift { winios_post_key(0x10, 1) }   // VK_SHIFT down
@@ -1163,6 +1197,7 @@ extension MetalBackedView: UIKeyInput {
 
     func deleteBackward() {
         if HardwareInput.shared.handlesTyping { return }
+        HardwareInput.shared.cancelPaste()
         winios_post_key(0x08, 1)   // VK_BACK down
         winios_post_key(0x08, 0)
     }
@@ -1490,6 +1525,9 @@ struct ContentView: View {
                 madeira_startup_log("startup-v2: load diagnostics started")
                 // Madeira Dock: an unconsumed sign-in transfer from an earlier run goes.
                 if wine_process_is_running() == 0 { MadeiraDock.cleanup() }
+                // madeira-bcd: the Dock's Reset sets the VC++ markers back to a new prefix's
+                // values, read from the bundled prefix template (DockReset.swift).
+                DockReset.baselineProvider = { DockReset.templateRegistry { madeira_extract_prefix_tgz($0, $1) } }
                 publishActiveState(true)   /* a stale empty marker from the last run would start us "backgrounded" */
                 madeira_startup_log("startup-v2: lifecycle startup complete")
             }
@@ -1596,6 +1634,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .background(Color.black)
         .statusBarHidden(true)
+        .persistentSystemOverlays15(.hidden)
     }
 
     /// Portrait: classic tooling layout — header, badges, 240pt game strip,
@@ -2340,6 +2379,9 @@ struct ContentView: View {
         .sheet(item: $devSheet) { sheet in
             switch sheet {
             case .steamSignIn: SteamSignInView()
+            case .gogSignIn: GOGSignInView()
+            case .epicSignIn: EpicSignInView()
+            case .eaSignIn: EASignInView()
             case .dock: MadeiraDockView { startDock($0, compactPool: $1) }
             case .allSettings: AllSettingsView()
             }
@@ -2712,10 +2754,20 @@ struct ContentView: View {
 
     /// A Home Screen shortcut waiting for the library (a link opened at a cold start
     /// arrives before the library is up).
+    /// Then the Steam game the last run's game asked to start (NextSteamApp).
     private func launchPendingShortcut() {
-        guard library.enabled, library.current == nil, let exe = ShortcutRouter.shared.pendingExe else { return }
-        ShortcutRouter.shared.pendingExe = nil
-        launchShortcut(exe)
+        guard library.enabled, library.current == nil else { return }
+        if let exe = ShortcutRouter.shared.pendingExe {
+            ShortcutRouter.shared.pendingExe = nil
+            _ = NextSteamApp.take()
+            launchShortcut(exe); return
+        }
+        guard LibraryModel.sessionsThisRun == 0, let appID = NextSteamApp.take() else { return }
+        guard let entry = library.entries.first(where: { $0.steamAppID == appID }) else {
+            LogStore.shared.log("[dock-steam-run] app \(appID) is not in the library: not started", level: .error); return
+        }
+        LogStore.shared.log("[dock-steam-run] starting app \(appID), which the last run's game asked for")
+        launchLibraryEntry(entry)
     }
 
     /// A Home Screen shortcut starts a game that is in the library, by its Windows
@@ -2769,6 +2821,12 @@ struct ContentView: View {
     }
 
     private func launchLibraryEntry(_ entry: LibraryEntry) {
+        // madeira-bcd: a game seen for the first time starts with Madeira's recommended
+        // settings (GameRecommendationsApply.swift).
+        var entry = entry
+        let isNew = !library.entries.contains { $0.id == entry.id }
+        if GameRecommendations.prepare(&entry, new: isNew) { library.save(entry) }
+
         /* Automatic A/B launch diagnosis (MADEIRA_AB_TEST=1): run the game the way
          * the user asked, then the other way, back to back, and log where each run
          * ended. Built for TheShell, which renders ~100 frames and then calls a
@@ -2793,6 +2851,9 @@ struct ContentView: View {
                 library.error = "Steam no longer lists this game as installed. Refresh the library and try again."; return
             }
             LogStore.shared.log("[steam-games] play app=\(appID)")
+            // madeira-bcd: the game's own options (AVX, NVIDIA, Wine's C++ runtime, its
+            // config file) -- this path never reached BCDLaunch, so a Steam game ran without them.
+            BCDLaunch.applyLibrary(entry)
             startDock(game, compactPool: MadeiraDockModel.shared.compactPool, profile: entry)
             return
         }
@@ -2820,19 +2881,74 @@ struct ContentView: View {
     }
 
     /// The rest of Play, with JIT on: checks the entry's launch profile and starts it.
-    private func startLibraryEntry(_ entry: LibraryEntry) {
+    /// An Epic game first gets Epic's sign-in arguments with a fresh one-use code
+    /// (EpicLibrary.launchArguments), for this launch only. An EA game first gets its
+    /// licence, the EA app's environment and Madeira's stand-in for the EA app's local
+    /// service (EALibrary.prepareLaunch); every other launch starts without that environment.
+    private func startLibraryEntry(_ entry: LibraryEntry, epicReady: Bool = false, eaReady: Bool = false) {
+        guard !EpicCloud.shared.isBusy else {
+            library.error = "Wait for Epic Cloud save sync to finish before starting a game."
+            return
+        }
+        if entry.eaOfferID == nil { EALibrary.clearEnvironment() }
+        if let offer = entry.eaOfferID, !eaReady {
+            Task { @MainActor in
+                do {
+                    try await EALibrary.shared.prepareLaunch(entry)
+                    startLibraryEntry(entry, epicReady: epicReady, eaReady: true)
+                } catch {
+                    LogStore.shared.log("[ea-launch] offer=\(offer) not started: \(error.localizedDescription)", level: .error)
+                    library.error = "This EA game could not be prepared: \(error.localizedDescription)"
+                }
+            }
+            return
+        }
+        if let app = entry.epicAppName, !epicReady {
+            Task { @MainActor in
+                do {
+                    let arguments = try await EpicLibrary.shared.launchArguments(appName: app)
+                    LibraryEntry.setTransientArguments(arguments, for: entry.id)
+                    startLibraryEntry(entry, epicReady: true)
+                } catch {
+                    LogStore.shared.log("[epic-launch] app=\(app) not started: no sign-in arguments", level: .error)
+                    library.error = "This Epic game could not get its sign-in from Epic: \(error.localizedDescription)"
+                }
+            }
+            return
+        }
+        // ml2021: Big Picture's batch exists only once written; the preflight checks the file.
+        if entry.bigPicture == true, !LibraryEntry.writeBigPictureBatch() {
+            library.error = "Big Picture needs Madeira Dock's Steam components (Settings › Steam) to start from."
+            return
+        }
+        // A GOG game's install-script registry values (The Witcher's launcher needs its
+        // InstallFolder), for its own entry or a program added from its folder.
+        GOGLibrary.shared.writeInstallScriptRegistry(for: entry)
+        if entry.gogProductID != nil {
+            // A GOG game: its redistributable installers still to run, before the game
+            // (from the services batch), and GOG's game services while it runs.
+            LibraryEntry.setGOGSetup(GOGLibrary.shared.setupBatch(for: entry), for: entry.id)
+            GOGGalaxy.shared.prepare(entry)
+        }
         do { if entry.desktop != true { _ = try LibraryModel.executable(entry.launchRelativePath) }; try entry.validate() }
         catch {
+            LibraryEntry.setTransientArguments(nil, for: entry.id)
             library.error = error.localizedDescription
             logStore.log("[launch-preflight] profile validation failed: \(error.localizedDescription)", level: .error)
+            GOGGalaxy.shared.stop()
             return
         }
         // launchArguments carries the whole ml1163 command (explorer's /desktop=, the quoted
         // program, its arguments); validate() and the bridge's tokenizer take 4 KB.
         guard entry.launchWindowsPath.utf8.count < 1024, entry.launchArguments.utf8.count < 4096 else {
+            LibraryEntry.setTransientArguments(nil, for: entry.id)
+            GOGGalaxy.shared.stop()
             library.error = "The executable path or launch arguments are too long."; return
         }
         entry.configureLaunch()
+        // madeira-bcd: the game's own options (LibraryBCD.swift).
+        BCDLaunch.applyLibrary(entry)
+        exportBCDDesktopProfile(entry)
         // This run's log under the program's name too (Documents/logs). A Steam game started
         // through Madeira Dock above gets its own from ntdll, once Valve's client starts it.
         let program = entry.desktop == true ? "explorer.exe"
@@ -2840,6 +2956,50 @@ struct ContentView: View {
         LogStore.shared.startSessionLog(program: program)
         library.begin(entry)
         runWineFullSequence(profile: entry)
+    }
+
+    /// madeira-bcd: LibraryPrefs' AVX, NVIDIA and Wine C++ runtime switches for a
+    /// library launch, set again after LibraryEntry.applyEnvironment (which unsets
+    /// what its own fields do not choose). For the Desktop entry too: Game details
+    /// writes them for every entry, and BCDLaunch.applyLibrary clears them there.
+    static func reassertBCDSwitches(_ entry: LibraryEntry) {
+        let path = entry.windowsPath
+        var on: [String] = []
+        if LibraryPrefs.avx(path) { setenv("MADEIRA_FEX_AVX", "1", 1); on.append("avx") }
+        if LibraryPrefs.wineVCRT(path) { setenv("MADEIRA_WINE_VCRT", "1", 1); on.append("wine-vcrt") }
+        let card = GPUCards.card(LibraryPrefs.gpuCard(path))
+        if LibraryPrefs.nvidia(path), card == nil {
+            setenv("DXMT_ENABLE_NVEXT", "1", 1)
+            setenv("DXMT_WSI_MONITOR_IDENTITY", "1", 1)
+            setenv("DXMT_WSI_MODE_TABLE", "1", 1)
+            if entry.desktop == true, getenv("MADEIRA_DXMT_EXTRA") == nil { setenv("MADEIRA_DXMT_EXTRA", "dxgi.customDeviceId=2544", 1) }
+            on.append("nvidia")
+        }
+        // "Graphics card the game sees" replaces the NVIDIA switch (BCDLaunch.applyExtras);
+        // applyEnvironment unset its NVAPI and monitor switches. The Desktop entry gets
+        // the card's DXMT options here, as it gets the switch's device id above.
+        if let card {
+            let metalName = MTLCreateSystemDefaultDevice()?.name
+            for (name, value) in GPUCards.environment(card, metalName: metalName) {
+                if let value { setenv(name, value, 1) } else { unsetenv(name) }
+            }
+            if entry.desktop == true {   // applyLibrary left the Desktop entry without any
+                setenv("MADEIRA_DXMT_EXTRA", GPUCards.dxmtOptions(card, metalName: metalName).joined(separator: ";"), 1)
+            }
+            on.append("gpu-card=\(card.id)")
+        }
+        if !on.isEmpty { LogStore.shared.log("[bcd] game switches: \(on.joined(separator: " "))") }
+    }
+
+    /// madeira-bcd: the Desktop entry's own file (Game details writes every entry's
+    /// options to GameProfiles.swift files); BCDLaunch.applyLibrary leaves the
+    /// Desktop without one, so it is exported here, before the session starts.
+    private func exportBCDDesktopProfile(_ entry: LibraryEntry) {
+        guard entry.desktop == true else { return }
+        let file = GameProfile(windowsPath: entry.windowsPath)
+        guard file.hasSettings, let url = file.url else { return }
+        setenv("MADEIRA_CFG_GAME", url.path, 1)
+        logStore.log("[bcd] Desktop: its own settings file \(url.lastPathComponent)")
     }
 
     /// Full sequence: allocate JIT pool, start wineserver, start Wine.
@@ -2855,6 +3015,10 @@ struct ContentView: View {
         // Steam downloads wait for the session, and the app's own Steam connection closes
         // before Valve's client signs in with the same account (SteamOwnedLibrary).
         SteamOwnedLibrary.shared.sessionChanged(active: true)
+        GOGLibrary.shared.sessionChanged(active: true)
+        ItchLibrary.shared.sessionChanged(active: true)
+        EpicLibrary.shared.sessionChanged(active: true)
+        EALibrary.shared.sessionChanged(active: true)
         /* ml1095: one config file. Written once from any legacy madeira-*.txt. */
         MadeiraConfig.migrateLegacy { self.logStore.log($0) }
         MadeiraConfig.deleteLegacyFiles { self.logStore.log($0) }   /* ml1096: the old files go once the cfg exists */
@@ -2871,6 +3035,7 @@ struct ContentView: View {
 
         logStore.log("Running full Wine sequence...")
         DeviceDiagnostics.logLaunch()
+        MadeiraExtensionProbe.runIfRequested()   /* ml1310: env.MADEIRA_EXT_PROBE = 1 only */
 
         // Start a main thread heartbeat to diagnose hang
         var heartbeatCount = 0
@@ -2892,7 +3057,19 @@ struct ContentView: View {
             // precision, frame limit).
             if let profile {
                 profile.applyEnvironment()
+                // madeira-bcd: applyEnvironment sets or unsets AVX and "Report an NVIDIA
+                // GPU" from the entry's own fields; BCDLaunch.applyExtras exported the
+                // game's LibraryPrefs switches before, on the main thread (Game details
+                // writes those). Either one turns a switch on.
+                Self.reassertBCDSwitches(profile)
                 logStore.log("[launch-route] library profile applied")
+                // madeira-bcd: a Dock session of one-time installs runs without the game's
+                // address-space holds, which leave its 32-bit setups no room.
+                let dropped = DockInstallers.applyInstallSessionConfig()
+                if !dropped.isEmpty {
+                    logStore.log("[dock-installers] this session of one-time installs leaves out the game's " +
+                                 dropped.sorted().joined(separator: ", ") + " (MADEIRA_DOCK_INSTALL_LAYOUT=0 keeps them)")
+                }
             } else {
                 _ = try? MadeiraConfig.applyGame(nil)   // no library game: no game's own lines
             }
@@ -3009,12 +3186,13 @@ struct ContentView: View {
             }
             var poolSizeMB = DockPerformancePolicy.sessionPoolMB(standard: 896, dock: dockLaunch.dock, compact: dockLaunch.compact)
             if poolSizeMB != 896 { logStore.log("[dock-pool] compact JIT pool \(poolSizeMB)MB for this Dock launch") }
-            // madeira.cfg pool: the JIT pool size in MB (256 to 1152) for every launch; wins over the size above.
-            if let txt = MadeiraConfig.get("pool"),
+            // madeira.cfg pool: the JIT pool size in MB (256 to 1152); wins over the size above. The game's own file wins over madeira.cfg, so a game can size the pool to fit a free run above its executable window and pair it with pool-low.
+            let gamePool = MadeiraConfig.gameValue("pool")
+            if let txt = gamePool ?? MadeiraConfig.get("pool"),
                let mb = Int(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
                mb >= 256, mb <= 1152 {
                 poolSizeMB = mb
-                logStore.log("JIT pool overridden to \(mb)MB via madeira.cfg pool")
+                logStore.log("JIT pool overridden to \(mb)MB via \(gamePool != nil ? "the game's settings" : "madeira.cfg") pool")
             }
             // ml694: W^X A/B switch. Documents/madeira-wx.txt containing "0"
             // disables page demotion for the SAME binary, so the on/off
@@ -3096,6 +3274,36 @@ struct ContentView: View {
                 dxmtOptions.append("dxgi.customDeviceId=2544")
                 logStore.log("DXMT config: dxgi.customDeviceId=2544 via Report an NVIDIA GPU")
             }
+            // DXMT's memory census reports from the encode thread several times a second in a
+            // 64-bit game (a third of a log, and its scans on the frame path). DXMT throttles
+            // it to one report every 10 s by default only in its 32-bit build; turn that on for
+            // every session unless madeira.cfg sets env.DXMT_CENSUS_THROTTLE itself.
+            if MadeiraConfig.get("env.DXMT_CENSUS_THROTTLE") == nil && getenv("DXMT_CENSUS_THROTTLE") == nil {
+                setenv("DXMT_CENSUS_THROTTLE", "1", 0)
+            }
+            // madeira-bcd: the game's options from BCDLaunch.applyExtras (LibraryPrefs'
+            // NVIDIA device id), last, as before the merge. An option whose key is already
+            // set above is replaced, not repeated: DXMT reads at most 259 characters.
+            if let c = getenv("MADEIRA_DXMT_EXTRA") {
+                let extra = String(cString: c).split(whereSeparator: { $0 == ";" || $0.isNewline })
+                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("#") }
+                for option in extra {
+                    let key = option.split(separator: "=", maxSplits: 1).first.map(String.init) ?? option
+                    dxmtOptions.removeAll { ($0.split(separator: "=", maxSplits: 1).first.map(String.init) ?? $0) == key }
+                    dxmtOptions.append(option)
+                }
+                if !extra.isEmpty { logStore.log("DXMT config: \(extra.joined(separator: ";")) via the game's settings") }
+            }
+            // Past DXMT's limit (below) every option is lost; the adapter names (a chosen
+            // graphics card's, GPUCards.swift) go first, as the ids are what a game's table
+            // reads: DXGI's, then Direct3D 9's (older games read the name more often).
+            for key in GPUCards.nameKeys where dxmtOptions.joined(separator: ";").utf16.count > 259 {
+                let before = dxmtOptions.count
+                dxmtOptions.removeAll { GPUCards.optionKey($0) == key }
+                if dxmtOptions.count != before {
+                    logStore.log("DXMT config: \(key) left out, to stay within DXMT's 259 characters", level: .error)
+                }
+            }
             // Unset otherwise, so a previous session's options in this app process do not apply.
             if !dxmtOptions.isEmpty { setenv("DXMT_CONFIG", dxmtOptions.joined(separator: ";"), 1) } else { unsetenv("DXMT_CONFIG") }
             // ml1255: DXMT reads the variable into a MAX_PATH buffer (util_env.cpp
@@ -3106,14 +3314,15 @@ struct ContentView: View {
             }
 
             // D3D9 frontend for 32-bit programs. The i386 d3d9.dll is DXMT's thin
-            // shim. Unset (the default), it tries the native frontend -- the shim
-            // binds its unix side and runs as native ARM64 code in
-            // libdxmt_combined.a -- and falls back to d3d9-emulated.dll once if
-            // that frontend is unavailable. "emulated" skips native entirely and
-            // forwards every export to d3d9-emulated.dll, the D3D9 frontend built
-            // for i386 and translated by FEX like the program. "native" is native
-            // or nothing (the A/B comparison). Only the i386 shim reads
-            // MADEIRA_D3D9; 64-bit programs are unaffected.
+            // shim; unset (the default) or "emulated", it forwards every export to
+            // d3d9-emulated.dll, DXMT's D3D9 frontend built for i386 and translated
+            // by FEX like the program. "native" makes the shim bind its unix side
+            // and run the frontend as native ARM64 code in libdxmt_combined.a.
+            // Only the i386 shim reads those two; 64-bit programs are unaffected.
+            // "wined3d" replaces DXMT for 32- and 64-bit programs alike: Wine's own
+            // d3d9 (shipped as d3d9-wined3d.dll) on wined3d's OpenGL renderer, i.e.
+            // opengl32 and the winios WGL driver on Zink/MoltenVK (gl-backend = zink).
+            // WineProcessBridge.m re-points the session's d3d9.dll links to it.
             if let txt = MadeiraConfig.get("d3d9") {
                 let v = txt.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !v.isEmpty {
@@ -3162,12 +3371,14 @@ struct ContentView: View {
             // freezing a thread that holds the malloc lock or FEX's CodeInvalidationMutex
             // can deadlock whoever suspended it. Windows apps tolerate preemptive suspend
             // because the suspender does not share their heap; here it does.
-            if let txt = MadeiraConfig.get("real-suspend") {
-                let v = txt.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !v.isEmpty {
-                    setenv("MADEIRA_REAL_SUSPEND", v, 1)
-                    logStore.log("Thread suspension: MADEIRA_REAL_SUSPEND=\(v) via madeira.cfg real-suspend")
-                }
+            // madeira-bcd: per game too (BCDLaunch.realSuspend: the game's switch, then
+            // madeira.cfg, then on for a Unity IL2CPP game). Unset otherwise, so an
+            // earlier session's choice in this app run does not carry over.
+            if let rs = BCDLaunch.realSuspend(profile) {
+                setenv("MADEIRA_REAL_SUSPEND", rs.value, 1)
+                logStore.log("Thread suspension: MADEIRA_REAL_SUSPEND=\(rs.value) via \(rs.source)")
+            } else {
+                unsetenv("MADEIRA_REAL_SUSPEND")
             }
 
             // ml713: Mono suspend-policy A/B. Documents/madeira-mono-suspend.txt
@@ -3360,6 +3571,30 @@ struct ContentView: View {
                 setenv("WINE_IOS_JIT_RX", String(format: "%lx", Int(bitPattern: pool.rx)), 1)
                 setenv("WINE_IOS_JIT_RW", String(format: "%lx", Int(bitPattern: pool.rw)), 1)
                 setenv("WINE_IOS_JIT_SIZE", String(format: "%lx", pool.size), 1)
+                // madeira-bcd split pool (pool-split = 1): the pool offsets between its two
+                // debugger regions, which ntdll never hands out (StikJITHelper.poolHole).
+                if let hole = StikJITHelper.poolHole {
+                    setenv("WINE_IOS_JIT_HOLE", String(format: "%lx:%lx", hole.off, hole.end), 1)
+                } else {
+                    unsetenv("WINE_IOS_JIT_HOLE")
+                }
+                // madeira-bcd pool-mid (pool-mid = 1): the second hole, when a free run
+                // between the split regions became a third region (StikJITHelper.poolHole2).
+                if let hole2 = StikJITHelper.poolHole2 {
+                    setenv("WINE_IOS_JIT_HOLE2", String(format: "%lx:%lx", hole2.off, hole2.end), 1)
+                } else {
+                    unsetenv("WINE_IOS_JIT_HOLE2")
+                }
+                // madeira-bcd pool-low (pool-low = 1): region C below the executable window,
+                // RW alias at the pool's distance; ntdll carves FEX's code buffers from it
+                // first (StikJITHelper.poolLow).
+                if let low = StikJITHelper.poolLow {
+                    setenv("WINE_IOS_JIT_TAIL_REGION", String(format: "%lx:%lx", low.rx, low.size), 1)
+                    logStore.log(String(format: "[pool-low] WINE_IOS_JIT_TAIL_REGION=%lx:%lx (%ldMB for FEX code buffers)",
+                                        low.rx, low.size, low.size >> 20), level: .success)
+                } else {
+                    unsetenv("WINE_IOS_JIT_TAIL_REGION")
+                }
             } else {
                 // ml596: ABORT. "Continuing without it" produced ml595 — a run that
                 // looked like an ARM64EC/optimizer regression but was only Wine
@@ -3487,7 +3722,7 @@ struct ContentView: View {
                 // loop actually observes so that can't happen silently again.
                 if now - lastHeartbeat > 30 {
                     lastHeartbeat = now
-                    logStore.log("detach-wait: presents=\(madeira_get_present_count()) running=\(wine_process_is_running()) elapsed=\(Int(now - pollStart))s")
+                    logStore.log("detach-wait: presents=\(madeira_frame_count()) running=\(wine_process_is_running()) elapsed=\(Int(now - pollStart))s")
                 }
                 // Task #25: the present heuristic is meaningless in desktop
                 // mode — ANY child presenting (cube, a game window) trips it
@@ -3496,7 +3731,7 @@ struct ContentView: View {
                 // attached until the desktop exits (or the safety cap).
                 let isDesktopSession = getenv("MADEIRA_DESKTOP").map { $0.pointee == 49 } ?? false
                 if !isDesktopSession {
-                    if presentingSince == nil && madeira_get_present_count() >= 1 {
+                    if presentingSince == nil && madeira_frame_count() >= 1 {
                         presentingSince = now
                         logStore.log("Game is presenting (#1, splash) — early detach in \(Int(settleAfterFirstPresent))s")
                     }
@@ -3578,7 +3813,17 @@ struct ContentView: View {
             // used before; Dock stops at once if Steam names that entry missing.
             let options = await SteamOwnedLibrary.shared.launchOptions(appID: game.id)
             let installFolder = MadeiraDock.drive.appendingPathComponent(game.library + "/common/" + game.installDir)
-            let chosen = options.flatMap { SteamDirectStart.choose($0, installFolder: installFolder)?.launchIndex }
+            let steamEntry = options.flatMap { SteamDirectStart.choose($0, installFolder: installFolder) }
+            let chosen = steamEntry?.launchIndex
+            // madeira-bcd exe-window-mb: measure the game's own fixed-base exe now, so the
+            // JIT pool is placed above it (StikJITHelper.allocatePool reads this once).
+            if let need = StikJITHelper.fixedBaseWindowMB(in: installFolder) {
+                StikJITHelper.exeWindowAutoMB = need.mb
+                LogStore.shared.log("[exe-window] \(need.exe) is a fixed-base image ending \(need.mb)MB above 0x140000000: "
+                    + "the executable window is widened to \(need.mb)MB for this session (exe-window-mb in the game's file overrides)")
+            } else {
+                StikJITHelper.exeWindowAutoMB = 0
+            }
             let launchOption = chosen ?? 0
             LogStore.shared.log("[madeira-dock] launch option \(launchOption)\(chosen == nil ? " (none chosen: the default)" : "")")
             await SteamOwnedLibrary.shared.prepareDock()
@@ -3593,15 +3838,92 @@ struct ContentView: View {
                 }
                 try MadeiraDock.writeHandoff(account: signIn.accountName, token: signIn.refreshToken, appID: game.id)
             } catch { fail(error); return }
-            MadeiraDock.configure(game, launchOption: launchOption)
+            MadeiraDock.configure(game, launchOption: launchOption, arguments: LaunchArgumentText.plain(profile?.arguments ?? ""))
+            // "Steam starts" (DockStartProgram): the chosen program takes the place of the
+            // one Steam's launch entry names, or the kept launcher goes back. No session runs.
+            let program = DockStartProgram.chosen(game.id)
+            if let launcher = steamEntry?.program {
+                let outcome = DockStartProgram.apply(launcher: launcher, program: program, folder: installFolder)
+                if case .failed(let why) = outcome {
+                    logStore.log("[dock-start-program] app=\(game.id) launcher=\(launcher) program=\(program ?? "steam") failed: \(why)", level: .error)
+                } else if outcome != .unchanged || program != nil {
+                    logStore.log("[dock-start-program] app=\(game.id) launcher=\(launcher) program=\(program ?? "steam") \(outcome)")
+                }
+            } else if program != nil {
+                logStore.log("[dock-start-program] app=\(game.id) program=\(program ?? "") not used: Steam's launch entry is not known", level: .error)
+            }
             // The game's one-time installs (its Steam install script) run first, in the same
             // session. No session runs yet, so the registry files can be read and written.
-            DockInstallers.prepare(game, drive: MadeiraDock.drive, prefix: MadeiraDock.prefix)
-            // Only a start that runs installers turns madsync off, for its own session
-            // (build/madsync/madsync.c reads MADEIRA_MADSYNC_SESSION once, when the server starts).
-            if DockInstallers.serverSync {
+            // madeira-bcd: they run in a session of their own (DockInstallers.installsOnly), and
+            // a Reset takes out what they installed; the other games share those installs.
+            DockInstallers.prepare(game, drive: MadeiraDock.drive, prefix: MadeiraDock.prefix,
+                                   others: MadeiraDock.games(drive: MadeiraDock.drive))
+            if DockInstallers.installsOnly {
+                // No host runs in this session: nothing will take the sign-in transfer.
+                MadeiraDock.cleanup()
+                logStore.log("[madeira-dock] app \(game.id): this session runs only the one-time installs; the host starts after a restart")
+                // The launch leaves out the game's address-space holds (DockInstallers.applyInstallSessionConfig).
+                setenv("MADEIRA_DOCK_INSTALLS_SESSION", "1", 1)
+            } else {
+                unsetenv("MADEIRA_DOCK_INSTALLS_SESSION")
+            }
+            // ml2020: a launcher's own automatic-start service needs a service manager in the
+            // game session, which the host starts when asked (DockGameSession: the game's
+            // MADEIRA_DOCK_GAME_SCM, else the prefix's system.reg decides). Decided here, before
+            // the session, because such a session must also leave madsync (below).
+            let scm = DockGameSession.decide(prefix: MadeiraDock.prefix,
+                                             gameConfig: profile.map { GameProfile(windowsPath: $0.windowsPath).text },
+                                             thirdPartyInstalls: DockInstallers.thirdPartyInstalls)
+            setenv("MADEIRA_DOCK_GAME_SCM", scm.exported, 1)
+            logStore.log(scm.logLine)
+            let scmServerSync = DockGameSession.serverSyncOff(scm, madsyncConfigured: DockInstallers.madsyncConfigured)
+            // ml2020: a 32-bit program behind a 64-bit launcher chain needs its 4 GB guest window
+            // late in the session, when the launcher's browser helper has taken most of the map
+            // (two device runs found no slot). ntdll holds one placeholder at session start.
+            // env.MADEIRA_WOW_HOLD_WINDOWS in madeira.cfg or the game's file, exported after this, wins.
+            let gameFolder = MadeiraDock.drive.appendingPathComponent(game.library + "/common/" + game.installDir, isDirectory: true)
+            if DockGameSession.has32BitProgram(in: gameFolder, machine: DockInstallers.machine) {
+                setenv("MADEIRA_WOW_HOLD_WINDOWS", "1", 1)
+                logStore.log("[dock-wow] the game's folder holds a 32-bit program: one guest-window placeholder is held from session start (MADEIRA_WOW_HOLD_WINDOWS=1)")
+                // The held window goes only to the game's own 32-bit programs: Valve's 32-bit client service,
+                // demand-started seconds into the session once a CEG game installed it, took it and the game
+                // found no slot (2026-11-02). A program from elsewhere still gets any other free slot.
+                if MadeiraConfig.flag("MADEIRA_WOW_HOLD_FOR_GAME") {   // 0: any 32-bit program may take the held window, as before 2026-11-02
+                    setenv("MADEIRA_WOW_HOLD_FOR", game.windowsInstallPath + "\\", 1)
+                } else {
+                    unsetenv("MADEIRA_WOW_HOLD_FOR")
+                }
+            } else {
+                unsetenv("MADEIRA_WOW_HOLD_WINDOWS")
+                unsetenv("MADEIRA_WOW_HOLD_FOR")
+            }
+            // A 64-bit title beside its 32-bit helpers: its memory takes donor RAM first even while
+            // a 32-bit program is in the session (virtual_ios.c ios_swap_x64_policy, swap-x64 unset).
+            // env.MADEIRA_DOCK_X64_TITLE = 0 leaves the swap file first, as before 2026-10-28.
+            if MadeiraConfig.flag("MADEIRA_DOCK_X64_TITLE"),   // 0: a 32-bit helper in the game's folder keeps the 64-bit title's memory on the swap file first
+               DockGameSession.largestProgramMachine(in: gameFolder, machine: DockInstallers.machine) == 0x8664 {
+                setenv("MADEIRA_SWAP_X64_TITLE", "1", 1)
+                logStore.log("[dock-wow] the game's largest program is 64-bit: its memory takes donor RAM first, then the swap file (MADEIRA_SWAP_X64_TITLE=1; env.MADEIRA_DOCK_X64_TITLE = 0 keeps the file first)")
+            } else {
+                unsetenv("MADEIRA_SWAP_X64_TITLE")
+            }
+            // Only a start that runs installers, or one that starts the service manager, turns
+            // madsync off, for its own session (build/madsync/madsync.c reads
+            // MADEIRA_MADSYNC_SESSION once, when the server starts).
+            if DockInstallers.serverSync || scmServerSync {
                 setenv("MADEIRA_MADSYNC_SESSION", "0", 1)
-                logStore.log("[dock-installers] this session runs one-time installs: madsync off for this session only (MADEIRA_MADSYNC_SESSION=0)")
+                logStore.log(DockInstallers.serverSync
+                    ? "[dock-installers] this session runs one-time installs: madsync off for this session only (MADEIRA_MADSYNC_SESSION=0)"
+                    : "[dock-game-scm] this session starts the service manager: madsync off for this session only (MADEIRA_MADSYNC_SESSION=0; env.MADEIRA_DOCK_GAME_SCM_SERVER_SYNC = 0 keeps madsync)")
+                // A game session that gives madsync up for the service manager runs fastsync, which
+                // leaves every object's state with the server, instead of Wine's standard sync: a
+                // job-system game otherwise sent ~33,000 waits and wakes a second to the server
+                // (device log 2026-10-28). A game's own fastsync switch, when set, is kept.
+                if scmServerSync, !DockInstallers.serverSync, getenv("MADEIRA_FASTSYNC") == nil,
+                   MadeiraConfig.flag("MADEIRA_DOCK_GAME_SCM_FASTSYNC") {   // 0: such a session runs Wine's standard sync, as before 2026-10-28
+                    setenv("MADEIRA_FASTSYNC", "auto", 1)
+                    logStore.log("[dock-game-scm] fastsync for this session in madsync's place (MADEIRA_FASTSYNC=auto; env.MADEIRA_DOCK_GAME_SCM_FASTSYNC = 0 keeps Wine's standard sync)")
+                }
             } else {
                 unsetenv("MADEIRA_MADSYNC_SESSION")
             }
@@ -3629,7 +3951,8 @@ struct ContentView: View {
                 width = size[0]; height = size[1]
             }
             setenv("MADEIRA_EXE", "explorer.exe", 1)
-            setenv("MADEIRA_ARGS", MadeiraDock.launchArguments(width: width, height: height, installers: DockInstallers.script), 1)
+            setenv("MADEIRA_ARGS", MadeiraDock.launchArguments(width: width, height: height, installers: DockInstallers.script,
+                                                               host: !DockInstallers.installsOnly), 1)
             setenv("MADEIRA_DESKTOP", "1", 1)
             setenv("MADEIRA_SCREEN_W", String(width), 1)
             setenv("MADEIRA_SCREEN_H", String(height), 1)
@@ -3638,7 +3961,9 @@ struct ContentView: View {
             // start this session from its own desktop size, not a previous one.
             winios_display_mode_changed(Int32(width), Int32(height))
             MadeiraDock.requestLaunch(compactPool: compactPool)
-            logStore.log("[madeira-dock] starting the host for app \(game.id); Valve's client authenticates and authorizes the launch")
+            if !DockInstallers.installsOnly {
+                logStore.log("[madeira-dock] starting the host for app \(game.id); Valve's client authenticates and authorizes the launch")
+            }
             MadeiraDockModel.shared.watchReport()
             if inLibrary {
                 if let profile { library.begin(profile, dock: game) }
@@ -3750,6 +4075,8 @@ struct ContentView: View {
 
         logStore.log("Wine prefix: \(winePrefixPath)")
 
+        // Link external drives before the server lists dosdevices.
+        ExternalDrives.shared.mountAll()
         let result = wineserver_start(winePrefixPath)
         if result == 0 {
             logStore.log("Wineserver thread launched successfully", level: .success)
@@ -4050,6 +4377,8 @@ struct TouchControl: Codable, Identifiable, Equatable {
     /// (PadKeyboardMouse): "A", "RT", "D↑", ...; "LS"/"RS" for a key stick.
     /// Optional, so layouts saved before it existed still decode.
     var padBinding: String?
+    /// Locked in place: the editor selects it but will not move or resize it.
+    var locked: Bool?
 }
 
 final class TouchControlsModel: ObservableObject {
@@ -4058,11 +4387,15 @@ final class TouchControlsModel: ObservableObject {
 
     @Published var controls: [TouchControl] = [] { didSet { save() } }
     @Published var visible = true               { didSet { save() } }
+    @Published var snapToGrid = false
+    @Published var hapticsEnabled = true        { didSet { save() } }
     @Published var editing = false {            // transient, never persisted
         didSet {
             // ml1970: an ended edit is written back to the custom layout it came from.
-            if !oldValue && editing { editBaseline = controls }
-            if oldValue && !editing { ControlPresetsModel.shared.editingEnded(baseline: editBaseline) }
+            if !oldValue && editing { editBaseline = controls; editZoneBaseline = GestureZonesModel.shared.zones }
+            if oldValue && !editing {
+                ControlPresetsModel.shared.editingEnded(baseline: editBaseline, zoneBaseline: editZoneBaseline)
+            }
         }
     }
     @Published var selected: UUID?              // transient
@@ -4073,6 +4406,7 @@ final class TouchControlsModel: ObservableObject {
     /// layout may be applied once (ControlPresetsModel.applyDefaultIfNeeded).
     var needsDefaultLayout = false
     private var editBaseline: [TouchControl] = []
+    private var editZoneBaseline: [GestureZone] = []
 
     /// One size for the whole layout (0.5...2), multiplying each control's own
     /// pinch `scale`. A library entry keeps its own (Control size) and sets it
@@ -4095,7 +4429,7 @@ final class TouchControlsModel: ObservableObject {
     }
 
     /// `layout` is optional so files written before it existed still decode.
-    private struct Saved: Codable { var controls: [TouchControl]; var visible: Bool; var layout: String? }
+    private struct Saved: Codable { var controls: [TouchControl]; var visible: Bool; var layout: String?; var haptics: Bool? }
 
     private init() {
         loading = true
@@ -4104,6 +4438,7 @@ final class TouchControlsModel: ObservableObject {
             controls = s.controls
             visible  = s.visible
             layoutID = s.layout
+            hapticsEnabled = s.haptics ?? true
         }
         needsDefaultLayout = !FileManager.default.fileExists(atPath: Self.url.path)
         loading = false
@@ -4111,7 +4446,7 @@ final class TouchControlsModel: ObservableObject {
 
     private func save() {
         guard !loading else { return }
-        guard let d = try? JSONEncoder().encode(Saved(controls: controls, visible: visible, layout: layoutID))
+        guard let d = try? JSONEncoder().encode(Saved(controls: controls, visible: visible, layout: layoutID, haptics: hapticsEnabled))
         else { return }
         try? d.write(to: Self.url, options: .atomic)
     }
@@ -4155,7 +4490,7 @@ final class TouchControlsModel: ObservableObject {
             let cy = CGFloat(c.ny) * bounds.height
             if hypot(p.x - cx, p.y - cy) <= r { return true }
         }
-        return false
+        return GestureZonesModel.shared.contains(p, in: bounds)
     }
 }
 
@@ -4181,6 +4516,10 @@ final class ControlsWindow: UIWindow {
         // menu and starting screen take every touch; otherwise only its menu
         // button, its performance overlay and the touch controls do.
         let library = LibraryModel.shared
+        // A Play getting ready: its starting screen takes every touch.
+        if library.preparing != nil { return super.hitTest(point, with: event) }
+        // The library itself, between sessions (a start that did not happen): nothing here.
+        if library.enabled && library.current == nil { return nil }
         if library.current != nil {
             if library.menu || library.launching || library.menuButtonRect.contains(point) ||
                 (library.performance && library.performanceRect.contains(point)) {
@@ -4217,6 +4556,7 @@ enum TouchControlsHost {
             let host = UIHostingController(rootView: TouchControlsOverlay())
             host.view.backgroundColor = .clear
             w.rootViewController = host
+            PointerLock.register(host)
             window = w
         }
         window?.frame = scene.coordinateSpace.bounds
@@ -4228,6 +4568,7 @@ enum TouchControlsHost {
 struct TouchControlsOverlay: View {
     @ObservedObject private var m = TouchControlsModel.shared
     @ObservedObject private var library = LibraryModel.shared
+    @ObservedObject private var zones = GestureZonesModel.shared
     @State private var pinchBase: Double?
 
     var body: some View {
@@ -4236,16 +4577,27 @@ struct TouchControlsOverlay: View {
             // A library session is full screen in either orientation, and its
             // HUD (menu button, starting screen, in-game menu) replaces the top
             // bar; the controls hide while its menu or starting screen is up.
-            let session = library.current != nil
+            let session = library.current != nil || library.preparing != nil
             let landscape = geo.size.width > geo.size.height || session
             ZStack(alignment: .top) {
-                if landscape {
+                // The library between sessions (the window came up for a start that did not
+                // happen) draws nothing over the library's own screens.
+                if landscape && !(library.enabled && !session && !m.editing) {
+                    if m.editing {
+                        Color.clear.contentShape(editorCanvas(geo.size), eoFill: true)
+                            .onTapGesture { m.selected = nil; zones.selected = nil }
+                    }
                     if (m.visible || m.editing) && !library.blocksGameplayTouch {
+                        if GestureZonesModel.enabled {
+                            GestureZonesLayer(screen: geo.size, editing: m.editing)
+                        }
                         controls(geo.size, session: session)
                     }
                     if session && !m.editing { LibraryHUD() } else { topBar }
                     if m.editing, let i = m.index(of: m.selected) {
                         MappingPanel(control: m.controls[i], screen: geo.size)
+                    } else if m.editing, let i = zones.index(of: zones.selected) {
+                        GestureZonePanel(zone: zones.zones[i], screen: geo.size)
                     }
                 }
             }
@@ -4256,11 +4608,31 @@ struct TouchControlsOverlay: View {
             .onChange(of: geo.size) { _ in applyDefaultLayout(geo); configureGamepad(landscape: landscape) }
             .onChange(of: m.controls) { _ in configureGamepad(landscape: landscape) }
             .onChange(of: m.visible) { _ in configureGamepad(landscape: landscape) }
+            .onChange(of: zones.padZoneIDs) { _ in configureGamepad(landscape: landscape) }
+            .onChange(of: m.selected) { new in if new != nil { zones.selected = nil } }
             .onChange(of: m.editing) { _ in configureGamepad(landscape: landscape) }
             .onChange(of: library.blocksGameplayTouch) { _ in configureGamepad(landscape: landscape) }
             .onDisappear { GamepadInput.shared.configureTouch(controls: []); TouchMouseGate.padOverlay = false }
         }
         .ignoresSafeArea()
+        .statusBarHidden(library.current != nil)
+        .persistentSystemOverlays15(library.current != nil ? .hidden : .automatic)
+    }
+
+    /// The dismissal gesture must never take a control's drag on iOS 26.
+    private func editorCanvas(_ screen: CGSize) -> Path {
+        var area = Path(CGRect(origin: .zero, size: screen))
+        for control in m.controls {
+            let size = TouchControlsModel.size(control)
+            let frame = CGRect(x: CGFloat(control.nx) * screen.width - size.width / 2,
+                               y: CGFloat(control.ny) * screen.height - size.height / 2,
+                               width: size.width, height: size.height)
+            area = area.subtracting15(Path(frame))
+        }
+        if GestureZonesModel.enabled {
+            for zone in zones.zones { area = area.subtracting15(Path(zone.rect(in: screen))) }
+        }
+        return area
     }
 
     /// Every control in ONE GlassEffectContainer: on iOS 26 the system merges
@@ -4270,24 +4642,30 @@ struct TouchControlsOverlay: View {
     /// neighbours sit further apart than that, so nothing merges until it is
     /// moved almost touching. Before 26 the same views stack as plain material.
     @ViewBuilder private func controls(_ screen: CGSize, session: Bool) -> some View {
+        // A library session's Control opacity; full while editing. The opacity
+        // goes on the whole group, not on each button: inside a
+        // GlassEffectContainer the glass is rendered by the container as one
+        // layer over its children, so a button's own .opacity faded its label and
+        // left the glass as it was (the Opacity slider seemed to do nothing).
+        let opacity = session && !m.editing ? library.opacity : 1
         let buttons = ForEach(m.controls) { c in
             TouchControlButton(control: c, screen: screen)
-                // A library session's Control opacity; full while editing.
-                .opacity(session && !m.editing ? library.opacity : 1)
         }
         if #available(iOS 26.0, *) {
             GlassEffectContainer(spacing: 12) {
                 ZStack { buttons }
                     .frame(width: screen.width, height: screen.height, alignment: .topLeading)
             }
+            .opacity(opacity)
         } else {
-            buttons
+            buttons.opacity(opacity)
         }
     }
 
     private func configureGamepad(landscape: Bool) {
         let ids = landscape && m.visible
-            ? m.controls.filter { $0.action.padName.map(TouchPadAction.supported) ?? false }.map(\.id) : []
+            ? m.controls.filter { $0.action.padName.map(TouchPadAction.supported) ?? false }.map(\.id)
+                + (GestureZonesModel.enabled ? zones.zones.filter(\.feedsPad).map(\.id) : []) : []
         // Menus and the control editor keep the pad connected but take no input (#204);
         // a touch that misses the controls is no mouse only while they do (#150).
         let accepting = !m.editing && !library.blocksGameplayTouch
@@ -4349,6 +4727,14 @@ struct TouchControlsOverlay: View {
                 }
             }
             if m.editing {
+                glassButton(m.snapToGrid ? "circle.grid.2x2.fill" : "circle.grid.2x2") {
+                    m.snapToGrid.toggle()
+                }
+                .transition(.opacity.combined(with: .scale))
+                glassButton(m.hapticsEnabled ? "iphone.radiowaves.left.and.right" : "iphone.slash") {
+                    m.hapticsEnabled.toggle()
+                }
+                .transition(.opacity.combined(with: .scale))
                 glassButton("plus") {
                     var c = TouchControl()
                     // Stagger, so repeated adds do not stack invisibly.
@@ -4358,6 +4744,14 @@ struct TouchControlsOverlay: View {
                     m.selected = c.id
                 }
                 .transition(.opacity.combined(with: .scale))
+                if GestureZonesModel.enabled {
+                    // A gesture zone (GestureZones.swift).
+                    glassButton("rectangle.dashed") {
+                        m.selected = nil
+                        GestureZonesModel.shared.add()
+                    }
+                    .transition(.opacity.combined(with: .scale))
+                }
             }
         }
         .padding(.top, 10)
@@ -4369,11 +4763,12 @@ struct TouchControlsOverlay: View {
     private var scalePinch: some Gesture {
         MagnificationGesture()
             .onChanged { v in
-                guard m.editing, let i = m.index(of: m.selected) else { return }
+                if m.editing, zones.selected != nil { zones.pinch(Double(v)); return }
+                guard m.editing, let i = m.index(of: m.selected), m.controls[i].locked != true else { return }
                 if pinchBase == nil { pinchBase = m.controls[i].scale }
                 m.controls[i].scale = min(max((pinchBase ?? 1) * Double(v), 0.5), 3.0)
             }
-            .onEnded { _ in pinchBase = nil }
+            .onEnded { _ in pinchBase = nil; zones.pinch(nil) }
     }
 
     private func glassButton(_ system: String, dim: Bool = false,
@@ -4403,6 +4798,9 @@ struct GlassShape: View {
     var capsule = false
     var cornerRadius: CGFloat = 18
     var tint: Color? = nil
+    /// The touch controls' Solid button style (TouchControlStyle): a plain opaque
+    /// shape in place of the glass, the tint as its colour.
+    var solid = false
     fileprivate var shape: AnyShape15 {
         if circle { return AnyShape15(Circle()) }
         if capsule { return AnyShape15(Capsule()) }
@@ -4420,7 +4818,9 @@ extension View {
     /// sibling of its glass ends up blurred underneath it; a label that is the
     /// glass view's own content is drawn on top, as the system's buttons are.
     @ViewBuilder func glassFace(_ g: GlassShape) -> some View {
-        if #available(iOS 26.0, *) {
+        if g.solid {
+            self.background(g.shape.fill(g.tint ?? TouchControlStyle.solidFill))
+        } else if #available(iOS 26.0, *) {
             if let tint = g.tint {
                 self.glassEffect(.regular.tint(tint.opacity(0.55)), in: g.shape)
             } else {
@@ -4433,6 +4833,17 @@ extension View {
             }
         }
     }
+}
+
+/// The touch controls' button style, remembered for every game: "glass" (the
+/// system's Liquid Glass, as before) or "solid" (an opaque disc, no glass;
+/// the Opacity slider still fades the whole set). Chosen in the in-game menu
+/// and in Settings › Appearance. The overlay's top bar stays glass.
+enum TouchControlStyle {
+    static let key = "madeiraControlsStyle"
+    static let styles: [(id: String, name: String)] = [("glass", "Glass"), ("solid", "Solid")]
+    static let solidFill = Color(red: 0.17, green: 0.17, blue: 0.19)
+    static func isSolid(_ style: String) -> Bool { style == "solid" }
 }
 
 extension ControlAction {
@@ -4453,11 +4864,13 @@ struct TouchControlButton: View {
     let control: TouchControl
     let screen: CGSize
     @ObservedObject private var m = TouchControlsModel.shared
+    @AppStorage(TouchControlStyle.key) private var style = "glass"
     @State private var isDown = false
     @State private var dragBase: CGPoint?
     @State private var stickDir: Int = -1
     @State private var padVector = CGSize.zero
 
+    private var solid: Bool { TouchControlStyle.isSolid(style) }
     private var diameter: CGFloat { TouchControlsModel.diameter(control) }
     private var size: CGSize { TouchControlsModel.size(control) }
     private var isStick: Bool { control.action.stickKeys != nil || control.action.isPadStick }
@@ -4491,19 +4904,19 @@ struct TouchControlButton: View {
                 }
             }
             .frame(width: size.width, height: size.height)
-            .glassFace(GlassShape(circle: true, tint: a.padTint))
+            .glassFace(GlassShape(circle: true, tint: a.padTint, solid: solid))
         case .small:
             Text(a.padFaceLabel)
                 .font(.system(size: size.height * 0.36, weight: .semibold))
                 .foregroundStyle(.white.opacity(isDown ? 1.0 : 0.85))
                 .frame(width: size.width, height: size.height)
-                .glassFace(GlassShape(circle: true))
+                .glassFace(GlassShape(circle: true, solid: solid))
         case .wide:
             Text(a.padFaceLabel)
                 .font(.system(size: size.height * 0.42, weight: .semibold))
                 .foregroundStyle(.white.opacity(isDown ? 1.0 : 0.88))
                 .frame(width: size.width, height: size.height)
-                .glassFace(GlassShape(cornerRadius: size.height * 0.30))
+                .glassFace(GlassShape(cornerRadius: size.height * 0.30, solid: solid))
         case .capsule:
             Text(a.padFaceLabel)
                 .font(.system(size: size.height * 0.40, weight: .semibold))
@@ -4513,7 +4926,7 @@ struct TouchControlButton: View {
                 .padding(.horizontal, 6)
                 .foregroundStyle(.white.opacity(isDown ? 1.0 : 0.85))
                 .frame(width: size.width, height: size.height)
-                .glassFace(GlassShape(capsule: true))
+                .glassFace(GlassShape(capsule: true, solid: solid))
         }
     }
 
@@ -4527,7 +4940,7 @@ struct TouchControlButton: View {
                     Text(control.action.label).font(.caption).foregroundStyle(.white.opacity(0.8))
                 }
                 .frame(width: diameter, height: diameter)
-                .glassFace(GlassShape(circle: true))
+                .glassFace(GlassShape(circle: true, solid: solid))
             } else if control.action.stickKeys != nil {
                 // Reuse the portrait pad's face so both look and animate the
                 // same; scale it to whatever size this control was pinched to.
@@ -4539,7 +4952,7 @@ struct TouchControlButton: View {
                            height: JoystickFace.padRadius * 2)
                     .scaleEffect(diameter / (JoystickFace.padRadius * 2))
                     .frame(width: diameter, height: diameter)
-                    .glassFace(GlassShape(circle: true))
+                    .glassFace(GlassShape(circle: true, solid: solid))
             } else if control.action.isPad {
                 padFace
             } else {
@@ -4550,7 +4963,7 @@ struct TouchControlButton: View {
                                   weight: .medium))
                     .foregroundStyle(.white.opacity(isDown ? 1.0 : 0.85))
                     .frame(width: size.width, height: size.height)
-                    .glassFace(GlassShape(circle: true))
+                    .glassFace(GlassShape(circle: true, solid: solid))
             }
         }
         .frame(width: size.width, height: size.height)
@@ -4566,7 +4979,7 @@ struct TouchControlButton: View {
         // ml646: the springy knob, same curve as the portrait pad overlay.
         .animation(.spring(response: 0.22, dampingFraction: 0.58), value: stickDir)
         .overlay(alignment: .topTrailing) {
-            if isSelected {
+            if isSelected && control.locked != true {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     m.controls.removeAll { $0.id == control.id }
@@ -4606,7 +5019,7 @@ struct TouchControlButton: View {
                 .onChanged { v in
                     if m.editing {
                         m.selected = control.id
-                        guard let i = m.index(of: control.id) else { return }
+                        guard control.locked != true, let i = m.index(of: control.id) else { return }
                         if dragBase == nil { dragBase = CGPoint(x: control.nx, y: control.ny) }
                         let b = dragBase ?? .zero
                         m.controls[i].nx = min(max(b.x + Double(v.translation.width  / screen.width),  0.03), 0.97)
@@ -4621,7 +5034,16 @@ struct TouchControlButton: View {
                 }
                 .onEnded { _ in
                     dragBase = nil
-                    if let q = control.action.stickKeys {
+                    if m.editing {
+                        guard let i = m.index(of: control.id) else { return }
+                        if m.snapToGrid {
+                            let step: Double = 0.02
+                            let snappedX = (m.controls[i].nx / step).rounded() * step
+                            let snappedY = (m.controls[i].ny / step).rounded() * step
+                            m.controls[i].nx = min(max(snappedX, 0.03), 0.97)
+                            m.controls[i].ny = min(max(snappedY, 0.03), 0.97)
+                        }
+                    } else if let q = control.action.stickKeys {
                         applyStick(-1, q)          // release every held direction
                         isDown = false
                     } else if isDown {
@@ -4664,14 +5086,18 @@ struct TouchControlButton: View {
         let old = Set(stickKeys(stickDir, q)), new = Set(stickKeys(next, q))
         for vk in old.subtracting(new) { winios_post_key(vk, 0) }
         for vk in new.subtracting(old) { winios_post_key(vk, 1) }
-        if stickDir == -1, next != -1 { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        if stickDir == -1, next != -1, TouchControlsModel.shared.hapticsEnabled {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
         stickDir = next
     }
 
     /// Haptic on the DOWN edge only — a held movement key would otherwise buzz
     /// continuously for as long as you walk.
     private func press(_ down: Bool) {
-        if down { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        if down && TouchControlsModel.shared.hapticsEnabled {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
         switch control.action {
         case .key(let vk):
             winios_post_key(vk, down ? 1 : 0)
@@ -4695,6 +5121,7 @@ struct MappingPanel: View {
     let screen: CGSize
     @ObservedObject private var m = TouchControlsModel.shared
     @State private var tab = 0                    // 0 keyboard, 1 controller
+    @State private var resizeDiameter: CGFloat?
 
 
     var body: some View {
@@ -4702,7 +5129,45 @@ struct MappingPanel: View {
             HStack(spacing: 0) {
                 tabButton(0, "keyboard")
                 tabButton(1, "gamecontroller")
+                Button {
+                    if let i = m.index(of: control.id) { m.controls[i].locked = control.locked == true ? nil : true }
+                } label: {
+                    Image(systemName: control.locked == true ? "lock.fill" : "lock.open")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(.white.opacity(control.locked == true ? 1.0 : 0.38))
+                        .frame(width: 44, height: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(control.locked == true ? "Unlock control" : "Lock control")
             }
+            HStack(spacing: 8) {
+                Text("Size").font(.system(size: 12))
+                Slider(value: Binding(get: { control.scale }, set: { value in
+                    if let i = m.index(of: control.id), m.controls[i].locked != true {
+                        m.controls[i].scale = value
+                    }
+                }), in: 0.5...3.0, onEditingChanged: { resizing in
+                    if resizing {
+                        if resizeDiameter == nil { resizeDiameter = TouchControlsModel.diameter(control) }
+                    } else if resizeDiameter != nil {
+                        // Let the slider finish tracking before the panel moves.
+                        DispatchQueue.main.async { resizeDiameter = nil }
+                    }
+                })
+                    .id(control.id)
+                    .disabled(control.locked == true)
+                    .accessibilityLabel("Control size")
+                    .accessibilityValue("\(Int(control.scale * 100)) percent")
+                Text("\(Int(control.scale * 100))%")
+                    .font(.system(size: 12).monospacedDigit())
+                    .frame(width: 42, alignment: .trailing)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .foregroundStyle(.white)
+            Rectangle().fill(.white.opacity(0.15)).frame(height: 1)
+            LayerButtons { mv in if let i = m.index(of: control.id) { mv.apply(&m.controls, i) } }
+                .padding(.horizontal, 10)
             Rectangle().fill(.white.opacity(0.15)).frame(height: 1)
             ScrollView {
                 (tab == 0 ? AnyView(keyboardTab) : AnyView(controllerTab))
@@ -4713,6 +5178,8 @@ struct MappingPanel: View {
         .background(GlassShape())
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.18), lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { } // Panel gaps must not dismiss the selection beneath them.
         .position(layout.center)
     }
 
@@ -4732,7 +5199,7 @@ struct MappingPanel: View {
     private var layout: Placement {
         let cx = CGFloat(control.nx) * screen.width
         let cy = CGFloat(control.ny) * screen.height
-        let r  = TouchControlsModel.diameter(control) / 2
+        let r  = (resizeDiameter ?? TouchControlsModel.diameter(control)) / 2
         let gap: CGFloat = 14, edge: CGFloat = 8
 
         for size in [CGSize(width: 340, height: 236),

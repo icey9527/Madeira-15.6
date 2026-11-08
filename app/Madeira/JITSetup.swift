@@ -53,7 +53,8 @@ enum JITPairingSource: String {
 /// the Files app and every Windows program in Madeira could read it. Its bytes
 /// go only to the bundled helper, over XPC, for one request. A copy an earlier
 /// build left at Documents/StikJIT/pairingFile.plist moves into the Keychain
-/// and is deleted.
+/// and is deleted; an installer that already holds this device's pairing file
+/// (SideInstaller) hands it over by writing it there.
 enum JITPairingFileStore {
     private static let service = "MadeiraJITPairing"
     private static let account = "rppairing"
@@ -79,7 +80,7 @@ enum JITPairingFileStore {
         ] as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data, !data.isEmpty else {
             throw NSError(domain: "MadeiraJIT", code: 11,
-                          userInfo: [NSLocalizedDescriptionKey: "No pairing file is stored for this device."])
+                          userInfo: [NSLocalizedDescriptionKey: L("No pairing file is stored for this device.")])
         }
         return data
     }
@@ -100,7 +101,7 @@ enum JITPairingFileStore {
               let identifier = dictionary["identifier"] as? String, !identifier.isEmpty else {
             throw NSError(domain: "MadeiraJIT", code: 10,
                           userInfo: [NSLocalizedDescriptionKey:
-                            "That is not a StikDebug remote pairing file. Create one with iloader and try again."])
+                            L("That is not a StikDebug remote pairing file. Create one with iloader and try again.")])
         }
         let item: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -120,7 +121,8 @@ enum JITPairingFileStore {
         UserDefaults.standard.set(source.rawValue, forKey: sourceKey)
     }
 
-    /// Documents/StikJIT/pairingFile.plist, where builds before the Keychain kept it.
+    /// Documents/StikJIT/pairingFile.plist, where builds before the Keychain kept it,
+    /// and where an installer leaves one for Madeira to take in.
     private static var legacyFolder: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("StikJIT", isDirectory: true)
@@ -154,8 +156,8 @@ final class JITCoordinator: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .setupRequired(let message): return message
-            case .pairingMissing: return "Pair this device or import its pairing file first."
-            case .scriptMissing: return "Madeira's JIT script is missing from this installation. Reinstall Madeira."
+            case .pairingMissing: return L("Pair this device or import its pairing file first.")
+            case .scriptMissing: return L("Madeira's JIT script is missing from this installation. Reinstall Madeira.")
             }
         }
     }
@@ -184,7 +186,7 @@ final class JITCoordinator: ObservableObject {
         var message: String {
             switch self {
             case .vpn:
-                return "Madeira couldn't reach this device. Connect LocalDevVPN, then try again."
+                return L("Madeira couldn't reach this device. Connect LocalDevVPN, then try again.")
             case .pairing:
                 return "This device closed the connection, which usually means it no longer accepts Madeira's pairing. Pair again, and check that LocalDevVPN is connected."
             }
@@ -225,17 +227,17 @@ final class JITCoordinator: ObservableObject {
 
     var automaticDescription: String {
         if StikJITHelper.hasMarkerConflict {
-            return "同时发现 _TrollStore 与 _TrollStoreLite 标记，无法安全选择 JIT 后端。"
+            return L("Both _TrollStore and _TrollStoreLite markers are present, so no JIT backend can be chosen.")
         }
         if StikJITHelper.isTrollStoreLite {
-            return "检测到 TrollStore Lite；启用前会检查本地双映射能力，检查通过也不代表代码执行已验证。"
+            return L("TrollStore Lite is detected; its local mapping check runs before enabling, and passing it does not prove code execution.")
         }
-        if StikJITHelper.installationType == 1 {
-            return "检测到 TrollStore；Madeira 使用本地 TrollStore JIT。"
+        if StikJITHelper.trollStoreMarkerPresent {
+            return L("TrollStore is detected, so Madeira will use TrollStore JIT.")
         }
         return StikJITHelper.isAvailable
-            ? "检测到 StikDebug；Madeira 会直接打开它。"
-            : "未检测到 StikDebug；Madeira 会使用内置辅助工具。"
+            ? L("StikDebug is installed, so Madeira will open it directly.")
+            : L("StikDebug was not detected, so Madeira will use its built-in helper.")
     }
 
     func refreshPairingStatus() {
@@ -354,7 +356,7 @@ final class JITCoordinator: ObservableObject {
                 }
                 // LocalDevVPN's Connect returns before its tunnel routes (about 5 s
                 // on the 18 Pro): go on the moment lockdownd answers.
-                self?.status = "Waiting for LocalDevVPN…"
+                self?.status = L("Waiting for LocalDevVPN…")
                 let waitStart = CFAbsoluteTimeGetCurrent()
                 LoopbackProbe.waitUntilReachable(within: 15) { [weak self] probe in
                     LogStore.shared.log(String(format: "[jit-loopback] after the shortcut: %@ after %.1f s (vpn-interface=%d, %@)",
@@ -385,7 +387,7 @@ final class JITCoordinator: ObservableObject {
                 self?.busy = false
                 if probe.reachable {
                     self?.connectionProblem = nil
-                    self?.status = "LocalDevVPN reaches this device."
+                    self?.status = L("LocalDevVPN reaches this device.")
                 } else {
                     self?.status = nil
                     self?.error = ConnectionProblem.vpn.message
@@ -404,25 +406,25 @@ final class JITCoordinator: ObservableObject {
             completion(.failure(CoordinatorError.setupRequired(message)))
         case .stikDebug:
             guard StikJITHelper.isAvailable else {
-                let message = "StikDebug is not installed. Install it or choose Built-in StikJIT."
+                let message = L("StikDebug is not installed. Install it or choose Built-in StikJIT.")
                 error = message
                 showSetup = true
                 completion(.failure(CoordinatorError.setupRequired(message)))
                 return
             }
             busy = true
-            status = "Waiting for StikDebug…"
+            status = L("Waiting for StikDebug…")
             StikJITHelper.enableJIT { [weak self] result in
                 Task { @MainActor in
                     self?.busy = false
-                    self?.status = (try? result.get()).map { _ in "StikDebug is attached." }
+                    self?.status = (try? result.get()).map { _ in L("StikDebug is attached.") }
                     if case .failure(let failure) = result { self?.error = failure.localizedDescription }
                     completion(result)
                 }
             }
         case .builtIn:
             guard JITPairingFileStore.isImported else {
-                let message = "Pair this device or import its pairing file to finish Built-in StikJIT setup."
+                let message = L("Pair this device or import its pairing file to finish Built-in StikJIT setup.")
                 error = message
                 showSetup = true
                 completion(.failure(CoordinatorError.setupRequired(message)))
@@ -437,7 +439,7 @@ final class JITCoordinator: ObservableObject {
             try JITPairingFileStore.importFile(from: source)
             OnDevicePairing.shared.cancel()
             refreshPairingStatus()
-            status = "Pairing file imported."
+            status = L("Pairing file imported.")
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -449,7 +451,7 @@ final class JITCoordinator: ObservableObject {
         try JITPairingFileStore.store(data, source: .onDevice)
         refreshPairingStatus()
         method = .builtIn
-        status = "Paired in Madeira."
+        status = L("Paired in Madeira.")
         error = nil
     }
 
@@ -469,7 +471,7 @@ final class JITCoordinator: ObservableObject {
         busy = true
         error = nil
         connectionProblem = nil
-        status = "Checking LocalDevVPN and the Developer Disk Image…"
+        status = L("Checking LocalDevVPN and the Developer Disk Image…")
         MadeiraBuiltInJIT.send(.prepare(pairingData: pairing)) { [weak self] result in
             guard let self else { return }
             busy = false
@@ -489,7 +491,7 @@ final class JITCoordinator: ObservableObject {
             let failure = NSError(
                 domain: "MadeiraJIT", code: 12,
                 userInfo: [NSLocalizedDescriptionKey:
-                    MadeiraBuiltInJIT.unavailableReason ?? "Built-in JIT is unavailable."])
+                    MadeiraBuiltInJIT.unavailableReason ?? L("Built-in JIT is unavailable.")])
             error = failure.localizedDescription
             completion(.failure(failure))
             return
@@ -507,21 +509,21 @@ final class JITCoordinator: ObservableObject {
 
         busy = true
         error = nil
-        status = "Starting Madeira's JIT helper…"
+        status = L("Starting Madeira's JIT helper…")
         var readinessTimer: Timer?
         var readinessFinished = false
         MadeiraBuiltInJIT.send(
             .enable(targetPID: getpid(), pairingData: pairing,
                     scriptBase64: script.base64EncodedString()),
             started: { [weak self] in
-                self?.status = "Waiting for Madeira's JIT helper to attach…"
+                self?.status = L("Waiting for Madeira's JIT helper to attach…")
                 readinessTimer = StikJITHelper.waitForDebugger { [weak self] result in
                     guard !readinessFinished else { return }
                     readinessFinished = true
                     self?.busy = false
                     switch result {
                     case .success:
-                        self?.status = "Built-in JIT is attached."
+                        self?.status = L("Built-in JIT is attached.")
                         self?.error = nil
                     case .failure(let failure):
                         self?.error = failure.localizedDescription
@@ -567,7 +569,7 @@ final class JITCoordinator: ObservableObject {
     func resetDDI() {
         busy = true
         error = nil
-        status = "Resetting the Developer Disk Image cache…"
+        status = L("Resetting the Developer Disk Image cache…")
         MadeiraBuiltInJIT.send(.resetDDI) { [weak self] result in
             self?.busy = false
             switch result {
@@ -589,7 +591,7 @@ enum LocalDevVPN {
     static let connect = URL(string: "localdevvpn://enable?scheme=madeira")!
 
     static var isInstalled: Bool { UIApplication.shared.canOpenURL(URL(string: "localdevvpn://")!) }
-    static var actionTitle: String { isInstalled ? "Connect LocalDevVPN" : "Get LocalDevVPN" }
+    static var actionTitle: String { isInstalled ? L("Connect LocalDevVPN") : L("Get LocalDevVPN") }
 
     static func open() {
         let installed = isInstalled
@@ -607,7 +609,7 @@ enum LocalDevVPN {
                                      then dismiss: @escaping () -> Void = {}) -> some View {
     Group {
         if problem == .pairing {
-            Button(OnDevicePairing.isSupported ? "Pair Again" : "Open JIT Setup") {
+            Button(OnDevicePairing.isSupported ? L("Pair Again") : L("Open JIT Setup")) {
                 dismiss()
                 if OnDevicePairing.isSupported { OnDevicePairing.shared.start() }
                 JITCoordinator.shared.showSetup = true
@@ -690,9 +692,9 @@ struct JITSetupView: View {
 
     private var pairingLabel: String {
         switch coordinator.pairingSource {
-        case .onDevice: return "Paired in Madeira"
-        case .imported: return "File imported"
-        case nil: return "Not set up"
+        case .onDevice: return L("Paired in Madeira")
+        case .imported: return L("File imported")
+        case nil: return L("Not set up")
         }
     }
 
@@ -705,16 +707,18 @@ struct JITSetupView: View {
                             Text(method.title).tag(method)
                         }
                     }
-                    LabeledContent15("当前生效", value: coordinator.resolvedMethod.title)
+                    LabeledContent15 { Text(coordinator.resolvedMethod.title).foregroundColor(.secondary) } label: {
+                        Text("当前生效")
+                    }
                     LabeledContent15("TrollStore 安装类型", value: StikJITHelper.installationDescription)
                     if coordinator.method == .automatic {
                         Text(coordinator.automaticDescription)
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     LabeledContent15("StikDebug",
-                                   value: StikJITHelper.isAvailable ? "Installed" : "Not detected")
-                    LabeledContent15("内置辅助工具",
-                                   value: MadeiraBuiltInJIT.isAvailable ? "Available" : "Unavailable")
+                                     value: StikJITHelper.isAvailable ? L("Installed") : L("Not detected"))
+                    LabeledContent15("Built-in helper",
+                                     value: MadeiraBuiltInJIT.isAvailable ? L("Available") : L("Unavailable"))
                 } header: {
                     Text("JIT 方式")
                 } footer: {
@@ -748,7 +752,7 @@ struct JITSetupView: View {
                     Section {
                         LabeledContent15("配对", value: pairingLabel)
                         if OnDevicePairing.isSupported {
-                            Button(coordinator.pairingSource == .onDevice ? "Pair in Madeira again" : "Pair in Madeira") {
+                            Button(coordinator.pairingSource == .onDevice ? L("Pair in Madeira again") : L("Pair in Madeira")) {
                                 pairing.start()
                             }
                             .disabled(pairing.active)
@@ -799,7 +803,7 @@ struct JITSetupView: View {
                     Section { Label(status, systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
                 }
                 if let txm = coordinator.txmPresent {
-                    Section { LabeledContent15("TXM/SPTM", value: txm ? "Present" : "Not present") }
+                    Section { LabeledContent15("TXM/SPTM", value: txm ? L("Present") : L("Not present")) }
                 }
             }
             .navigationTitle("JIT 设置")

@@ -1,3 +1,5 @@
+/* Portions copyright 2026 thebcd69 (BCD): code taken from pull requests willfaust/Madeira#337 to #346 (thebcd69, 2026-10-15) and https://github.com/thebcd69/bcd-games
+ * under GPL-3.0-or-later and modified for Madeira in October and November 2026. See THIRD-PARTY-NOTICES.md. */
 /*
  * NT process handling
  *
@@ -63,6 +65,7 @@
 #ifdef WINE_IOS
 #include <pthread.h>
 #include <setjmp.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #endif
 
@@ -76,6 +79,8 @@
 #include "wine/condrv.h"
 #include "wine/server.h"
 #include "wine/debug.h"
+#define MADEIRA_REDACT_WINE
+#include "../madeira_redact.h"   /* command lines are logged with credential-like values redacted */
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 
@@ -426,6 +431,7 @@ struct ios_child_args {
     int slot;   /* ios_child_slots index, -1 = none */
 };
 
+
 /* Pseudo-process children that are still running. A launcher stub that
  * starts the game and exits at once (GTA V Enhanced: PlayGTAV.exe starts
  * GTA5_Enhanced.exe and exits ~1 s later) ended the whole session: the main
@@ -436,7 +442,27 @@ struct ios_child_args {
  * as long as the game and used to end with it. */
 #define IOS_CHILD_SLOTS 32
 static pthread_mutex_t ios_child_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct { char name[64]; double started; int used; } ios_child_slots[IOS_CHILD_SLOTS];
+/* Madeira child-exit: peb = the child's PEB once it registered with the wineserver (ios_child_slot_bind_peb);
+ * exited = its process ended (ios_child_slot_exited, from process_exit_wrapper, the chokepoint every exit
+ * reaches). A child whose process ended on a thread other than its boot thread never returns from
+ * wine_ios_child_main, so ios_child_slot_release below never ran for it and its slot stayed "used" for good:
+ * the launcher wait in WineProcessBridge.m then waited for a program that was long dead (an abort_process
+ * 0xc0000005 on a worker thread, "still running ... 60 s", and the session never ended). Used only to decide
+ * whether anything still runs; the slot itself is released as before. env.MADEIRA_CHILD_EXIT_TRACK=0 counts an
+ * ended child as running until its boot thread returns, as before. */
+#define IOS_CHILD_PATH 260
+static struct { char name[64]; char path[IOS_CHILD_PATH]; double started; int used; void *peb; int exited; double exited_at; int noted; } ios_child_slots[IOS_CHILD_SLOTS];
+/* Madeira child-exit: the last processes that ended, with the status each ended with. The slots above are
+ * released when a child's boot thread returns (milliseconds after a healthy exit), so the status has to live
+ * elsewhere: this ring keeps the last IOS_CHILD_ENDED ends (process_exit_wrapper, through
+ * ios_child_slot_note_exit). Read by madeira_child_report, for an app-side game-end watch. */
+#define IOS_CHILD_ENDED 64
+static struct { char name[64]; char path[IOS_CHILD_PATH]; double started; double ended_at; int status; } ios_child_ended[IOS_CHILD_ENDED];
+static unsigned ios_child_ended_count;   /* ends ever noted; the ring holds the last IOS_CHILD_ENDED */
+/* spawns that found no free slot: processes this table cannot see (madeira_live_user_processes counts them as running) */
+static unsigned ios_child_untracked;
+/* the slot of the child whose boot thread this is (set by ios_child_thread_entry) */
+static _Thread_local int ios_child_slot_current = -1;
 
 static double ios_child_now(void)
 {
@@ -445,12 +471,71 @@ static double ios_child_now(void)
     return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+/* A child whose process ended and whose boot thread has not released the slot for this long never will (its
+ * ExitProcess ran on another thread). A child that ends on its boot thread releases it within milliseconds, so a
+ * healthy session sees no change: the slot counts until then, as it always did. */
+#define IOS_CHILD_EXIT_SETTLE 2.0
+static int ios_child_switch_off( const char *name, int *cache )
+{
+    if (*cache < 0)
+    {
+        const char *e = getenv( name );
+        *cache = (e && e[0] == '0' && !e[1]) ? 1 : 0;
+    }
+    return *cache;
+}
+
+static int ios_child_slot_gone( int i, double now )
+{
+    static int off = -1;   /* env.MADEIRA_CHILD_EXIT_TRACK=0: an ended child counts until its boot thread returns */
+    if (ios_child_switch_off( "MADEIRA_CHILD_EXIT_TRACK", &off )) return 0;
+    return ios_child_slots[i].exited && now - ios_child_slots[i].exited_at >= IOS_CHILD_EXIT_SETTLE;
+}
+
+/* Madeira child-helper-names: the bare substring "crash" made a game whose file name begins with "crash" a
+ * "crash reporter", so the program-end watch and the launcher-stub wait never saw the game, and the session
+ * stayed "running" long after the game died. "handler", "report" and "helper" still match as substrings, as
+ * before (the real helpers seen in logs have one of them: crashpad_handler, UnityCrashHandler32/64,
+ * crs-handler, steamerrorreporter(64), launcher error handlers and helpers, CrashReportClient). "crash" alone
+ * now counts only when a helper word follows it (crashpad, crash_service, crash-sender, crashdump, crashrpt ...)
+ * or when it is the whole name (crash.exe, foo_crash.exe): never as the beginning of a program's name. The
+ * names are lower case, as ios_child_slot_take stores them. env.MADEIRA_CHILD_HELPER_NAMES=0 brings back the
+ * bare "crash" substring. */
 static int ios_child_is_helper( const char *name )
 {
-    static const char *const parts[] = { "crash", "crs-handler", "handler", "report", "helper" };
+    static int legacy = -1;
+    static const char *const parts[] = { "crs-handler", "handler", "report", "helper" };
+    static const char *const after_crash[] = { "pad", "rpt", "send", "dump", "log", "monitor", "service", "submit",
+                                               "upload", "client", "server", "collect", "watch", "guard", "daemon",
+                                               "catch", "notif", "telemetry", "analy", "diag", "trace", "detect",
+                                               "util", "tool", "info", "manage", "process" };
+    const char *p;
     unsigned i;
     for (i = 0; i < ARRAY_SIZE(parts); i++) if (strstr( name, parts[i] )) return 1;
+    if (ios_child_switch_off( "MADEIRA_CHILD_HELPER_NAMES", &legacy )) return strstr( name, "crash" ) != NULL;
+    for (p = name; (p = strstr( p, "crash" )); p += 5)
+    {
+        const char *q = p + 5;
+        if (*q == '.' || !*q) { if (p == name || p[-1] == '_' || p[-1] == '-' || p[-1] == ' ') return 1; continue; }
+        if (*q == '_' || *q == '-' || *q == ' ') q++;
+        for (i = 0; i < ARRAY_SIZE(after_crash); i++)
+            if (!strncmp( q, after_crash[i], strlen( after_crash[i] ))) return 1;
+    }
     return 0;
+}
+
+/* The image path as the process was spawned (a Windows path), printable ASCII only, cut to IOS_CHILD_PATH - 1. Never logged:
+ * an app-side game-end watch reads it (madeira_child_report) to tell where a program lives. */
+static void ios_child_path_text( char *out, const UNICODE_STRING *image )
+{
+    unsigned i, len = image->Length / sizeof(WCHAR), n = 0;
+
+    for (i = 0; i < len && n < IOS_CHILD_PATH - 1; i++)
+    {
+        WCHAR c = image->Buffer[i];
+        out[n++] = (c >= 32 && c < 127 && c != '\t') ? (char)c : '?';
+    }
+    out[n] = 0;
 }
 
 static int ios_child_slot_take( const UNICODE_STRING *image )
@@ -473,10 +558,13 @@ static int ios_child_slot_take( const UNICODE_STRING *image )
         if (ios_child_slots[i].used) continue;
         ios_child_slots[i].used = 1;
         ios_child_slots[i].started = ios_child_now();
+        ios_child_slots[i].noted = 0;
         memcpy( ios_child_slots[i].name, name, n + 1 );
+        ios_child_path_text( ios_child_slots[i].path, image );
         slot = i;
         break;
     }
+    if (slot < 0) ios_child_untracked++;
     pthread_mutex_unlock( &ios_child_lock );
     return slot;
 }
@@ -486,7 +574,101 @@ static void ios_child_slot_release( int slot )
     if (slot < 0 || slot >= IOS_CHILD_SLOTS) return;
     pthread_mutex_lock( &ios_child_lock );
     ios_child_slots[slot].used = 0;
+    ios_child_slots[slot].peb = NULL;
+    ios_child_slots[slot].exited = 0;
+    ios_child_slots[slot].exited_at = 0;
+    ios_child_slots[slot].noted = 0;
     pthread_mutex_unlock( &ios_child_lock );
+}
+
+/* The child whose boot thread this is has registered its PEB with the wineserver (server_init_process_child). */
+void ios_child_slot_bind_peb( void *peb )
+{
+    int slot = ios_child_slot_current;
+    if (slot < 0 || slot >= IOS_CHILD_SLOTS || !peb) return;
+    pthread_mutex_lock( &ios_child_lock );
+    if (ios_child_slots[slot].used) { ios_child_slots[slot].peb = peb; ios_child_slots[slot].exited = 0; ios_child_slots[slot].exited_at = 0; }
+    pthread_mutex_unlock( &ios_child_lock );
+}
+
+/* The Windows image path of the child whose boot thread this is, NULL for a child without a slot. The slot is this
+ * thread's until its boot thread returns, so no lock. Read by virtual_ios.c: a guest-window placeholder held for the
+ * game's folder (MADEIRA_WOW_HOLD_FOR) goes only to a program from that folder. */
+const char *ios_child_image_path( void )
+{
+    int slot = ios_child_slot_current;
+    if (slot < 0 || slot >= IOS_CHILD_SLOTS || !ios_child_slots[slot].used) return NULL;
+    return ios_child_slots[slot].path;
+}
+
+/* The child process with this PEB ended (process_exit_wrapper). Marks the slot that holds it, whichever thread
+ * ended it; the slot itself is released when the child's boot thread returns, if it ever does. */
+void ios_child_slot_exited( void *peb )
+{
+    unsigned i;
+    double now = ios_child_now();
+    if (!peb) return;
+    pthread_mutex_lock( &ios_child_lock );
+    for (i = 0; i < IOS_CHILD_SLOTS; i++)
+        if (ios_child_slots[i].used && !ios_child_slots[i].exited && ios_child_slots[i].peb == peb)
+        {
+            ios_child_slots[i].exited = 1;
+            ios_child_slots[i].exited_at = now;
+        }
+    pthread_mutex_unlock( &ios_child_lock );
+}
+
+/* Madeira storm-end: the file name (lower case) of the child process with this PEB, for the one log line that says which Windows
+ * process the redelivery storm guard ended (server_ios.c, ios_end_child_process_async). 1 and the name in `out`, or 0 (the table has no such process: out is "?"). Never the path. */
+int ios_child_slot_name( void *peb, char *out, size_t len )
+{
+    unsigned i;
+    int found = 0;
+
+    if (!out || !len) return 0;
+    out[0] = '?'; if (len > 1) out[1] = 0;
+    if (!peb) return 0;
+    pthread_mutex_lock( &ios_child_lock );
+    for (i = 0; i < IOS_CHILD_SLOTS && !found; i++)
+        if (ios_child_slots[i].used && ios_child_slots[i].peb == peb)
+        {
+            size_t n = strlen( ios_child_slots[i].name );
+
+            if (n > len - 1) n = len - 1;
+            memcpy( out, ios_child_slots[i].name, n );
+            out[n] = 0;
+            found = 1;
+        }
+    pthread_mutex_unlock( &ios_child_lock );
+    return found;
+}
+
+/* Madeira child-exit: the child process with this PEB ended with this status (process_exit_wrapper, any thread,
+ * right after ios_child_slot_exited). Kept in the ring of ended processes with the slot's file name, image path, start
+ * and end time. Once per slot: a second call for the same process is ignored. No allocation, no logging. Returns 1 when
+ * the status was noted, 0 when no slot holds this PEB (the caller says so for a crash status: the watch would miss it). */
+int ios_child_slot_note_exit( void *peb, int status )
+{
+    unsigned i;
+    int noted = 0;
+    double now = ios_child_now();
+    if (!peb) return 0;
+    pthread_mutex_lock( &ios_child_lock );
+    for (i = 0; i < IOS_CHILD_SLOTS; i++)
+        if (ios_child_slots[i].used && !ios_child_slots[i].noted && ios_child_slots[i].peb == peb)
+        {
+            unsigned at = ios_child_ended_count++ % IOS_CHILD_ENDED;
+            memcpy( ios_child_ended[at].name, ios_child_slots[i].name, sizeof(ios_child_ended[at].name) );
+            memcpy( ios_child_ended[at].path, ios_child_slots[i].path, sizeof(ios_child_ended[at].path) );
+            ios_child_ended[at].started = ios_child_slots[i].started;
+            ios_child_ended[at].ended_at = now;
+            ios_child_ended[at].status = status;
+            ios_child_slots[i].noted = 1;
+            noted = 1;
+            break;
+        }
+    pthread_mutex_unlock( &ios_child_lock );
+    return noted;
 }
 
 /* Children still running that are not helpers, started at most max_age
@@ -502,7 +684,7 @@ int madeira_live_game_children( char *buf, int len, double max_age )
     pthread_mutex_lock( &ios_child_lock );
     for (i = 0; i < IOS_CHILD_SLOTS; i++)
     {
-        if (!ios_child_slots[i].used || ios_child_is_helper( ios_child_slots[i].name )) continue;
+        if (!ios_child_slots[i].used || ios_child_slot_gone( i, now ) || ios_child_is_helper( ios_child_slots[i].name )) continue;
         if (max_age >= 0 && now - ios_child_slots[i].started > max_age) continue;
         count++;
         if (buf && len - used > 1)
@@ -511,6 +693,98 @@ int madeira_live_game_children( char *buf, int len, double max_age )
     }
     pthread_mutex_unlock( &ios_child_lock );
     return count;
+}
+
+/* Madeira child-exit: Wine's own processes (and the Dock host). They start with the desktop or the first
+ * program and end with the session; a program that has ended (WineProcessBridge.m "Session end") is not kept
+ * alive by them. Wine's own names, not any game's. */
+static int ios_child_is_system( const char *name )
+{
+    static const char *const names[] = { "explorer.exe", "services.exe", "winedevice.exe", "conhost.exe",
+                                         "plugplay.exe", "rpcss.exe", "svchost.exe", "dockhost.exe" };
+    unsigned i;
+    for (i = 0; i < ARRAY_SIZE(names); i++) if (!strcmp( name, names[i] )) return 1;
+    return 0;
+}
+
+/* How many processes the program started still run, besides Wine's own and the helpers (any age); their file
+ * names go to buf. A child the table could not track counts as running: with an unknown tree the library never
+ * ends a session by itself. For an app-side program-end watch (same binary, through the bridging header, as
+ * madeira_live_game_children is for WineProcessBridge.m); nothing in this tree calls it yet. */
+int madeira_live_user_processes( char *buf, int len )
+{
+    double now = ios_child_now();
+    int count = 0, used = 0;
+    unsigned i;
+
+    if (buf && len > 0) buf[0] = 0;
+    pthread_mutex_lock( &ios_child_lock );
+    for (i = 0; i < IOS_CHILD_SLOTS; i++)
+    {
+        if (!ios_child_slots[i].used || ios_child_slot_gone( i, now )) continue;
+        if (ios_child_is_helper( ios_child_slots[i].name ) || ios_child_is_system( ios_child_slots[i].name )) continue;
+        count++;
+        if (buf && len - used > 1)
+            used += snprintf( buf + used, len - used, "%s%s", used ? " " : "", ios_child_slots[i].name );
+        if (used >= len) used = len - 1;
+    }
+    if (ios_child_untracked)
+    {
+        count += (int)ios_child_untracked;
+        if (buf && len - used > 1)
+            used += snprintf( buf + used, len - used, "%s(%u untracked)", used ? " " : "", ios_child_untracked );
+        if (used >= len) used = len - 1;
+    }
+    pthread_mutex_unlock( &ios_child_lock );
+    return count;
+}
+
+/* Madeira child-exit: a text snapshot of this table for an app-side game-end watch of a Dock session (nothing
+ * in this tree calls it yet): one line per process, fields separated by tabs, the image path last.
+ *   R <helper> <seconds since start> <path>                              still runs
+ *   E <helper> <status in hex> <seconds since the end> <seconds it lived> <path>   ended (the last IOS_CHILD_ENDED ends)
+ *   U <count>                                                            spawns this table could not track
+ *   T                                                                    the text was cut: the snapshot is incomplete
+ * <helper> is 1 for a crash reporter or helper by the file-name rule above; where a program lives is judged by the
+ * library from its path. Returns the number of process lines. Paths go nowhere else (no log line carries them). */
+int madeira_child_report( char *buf, int len )
+{
+    double now = ios_child_now();
+    int used = 0, lines = 0, cut = 0;
+    unsigned i, first;
+
+    if (!buf || len < 8) return 0;
+    buf[0] = 0;
+    pthread_mutex_lock( &ios_child_lock );
+    for (i = 0; i < IOS_CHILD_SLOTS && !cut; i++)
+    {
+        int room = len - used - 4, n;   /* 4 bytes stay free for the cut mark */
+        if (!ios_child_slots[i].used || ios_child_slots[i].exited) continue;   /* an ended one is in the ring */
+        n = room > 0 ? snprintf( buf + used, room, "R\t%d\t%.1f\t%s\n", ios_child_is_helper( ios_child_slots[i].name ),
+                                 now - ios_child_slots[i].started, ios_child_slots[i].path ) : -1;
+        if (n < 0 || n >= room) { cut = 1; break; }
+        used += n; lines++;
+    }
+    first = ios_child_ended_count > IOS_CHILD_ENDED ? ios_child_ended_count - IOS_CHILD_ENDED : 0;
+    for (i = first; i < ios_child_ended_count && !cut; i++)
+    {
+        int room = len - used - 4, n;
+        unsigned at = i % IOS_CHILD_ENDED;
+        n = room > 0 ? snprintf( buf + used, room, "E\t%d\t%x\t%.1f\t%.1f\t%s\n", ios_child_is_helper( ios_child_ended[at].name ),
+                                 (unsigned)ios_child_ended[at].status, now - ios_child_ended[at].ended_at,
+                                 ios_child_ended[at].ended_at - ios_child_ended[at].started, ios_child_ended[at].path ) : -1;
+        if (n < 0 || n >= room) { cut = 1; break; }
+        used += n; lines++;
+    }
+    if (ios_child_untracked && !cut)
+    {
+        int room = len - used - 4, n = room > 0 ? snprintf( buf + used, room, "U\t%u\n", ios_child_untracked ) : -1;
+        if (n < 0 || n >= room) cut = 1; else used += n;
+    }
+    if (cut) { memcpy( buf + used, "T\n", 3 ); used += 2; }
+    buf[used] = 0;
+    pthread_mutex_unlock( &ios_child_lock );
+    return lines;
 }
 
 /* the machine of the child's main image, published to
@@ -546,6 +820,7 @@ static void *ios_child_thread_entry( void *arg )
     /* Set up exit handling for this child thread */
     wine_ios_main_thread = pthread_self();
     wine_ios_exit_initialized = 1;
+    ios_child_slot_current = args->slot;   /* child-exit: server_init_process_child binds the PEB to it */
 
     if (setjmp(wine_ios_exit_jmpbuf) == 0) {
         /* Change working directory if requested */
@@ -653,8 +928,12 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
 
     if (winedebug) putenv( winedebug );
 
-    ERR("spawn_process: creating child thread for %s (fd=%d, unixdir=%d, dup_unixdir=%d)\n",
-        debugstr_us(&params->CommandLine), socketfd, unixdir, args->unixdir);
+    /* Madeira (log only): the Windows current directory the child is given. A game that looks up its data
+     * relative to the current directory ended on its own "Asset could not be found" box, and no line of any
+     * log said what directory a Steam-launched child has; this one does. */
+    ERR("spawn_process: creating child thread for %s (fd=%d, unixdir=%d, dup_unixdir=%d) cwd=%s\n",
+        madeira_debugstr_cmdline_us(&params->CommandLine), socketfd, unixdir, args->unixdir,
+        debugstr_us(&params->CurrentDirectory.DosPath));
 
     ret = pthread_create( &child_thread, NULL, ios_child_thread_entry, args );
     if (ret) {
@@ -990,6 +1269,89 @@ static int ec_conhost_refuse( int arm64ec_session, const char *env, const WCHAR 
     return arm64ec_session && !(env && env[0] == '1') && ios_image_name_is( image, image_len, "conhost.exe" );
 }
 
+/* ml2280 (testers' log, 2026-10-28): every aarch64 program in an ARM64EC session, for
+ * the reason conhost is refused above. A launcher installer's service helper made
+ * sechost start services.exe (aarch64) on demand; it faulted at 0x38 at its first
+ * executable allocation, its exception path faulted 2000 times until the storm
+ * handler ended it, twice, and the installer waited 20 s for its pipe each time.
+ * Refused, CreateProcess fails at once. A program that needs one (a launcher that
+ * registers a service) starts in the Wine desktop, an aarch64 session, where its
+ * aarch64 children run on the session's ntdll. MADEIRA_EC_NATIVE_CHILD=1 starts
+ * them anyway (and MADEIRA_EC_CONHOST=1 still lets conhost.exe through). */
+static int ec_native_child_refuse( int arm64ec_session, const char *env, USHORT machine )
+{
+    return arm64ec_session && machine == IMAGE_FILE_MACHINE_ARM64 && !(env && env[0] == '1');
+}
+
+/* madeira-bcd: the JIT pool's variables in every child's environment. The app
+ * exports WINE_IOS_JIT_RX/SIZE/RW (ContentView.swift) before Wine starts; the
+ * first process imports the Unix environment and children inherit it. The
+ * emulators read them from the Windows environment (xtajit64's and the WOW64
+ * FEX's ProcessInit: DualMap::WriteOffset = RW - RX). A service does not
+ * inherit: services.exe builds its environment from the registry
+ * (CreateEnvironmentBlock), so GTA V Enhanced's RockstarService.exe service ran
+ * without them (`[atomic-alias] LIVE: WINE_IOS_JIT_RX=<unset>`,
+ * `[DUAL_MAP_SANITY] ... WriteOffset=0x0`, in every 442 and 447 log) and its
+ * emulator wrote every translated block through the RX view of its code
+ * buffer: each store a Mach fault that the exception thread emulated. Build 447
+ * (2026-10-08 10:41 log): 1.09M emulated stores in 3.5 minutes, 99.8% into
+ * that service's 16 MB FEXMemJIT ([fault-class] blockRIP = its entry point),
+ * 45k/s at start and 3.5k/s during play, the exception thread ~20% of a core.
+ * Returns `env` (a WCHAR multi-sz) with NAME=value appended for each of
+ * `names` (ASCII, matched in any case) that it lacks and `get` (getenv) has,
+ * as a new block, its length in WCHARs (with the final NUL) in *len and the
+ * names added as bits in *added; NULL when nothing is missing or on failure. */
+static WCHAR *ios_env_with( const WCHAR *env, const char *const *names, int count,
+                            char *(*get)( const char * ), SIZE_T *len, unsigned int *added )
+{
+    const char *values[8];
+    SIZE_T used, extra = 0, o;
+    const WCHAR *p;
+    WCHAR *out;
+    int i, k;
+
+    *added = 0;
+    for (i = 0; i < count && i < 8; i++)
+    {
+        int n = (int)strlen( names[i] ), found = 0;
+
+        if (!(values[i] = get( names[i] ))) continue;
+        for (p = env; p && *p && !found; p++)
+        {
+            for (k = 0; k < n; k++)
+            {
+                WCHAR c = p[k];
+                if (c >= 'a' && c <= 'z') c -= 32;
+                if (c != (WCHAR)names[i][k]) break;   /* also stops at the entry's NUL */
+            }
+            found = (k == n && p[n] == '=');
+            while (*p) p++;   /* to this entry's NUL; the loop steps past it */
+        }
+        if (found) continue;
+        *added |= 1u << i;
+        extra += n + 1 + strlen( values[i] ) + 1;
+    }
+    if (!*added) return NULL;
+    for (p = env; p && *p; p++) while (*p) p++;
+    used = env ? (SIZE_T)(p - env) : 0;   /* every entry with its NUL, not the final NUL */
+    if (!(out = malloc( (used + extra + 1) * sizeof(WCHAR) ))) { *added = 0; return NULL; }
+    if (used) memcpy( out, env, used * sizeof(WCHAR) );
+    o = used;
+    for (i = 0; i < count && i < 8; i++)
+    {
+        const char *s;
+
+        if (!(*added & (1u << i))) continue;
+        for (s = names[i]; *s; s++) out[o++] = (WCHAR)(unsigned char)*s;
+        out[o++] = '=';
+        for (s = values[i]; *s; s++) out[o++] = (WCHAR)(unsigned char)*s;
+        out[o++] = 0;
+    }
+    out[o++] = 0;
+    *len = o;
+    return out;
+}
+
 /* A Steam game's session log under its own name.
  *
  * The app keeps each run's log as Documents/logs/<exe>-<yyyy-MM-dd_HH-mm-ss>.txt
@@ -1034,9 +1396,9 @@ static void madeira_steam_session_log( const UNICODE_STRING *image )
     name[n] = 0;
     if (!n) return;
     /* Helpers a game spawns (a shader compiler such as fxc.exe, installers,
-     * crash reporters) are not the game. */
+     * crash reporters such as Nixxes' crs-handler.exe) are not the game. */
     {
-        static const char * const helpers[] = { "fxc", "redist", "dxsetup", "crash", "setup", "install" };
+        static const char * const helpers[] = { "fxc", "redist", "dxsetup", "crash", "crs-handler", "setup", "install" };
         char lower[64];
         for (i = 0; i <= n; i++) lower[i] = (name[i] >= 'A' && name[i] <= 'Z') ? name[i] + 32 : name[i];
         for (i = 0; i < sizeof(helpers) / sizeof(helpers[0]); i++) if (strstr( lower, helpers[i] )) return;
@@ -1060,6 +1422,264 @@ static void madeira_steam_session_log( const UNICODE_STRING *image )
     else
         dprintf( 2, "[session-log] Steam game %s: could not link logs/%s-%s.txt (errno %d)\n",
                  name, name, stamp, errno );
+}
+
+/* madeira-bcd: Social Club's Chromium (SocialClubHelper.exe).
+ *
+ * GTA V Enhanced's socialclub.dll starts SocialClubHelper.exe as CEF's BROWSER
+ * process (no --type=) and connects to it over \\.\pipe\chrome.rgsc_gameinst_0.
+ * On Windows that browser then starts its renderer, GPU and utility children
+ * (nine SocialClubHelper.exe processes in a Proton log of a PC run). Here all
+ * pseudo-processes share one address space and one JIT pool, and every CEF
+ * process needs its own 240 MB pool copy of libcef.dll and its own 32 GB
+ * PartitionAlloc reservation on a 32 GB boundary, of which the address space
+ * has at most one (with env.MADEIRA_SC_PA_POOLS = 1, virtual_ios.c
+ * ios_sc_glued_pools). So, as for Steam's webhelper (task #34 above):
+ *   - the browser gets --single-process: renderer and GPU become its threads;
+ *   - a --type= child it still starts is refused;
+ *   - PartitionAllocBackupRefPtr is disabled where the switch is honoured: only
+ *     the first 4 GB of the BackupRefPtr pool are real memory (virtual_ios.c
+ *     ios_sc_glued_pools), and Steam's CEF died on BRP's refcount check (ml297;
+ *     ml616 saw it run with the switch set, so nothing relies on it);
+ *   - V8 gets --js-flags=--jitless unless MADEIRA_JITLESS=0 (as for Steam);
+ *   - --no-proxy-server unless it names its own proxy (as for Steam, ml287):
+ *     GTA log 2026-10-02 22:25, the browser connected to the game's IPC
+ *     channel, started its in-process V8 "PAC thread"s and never created a
+ *     renderer -- proxy resolution is where Steam's webhelper stalled too;
+ *   - env.MADEIRA_SC_CEF_FLAGS (madeira.cfg) is appended verbatim, for tests;
+ *     when it carries a --js-flags= of its own (V8 heap limits such as
+ *     --max-semi-space-size), --jitless goes into that value instead of a
+ *     second switch: Chromium keeps only the LAST --js-flags=, so the appended
+ *     one would silently turn V8's JIT back on (see sc_extra_js_flags).
+ * env.MADEIRA_SC_CEF = 0 turns this off, together with virtual_ios.c's parts. */
+enum { SC_NOT_HELPER = 0, SC_BROWSER = 1, SC_CHILD = 2 };
+enum { SC_BRP_SPLICED = 1, SC_BRP_NEW = 2, SC_SINGLE_ADDED = 4, SC_JITLESS_ADDED = 8,
+       SC_OWN_JS_FLAGS = 16, SC_EXTRA_ADDED = 32, SC_NOPROXY_ADDED = 64, SC_JITLESS_MERGED = 128 };
+
+/* Index of the first character after the LAST `sw` (an ASCII switch such as
+ * "--disable-features=") in `cl` that starts an argument, or -1. A switch
+ * without '=' only matches a whole argument. */
+static int sc_switch_end( const WCHAR *cl, int cl_len, const char *sw )
+{
+    int n = (int)strlen( sw ), k, j, last = -1;
+
+    for (k = 0; cl && k + n <= cl_len; k++)
+    {
+        if (k && cl[k - 1] != ' ' && cl[k - 1] != '\t' && cl[k - 1] != '"') continue;
+        for (j = 0; j < n; j++) if (cl[k + j] != (WCHAR)sw[j]) break;
+        if (j < n) continue;
+        if (sw[n - 1] != '=' && k + n < cl_len && cl[k + n] != ' ' && cl[k + n] != '\t' &&
+            cl[k + n] != '"' && cl[k + n] != '=') continue;
+        last = k + n;
+    }
+    return last;
+}
+
+/* ml2210: with env.MADEIRA_STEAM_ALLOW_CRASHPAD=1 (the Big Picture list), a web helper
+ * command line whose one --type= switch is exactly crashpad-handler may start. */
+static int ios_webhelper_crashpad_allowed( const WCHAR *cl, int len )
+{
+    static const char prefix[] = "--type=", type[] = "crashpad-handler";
+    const char *e = getenv( "MADEIRA_STEAM_ALLOW_CRASHPAD" );
+    int found = 0, value = -1, k, j;
+    if (!e || strcmp( e, "1" ) || !cl) return 0;
+    for (k = 0; k + 7 <= len; k++)
+    {
+        if (k && cl[k - 1] != ' ' && cl[k - 1] != '\t' && cl[k - 1] != '"') continue;
+        for (j = 0; j < 7; j++) if (cl[k + j] != (WCHAR)prefix[j]) break;
+        if (j == 7) { found++; value = k + 7; }
+    }
+    if (found != 1 || value + (int)sizeof(type) - 1 > len) return 0;
+    for (j = 0; type[j]; j++) if (cl[value + j] != (WCHAR)type[j]) return 0;
+    return value + j == len || cl[value + j] == ' ' || cl[value + j] == '\t' || cl[value + j] == '"';
+}
+
+/* What kind of Social Club process `image` with command line `cl` is. */
+static int sc_helper_kind( const WCHAR *image, int image_len, const WCHAR *cl, int cl_len )
+{
+    if (!ios_image_name_is( image, image_len, "socialclubhelper.exe" )) return SC_NOT_HELPER;
+    return sc_switch_end( cl, cl_len, "--type=" ) >= 0 ? SC_CHILD : SC_BROWSER;
+}
+
+/* Madeira: the EA app's Chromium (opt-in: env.MADEIRA_EA_CEF = 1, in the EA app's own configuration lines).
+ *
+ * EADesktop.exe is CEF's browser process (CEF 109); it starts EACefSubProcess.exe --type=gpu-process (and, for
+ * the pages, renderers and utility processes). Every CEF process of this Chromium needs four 16 GB
+ * PartitionAlloc pools and the band has four slots (virtual_ios.c, "the EA app's Chromium"), so, as for Social
+ * Club's helper and Steam's webhelper:
+ *   - the browser gets --single-process: renderer and GPU become its threads;
+ *   - a --type= child of EADesktop.exe or EACefSubProcess.exe it still starts is refused;
+ *   - the rest of the command line is Social Club's (sc_browser_cmdline): PartitionAllocBackupRefPtr off where the
+ *     switch is honoured, V8 --jitless unless MADEIRA_JITLESS=0, --no-proxy-server unless it names a proxy,
+ *     and env.MADEIRA_EA_CEF_FLAGS appended verbatim.
+ * env.MADEIRA_EA_CEF_CMDLINE = 0 leaves the browser's command line alone (the children are still refused): the
+ * EA app parses its own command line before CEF sees it and may not take a switch it does not know. */
+enum { EA_NOT_CEF = 0, EA_BROWSER = 1, EA_CHILD = 2 };
+
+static int ea_cef_kind( const WCHAR *image, int image_len, const WCHAR *cl, int cl_len )
+{
+    int browser = ios_image_name_is( image, image_len, "eadesktop.exe" );
+
+    if (!browser && !ios_image_name_is( image, image_len, "eacefsubprocess.exe" )) return EA_NOT_CEF;
+    if (sc_switch_end( cl, cl_len, "--type=" ) >= 0) return EA_CHILD;
+    return browser ? EA_BROWSER : EA_NOT_CEF;
+}
+
+/* madeira-bcd: env.MADEIRA_CHILD_ARGS = "<exe name> <arguments>" appends the
+ * arguments to the command line of every started process whose image file is
+ * <exe name> (any directory, ASCII case ignored). GTA V's PlayGTAV.exe starts
+ * GTA5_Enhanced.exe with its own fixed arguments and there is no
+ * commandline.txt to edit easily on the device, so this is how a game file
+ * passes e.g. "GTA5_Enhanced.exe -scDebugLogging". Returns the arguments to
+ * append, or NULL when `spec` does not name this image. */
+static const char *child_extra_args( const char *spec, const WCHAR *image, int image_len )
+{
+    char name[64];
+    int n = 0;
+
+    if (!spec) return NULL;
+    while (*spec == ' ') spec++;
+    while (spec[n] && spec[n] != ' ' && n < (int)sizeof(name) - 1)
+    {
+        char c = spec[n];
+        name[n++] = (c >= 'A' && c <= 'Z') ? c + 32 : c;
+    }
+    if (!n || (spec[n] && spec[n] != ' ')) return NULL;
+    name[n] = 0;
+    spec += n;
+    while (*spec == ' ') spec++;
+    if (!*spec || !ios_image_name_is( image, image_len, name )) return NULL;
+    return spec;
+}
+
+/* madeira-bcd: consoles without a window. kernelbase's alloc_console starts
+ * conhost.exe with a window unless the program asked for none
+ * (CREATE_NO_WINDOW appends --headless). In a Dock session explorer's desktop
+ * starts dockhost.exe, a console program, without a console, so it gets one
+ * with a window: build 442 (2026-10-08, both runs) had exactly one conhost,
+ * `conhost.exe --server 0x34` from dockhost's main thread at t+4 s, window
+ * 0x20056 shown at {0,0,505,434}, the "DOS window" left of the game, showing
+ * what dockhost, Valve's client in it and console children print. Social
+ * Club's helper opened one the same way when --enable-logging made Chromium
+ * call AllocConsole. On the phone it only covers the game, and painting what
+ * is written to it costs CPU, so a conhost.exe started for a console
+ * (--server) without --headless or --unix gets --headless: the console works
+ * as before (WriteConsole, modes, Ctrl handlers), only GetConsoleWindow() is
+ * NULL, as with CREATE_NO_WINDOW. Pseudo-consoles already start headless.
+ * env.MADEIRA_CONSOLE_WINDOW=1 keeps the window. Writes the new command line
+ * to `out` (`cap` WCHARs with the NUL) and returns its length, or -1 when it
+ * stays as it is. */
+static int console_headless_cmdline( const char *env, const WCHAR *image, int image_len,
+                                     const WCHAR *cl, int cl_len, WCHAR *out, int cap )
+{
+    static const char headless[] = " --headless";
+    int n = (int)sizeof(headless) - 1, k;
+
+    if ((env && env[0] == '1') || !ios_image_name_is( image, image_len, "conhost.exe" )) return -1;
+    if (sc_switch_end( cl, cl_len, "--server" ) < 0 || sc_switch_end( cl, cl_len, "--headless" ) >= 0 ||
+        sc_switch_end( cl, cl_len, "--unix" ) >= 0 || cl_len + n + 1 > cap) return -1;
+    memcpy( out, cl, cl_len * sizeof(WCHAR) );
+    for (k = 0; k < n; k++) out[cl_len + k] = (WCHAR)headless[k];
+    out[cl_len + n] = 0;
+    return cl_len + n;
+}
+
+/* madeira-bcd: index of the first character after the LAST "--js-flags=" in
+ * `extra` (env.MADEIRA_SC_CEF_FLAGS) that starts an argument, or -1. The memory
+ * study of 2026-10-09 (467 log: V8's cage 167 MB dirty when RDR2.exe started)
+ * suggests V8 heap flags through env.MADEIRA_SC_CEF_FLAGS, and a bare
+ * --js-flags=--max-semi-space-size=1 there would replace --jitless. */
+static int sc_extra_js_flags( const char *extra )
+{
+    static const char sw[] = "--js-flags=";
+    int n = sizeof(sw) - 1, k, last = -1;
+
+    for (k = 0; extra && extra[k]; k++)
+    {
+        if (k && extra[k - 1] != ' ' && extra[k - 1] != '\t' && extra[k - 1] != '"') continue;
+        if (!strncmp( extra + k, sw, n )) last = k + n;
+    }
+    return last;
+}
+
+/* The browser's new command line, written to `out` (`cap` WCHARs with the
+ * NUL): `cl` with PartitionAllocBackupRefPtr put first in its last
+ * --disable-features= list (Chromium uses only the last one; a second switch
+ * would drop the app's own list), or a new --disable-features= when it has
+ * none; then --single-process unless present, --js-flags=--jitless when
+ * `jitless` and neither `cl` nor `extra` has a --js-flags= of its own, and
+ * ` extra` when non-empty. With `jitless` and a --js-flags= in `extra`,
+ * "--jitless" becomes the first flag of extra's last one, the same argument
+ * however Windows splits it: --js-flags="--a --b" -> --js-flags="--jitless --a
+ * --b", and --js-flags=--a -> --js-flags=--jitless" "--a (CommandLineToArgvW
+ * reads "--jitless --a"). Returns the length and the SC_* bits in *how, or -1
+ * when `cap` is too small. */
+static int sc_browser_cmdline( const WCHAR *cl, int cl_len, int jitless, const char *extra,
+                               WCHAR *out, int cap, int *how )
+{
+    static const char brp[] = "PartitionAllocBackupRefPtr";
+    int df = sc_switch_end( cl, cl_len, "--disable-features=" ), o = 0, k;
+    int need = cl_len + 1 + 64 + 24 + 24 + 20 + (extra ? 1 + (int)strlen( extra ) : 0);
+    int xj = (jitless && extra) ? sc_extra_js_flags( extra ) : -1;   /* madeira-bcd: see sc_extra_js_flags */
+    const char *add;
+
+    *how = 0;
+    if (cap < need || cl_len < 0) return -1;
+    if (df >= 0)
+    {
+        for (k = 0; k < df; k++) out[o++] = cl[k];
+        for (add = brp; *add; add++) out[o++] = (WCHAR)*add;
+        out[o++] = ',';
+        for (k = df; k < cl_len; k++) out[o++] = cl[k];
+        *how |= SC_BRP_SPLICED;
+    }
+    else
+    {
+        for (k = 0; k < cl_len; k++) out[o++] = cl[k];
+        for (add = " --disable-features="; *add; add++) out[o++] = (WCHAR)*add;
+        for (add = brp; *add; add++) out[o++] = (WCHAR)*add;
+        *how |= SC_BRP_NEW;
+    }
+    if (sc_switch_end( cl, cl_len, "--single-process" ) < 0)
+    {
+        for (add = " --single-process"; *add; add++) out[o++] = (WCHAR)*add;
+        *how |= SC_SINGLE_ADDED;
+    }
+    if (sc_switch_end( cl, cl_len, "--js-flags=" ) >= 0) *how |= SC_OWN_JS_FLAGS;
+    else if (jitless && xj < 0)
+    {
+        for (add = " --js-flags=--jitless"; *add; add++) out[o++] = (WCHAR)*add;
+        *how |= SC_JITLESS_ADDED;
+    }
+    if (sc_switch_end( cl, cl_len, "--no-proxy-server" ) < 0 && sc_switch_end( cl, cl_len, "--proxy-server=" ) < 0 &&
+        sc_switch_end( cl, cl_len, "--proxy-pac-url=" ) < 0)
+    {
+        for (add = " --no-proxy-server"; *add; add++) out[o++] = (WCHAR)*add;
+        *how |= SC_NOPROXY_ADDED;
+    }
+    if (extra && *extra)
+    {
+        out[o++] = ' ';
+        for (k = 0; extra[k]; k++)
+        {
+            if (k == xj)   /* madeira-bcd: --jitless first in extra's last --js-flags= */
+            {
+                int quoted = extra[k] == '"';
+                for (add = quoted ? "\"--jitless " : "--jitless\" \""; *add; add++) out[o++] = (WCHAR)*add;
+                *how |= SC_JITLESS_MERGED;
+                if (quoted) continue;   /* its opening quote is the one just written */
+            }
+            out[o++] = (WCHAR)(unsigned char)extra[k];
+        }
+        if (xj == k)   /* "--js-flags=" ends extra: the value is --jitless alone */
+        {
+            for (add = "--jitless"; *add; add++) out[o++] = (WCHAR)*add;
+            *how |= SC_JITLESS_MERGED;
+        }
+        *how |= SC_EXTRA_ADDED;
+    }
+    out[o] = 0;
+    return o;
 }
 #endif
 
@@ -1140,10 +1760,10 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     if (!process_attr) process_attr = &empty_attr;
 
     TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
-           debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
+           debugstr_us( &params->ImagePathName ), madeira_debugstr_cmdline_us( &params->CommandLine ), parent, machine );
 #ifdef WINE_IOS
     ERR("NtCreateUserProcess: image=%s cmdline=%s\n",
-        debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ));
+        debugstr_us( &params->ImagePathName ), madeira_debugstr_cmdline_us( &params->CommandLine ));
 
     /* TEMP HACK (Steam S3 2026-07-10, task #29): refuse to spawn Steam's
      * minidump reporter. The reporter child hits the deep guest-exception-
@@ -1211,17 +1831,117 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
          * "EnterEC wrote it" does NOT name the origin — Core.cpp says so explicitly:
          * EnterEC storing an x64 target in State.rip is its job. The upstream producer
          * still needs finding via x9 at DispatchJump/RetToEntryThunk/ExitToX64. */
+        /* A game in a Madeira Dock session asks Steam to start another game: it
+         * runs steam.exe with steam://run/<App ID> (or steam://rungameid/<App ID>)
+         * and exits. Black Ops II's campaign does this when the player chooses
+         * Zombies (build 30, 2026-10-27). In a Dock session Valve's client runs
+         * inside dockhost.exe, so steam.exe found no client, began a 229 MB
+         * self-update and stopped at a black window. The request goes to the app
+         * instead (wine_steam_run_requested, WineProcessBridge.m), which starts
+         * that game in its next run; steam.exe is not started.
+         * env.MADEIRA_DOCK_STEAM_RUN=0 lets steam.exe start as before. */
+        {
+            extern void wine_steam_run_requested( unsigned int appid ) __attribute__((weak));
+            const char *dock = getenv( "MADEIRA_DOCK_SESSION" ), *sr = getenv( "MADEIRA_DOCK_STEAM_RUN" );
+            const WCHAR *cl = params->CommandLine.Buffer;
+            int cl_len = params->CommandLine.Length / sizeof(WCHAR);
+
+            if (dock && dock[0] == '1' && !(sr && sr[0] == '0' && !sr[1]) && cl &&
+                ios_image_name_is( params->ImagePathName.Buffer, params->ImagePathName.Length / sizeof(WCHAR),
+                                   "steam.exe" ))
+            {
+                static const char * const prefixes[] = { "steam://rungameid/", "steam://run/" };
+                unsigned int appid = 0;
+                unsigned p;
+                int k, j, found = 0;
+
+                for (p = 0; p < 2 && !found; p++)
+                {
+                    int pl = (int)strlen( prefixes[p] );
+                    for (k = 0; k + pl <= cl_len && !found; k++)
+                    {
+                        if (k && cl[k - 1] != ' ' && cl[k - 1] != '\t' && cl[k - 1] != '"') continue;
+                        for (j = 0; j < pl; j++)
+                        {
+                            WCHAR c = cl[k + j];
+                            if (c >= 'A' && c <= 'Z') c += 32;
+                            if (c != (WCHAR)prefixes[p][j]) break;
+                        }
+                        if (j < pl) continue;
+                        appid = 0;
+                        for (j = k + pl; j < cl_len && cl[j] >= '0' && cl[j] <= '9'; j++)
+                        {
+                            unsigned int digit = cl[j] - '0';
+                            if (appid > (UINT32_MAX - digit) / 10) { appid = 0; break; }
+                            appid = appid * 10 + digit;
+                        }
+                        found = appid && (j == cl_len || cl[j] == ' ' || cl[j] == '\t' ||
+                                          cl[j] == '"' || cl[j] == '/');
+                    }
+                }
+                if (found && wine_steam_run_requested)
+                {
+                    dprintf( 2, "[dock-steam-run] %s asks Steam to start app %u: steam.exe not started, "
+                             "the app starts it in its next run (env.MADEIRA_DOCK_STEAM_RUN=0 starts steam.exe)\n",
+                             madeira_debugstr_cmdline_us( &params->CommandLine ), appid );
+                    wine_steam_run_requested( appid );
+                    return STATUS_ACCESS_DENIED;
+                }
+            }
+        }
+
         static const char * const blocked_names[] = { "steamerrorreporter", "gldriverquery", "vulkandriverquery",
                                                       "steamsysinfo", "hardwareupdater",
                                                       "unitycrashhandler64" };
         const WCHAR *ip = params->ImagePathName.Buffer;
         int ip_len = params->ImagePathName.Length / sizeof(WCHAR);
         unsigned b;
+        /* ml1357: the full Windows Steam client (steam.exe, started by the in-session
+         * launcher or a library entry) runs its own crash reporter, hardware survey and
+         * GPU probes. These names were refused because, before ml937, a helper's crash or
+         * self-terminate took the whole app down; now each ends only its own
+         * pseudo-process. When the PARENT is steam.exe they may start (Dock sessions
+         * host Valve's client in dockhost.exe, so their spawns keep the gate).
+         * hardwareupdater (pool churn) and the web helper's --type= children (a second
+         * CEF instance, see below) stay refused. env.MADEIRA_PROC_GATE_STEAM=0 refuses
+         * them all as before. */
+        int full_client_parent = 0;
+        {
+            const char *g = getenv( "MADEIRA_PROC_GATE_STEAM" );
+            const RTL_USER_PROCESS_PARAMETERS *cur = NtCurrentTeb()->Peb->ProcessParameters;
+            if (!(g && g[0] == '0') && cur && cur->ImagePathName.Buffer &&
+                ios_image_name_is( cur->ImagePathName.Buffer, cur->ImagePathName.Length / sizeof(WCHAR),
+                                   "steam.exe" ))
+                full_client_parent = 1;
+        }
 
         for (b = 0; b < sizeof(blocked_names)/sizeof(blocked_names[0]); b++)
         {
             const char *blocked = blocked_names[b];
             int bl = (int)strlen( blocked ), k, j;
+
+            if (full_client_parent && b < 4)
+            {
+                /* the first four names: steamerrorreporter, gldriverquery,
+                 * vulkandriverquery, steamsysinfo (keep that order above) */
+                int hit = 0;
+                for (k = 0; k + bl <= ip_len && !hit; k++)
+                {
+                    for (j = 0; j < bl; j++)
+                    {
+                        WCHAR c = ip[k + j];
+                        if (c >= 'A' && c <= 'Z') c += 32;
+                        if (c != (WCHAR)blocked[j]) break;
+                    }
+                    if (j == bl) hit = 1;
+                }
+                if (hit)
+                    dprintf( 2, "[proc-gate] ml1357 allowing %s: started by the full Steam client "
+                             "(steam.exe), whose own helpers run in this session "
+                             "(env.MADEIRA_PROC_GATE_STEAM=0 refuses them as before)\n",
+                             debugstr_us( &params->ImagePathName ) );
+                continue;
+            }
 
             for (k = 0; k + bl <= ip_len; k++)
             {
@@ -1239,6 +1959,45 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                 }
             }
         }
+
+        /* madeira-bcd: more optional helpers, named per game. Every x64 pseudo-
+         * process copies its own system DLLs into the JIT pool and gets a 16 MB
+         * code buffer. GTA V Enhanced build 374 (2026-10-04 09:25): with
+         * SocialClubHelper.exe's 240 MB libcef.dll in the big-image slot, the
+         * run below the hole was 557 of 560 MB full and its D3DCompiler_47.dll
+         * (4.5 MB) failed -- "The CEF browser ... crashed and could not
+         * restart" -- while the launcher's crashpad handler,
+         * RockstarErrorHandler.exe, held 17 MB of copies and a code buffer.
+         * MADEIRA_SPAWN_BLOCK = <name>;<name>;... refuses a spawn whose image
+         * path contains one of the names (case-insensitive), like the gate
+         * above; empty by default. */
+        {
+            const char *list = getenv( "MADEIRA_SPAWN_BLOCK" );
+
+            while (list && *list)
+            {
+                const char *end = strchr( list, ';' );
+                int bl = end ? (int)(end - list) : (int)strlen( list ), k, j;
+
+                for (k = 0; bl > 0 && k + bl <= ip_len; k++)
+                {
+                    for (j = 0; j < bl; j++)
+                    {
+                        WCHAR c = ip[k + j], w = (WCHAR)(unsigned char)list[j];
+                        if (c >= 'A' && c <= 'Z') c += 32;
+                        if (w >= 'A' && w <= 'Z') w += 32;
+                        if (c != w) break;
+                    }
+                    if (j == bl)
+                    {
+                        dprintf(2, "[proc-gate] madeira-bcd REFUSING spawn of %s (MADEIRA_SPAWN_BLOCK %.*s)\n",
+                                debugstr_us( &params->ImagePathName ), bl, list );
+                        return STATUS_ACCESS_DENIED;
+                    }
+                }
+                list = end ? end + 1 : NULL;
+            }
+        }
     }
 
     /* conhost.exe is refused in an ARM64EC session, where it would crash the app (see
@@ -1250,6 +2009,46 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                 "its threads have no CPU area for the emulator loaded into it; env.MADEIRA_EC_CONHOST=1 "
                 "starts it)\n", debugstr_us( &params->ImagePathName ));
         return STATUS_ACCESS_DENIED;
+    }
+
+    /* madeira-conhost-headless: a pipe cannot be a --unix console's tty (the server
+     * calls tcgetattr on it); --headless takes the same standard handles and needs no
+     * terminal device. env.MADEIRA_CONHOST_HEADLESS = 1. */
+    {
+        const char *hl = getenv( "MADEIRA_CONHOST_HEADLESS" );
+        const WCHAR *cl = params->CommandLine.Buffer;
+        int cl_len = params->CommandLine.Length / sizeof(WCHAR), k, at = -1;
+        static const char from[] = "--unix", to[] = "--headless";
+
+        if (hl && hl[0] == '1' && cl &&
+            ios_image_name_is( params->ImagePathName.Buffer, params->ImagePathName.Length / sizeof(WCHAR),
+                               "conhost.exe" ))
+        {
+            for (k = 0; k + (int)sizeof(from) - 1 <= cl_len && at < 0; k++)
+            {
+                int j;
+                for (j = 0; j < (int)sizeof(from) - 1; j++) if (cl[k + j] != (WCHAR)from[j]) break;
+                if (j == (int)sizeof(from) - 1) at = k;
+            }
+            if (at >= 0)
+            {
+                int add = (int)sizeof(to) - (int)sizeof(from), o = 0;
+                WCHAR *nbuf = malloc( (cl_len + add + 1) * sizeof(WCHAR) );   /* leaks once per console, as the other rewrites */
+
+                if (nbuf)
+                {
+                    for (k = 0; k < at; k++) nbuf[o++] = cl[k];
+                    for (k = 0; k < (int)sizeof(to) - 1; k++) nbuf[o++] = (WCHAR)to[k];
+                    for (k = at + (int)sizeof(from) - 1; k < cl_len; k++) nbuf[o++] = cl[k];
+                    nbuf[o] = 0;
+                    params->CommandLine.Buffer = nbuf;
+                    params->CommandLine.Length = o * sizeof(WCHAR);
+                    params->CommandLine.MaximumLength = params->CommandLine.Length + sizeof(WCHAR);
+                    dprintf( 2, "[console] conhost --unix -> --headless (a pipe is not a terminal device; "
+                                "MADEIRA_CONHOST_HEADLESS)\n" );
+                }
+            }
+        }
     }
 
     /* ml526: stamp every accepted spawn on the startup timeline. This is the
@@ -1287,6 +2086,16 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                 if (c != (WCHAR)helper[j]) break;
             }
             if (j == hl) is_helper = 1;
+        }
+        if (is_helper && ios_webhelper_crashpad_allowed( params->CommandLine.Buffer,
+                                                         params->CommandLine.Length / sizeof(WCHAR) ))
+        {
+            /* ml2210: a 32-bit web helper (cef.win7) ends itself at start when its crash
+             * reporter cannot launch ("crash server failed to launch, self-terminating").
+             * The handler is a small process in a guest window of its own and never holds
+             * the browser's pools. Only exactly --type=crashpad-handler, command line unchanged. */
+            dprintf(2, "[proc-gate] ml2210 allowing steamwebhelper --type=crashpad-handler (env.MADEIRA_STEAM_ALLOW_CRASHPAD=1)\n");
+            is_helper = 0;
         }
         if (is_helper)
         {
@@ -1507,16 +2316,27 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                  * Interpreted V8 costs 5-20x on all of Steam's UI JavaScript, so
                  * this is the largest single startup lever we have.
                  * MADEIRA_JITLESS=0 turns it off; default stays ON (unchanged). */
+                /* ml2230 (device logs 111-112, Big Picture): CEF's verbose file log (--v=1) writes a line for most
+                 * of what the UI does, from the threads that draw it. env.MADEIRA_CEF_VERBOSE=0 leaves Steam's own
+                 * logging level (WARNING); default 1 keeps the verbose log, as before. */
                 static const char sp_jitless[] = " --single-process --enable-logging=file --v=1 --log-severity=verbose"
                                                  " --no-proxy-server --winhttp-proxy-resolver --js-flags=--jitless";
                 static const char sp_jit[]     = " --single-process --enable-logging=file --v=1 --log-severity=verbose"
                                                  " --no-proxy-server --winhttp-proxy-resolver";
+                static const char sp_quiet_jitless[] = " --single-process --no-proxy-server --winhttp-proxy-resolver"
+                                                       " --js-flags=--jitless";
+                static const char sp_quiet_jit[]     = " --single-process --no-proxy-server --winhttp-proxy-resolver";
                 const char *jl = getenv( "MADEIRA_JITLESS" );
+                const char *cv = getenv( "MADEIRA_CEF_VERBOSE" );   /* 0: Steam's web helper keeps its own log level, no verbose CEF file log */
                 int jitless_on = !(jl && jl[0] == '0');
-                const char *sp = jitless_on ? sp_jitless : sp_jit;
+                int verbose_on = !(cv && cv[0] == '0');
+                const char *sp = verbose_on ? (jitless_on ? sp_jitless : sp_jit)
+                                            : (jitless_on ? sp_quiet_jitless : sp_quiet_jit);
                 dprintf(2, "[proc-gate] V8 %s (MADEIRA_JITLESS=%s) rev=ml526\n",
                         jitless_on ? "JITLESS (interpreted)" : "JIT ENABLED — #82 retest",
                         jl ? jl : "unset");
+                if (!verbose_on)
+                    dprintf(2, "[proc-gate] ml2230 CEF verbose log off (env.MADEIRA_CEF_VERBOSE=0)\n");
                 static const char dfs[] = "--disable-features=";
                 /* ml426 (#70): + segmentation-platform features. Four CreateBrowser
                  * runs died C00000FD in the CreateResponse→BrowserReady gap, and
@@ -1583,15 +2403,231 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                      * every injected-arg experiment from now on is proven by
                      * this line, not by binary greps or Valve's log. */
                     {
+                        /* The tail of the redacted line: a value cut by the
+                         * tail's start could no longer be recognised. */
+                        size_t cap = 2 * (size_t)o + 64, sn = 0;
+                        unsigned short *shown = malloc( cap * sizeof(*shown) );
                         char tail[136];
-                        int tstart = o > 128 ? o - 128 : 0, ti;
-                        for (ti = 0; ti + tstart < o && ti < 135; ti++)
-                            tail[ti] = (char)nbuf[tstart + ti];
+                        int tstart, ti = 0;
+                        if (shown)
+                        {
+                            sn = madeira_redact_line_w( (const unsigned short *)nbuf, (size_t)o, shown, cap );
+                            tstart = sn > 128 ? (int)sn - 128 : 0;
+                            for (; ti + tstart < (int)sn && ti < 135; ti++)
+                                tail[ti] = (char)shown[tstart + ti];
+                            free( shown );
+                        }
                         tail[ti] = 0;
                         dprintf(2, "[proc-gate] cmdline-tail(ml428): ...%s\n", tail);
                     }
                 }
             }
+        }
+    }
+
+    /* madeira-bcd: env.MADEIRA_CHILD_ARGS -- see child_extra_args. */
+    {
+        const char *extra = child_extra_args( getenv( "MADEIRA_CHILD_ARGS" ), params->ImagePathName.Buffer,
+                                              params->ImagePathName.Length / sizeof(WCHAR) );
+        if (extra)
+        {
+            int cl_len = params->CommandLine.Length / sizeof(WCHAR), n = (int)strlen( extra ), k;
+            WCHAR *nbuf = malloc( (cl_len + n + 2) * sizeof(WCHAR) );   /* leaks once per start, as below */
+
+            if (nbuf)
+            {
+                memcpy( nbuf, params->CommandLine.Buffer, cl_len * sizeof(WCHAR) );
+                nbuf[cl_len] = ' ';
+                for (k = 0; k < n; k++) nbuf[cl_len + 1 + k] = (WCHAR)(unsigned char)extra[k];
+                nbuf[cl_len + 1 + n] = 0;
+                params->CommandLine.Buffer = nbuf;
+                params->CommandLine.Length = (cl_len + 1 + n) * sizeof(WCHAR);
+                params->CommandLine.MaximumLength = params->CommandLine.Length + sizeof(WCHAR);
+                dprintf( 2, "[child-args] env.MADEIRA_CHILD_ARGS: appended \"%s\" to the command line\n", extra );
+            }
+        }
+    }
+
+
+    /* madeira-bcd: a console's conhost.exe starts without a window (see
+     * console_headless_cmdline); env.MADEIRA_CONSOLE_WINDOW=1 keeps it. */
+    {
+        int cl_len = params->CommandLine.Length / sizeof(WCHAR), o = -1;
+        WCHAR *nbuf = malloc( (cl_len + 16) * sizeof(WCHAR) );   /* kept when used: leaks once per console, as above */
+        const char *window = getenv( "MADEIRA_CONSOLE_WINDOW" );   /* 1: consoles keep their conhost window (default: none, as with CREATE_NO_WINDOW) */
+
+        if (nbuf)
+            o = console_headless_cmdline( window, params->ImagePathName.Buffer, params->ImagePathName.Length / sizeof(WCHAR),
+                                          params->CommandLine.Buffer, cl_len, nbuf, cl_len + 16 );
+        if (o < 0) free( nbuf );
+        else
+        {
+            const RTL_USER_PROCESS_PARAMETERS *own = NtCurrentTeb()->Peb->ProcessParameters;
+            static int console_n;
+
+            params->CommandLine.Buffer = nbuf;
+            params->CommandLine.Length = o * sizeof(WCHAR);
+            params->CommandLine.MaximumLength = params->CommandLine.Length + sizeof(WCHAR);
+            if (console_n++ < 16)
+                dprintf( 2, "[console] the console of %s starts without a window (conhost --headless, as with "
+                            "CREATE_NO_WINDOW; env.MADEIRA_CONSOLE_WINDOW=1 shows it)\n",
+                         own ? debugstr_us( &own->ImagePathName ) : "?" );
+        }
+    }
+
+    /* madeira-bcd: Social Club's Chromium -- see sc_helper_kind. */
+    {
+        const char *sc = getenv( "MADEIRA_SC_CEF" );
+        int kind = (sc && sc[0] == '0') ? SC_NOT_HELPER
+                 : sc_helper_kind( params->ImagePathName.Buffer, params->ImagePathName.Length / sizeof(WCHAR),
+                                   params->CommandLine.Buffer, params->CommandLine.Length / sizeof(WCHAR) );
+        if (kind == SC_CHILD)
+        {
+            dprintf( 2, "[sc-cef] REFUSING a SocialClubHelper.exe --type= child: its browser runs "
+                        "--single-process, one CEF process is all the address space holds "
+                        "(env.MADEIRA_SC_CEF=0 allows it)\n" );
+            return STATUS_ACCESS_DENIED;
+        }
+        if (kind == SC_BROWSER)
+        {
+            const char *jl = getenv( "MADEIRA_JITLESS" );
+            const char *extra = getenv( "MADEIRA_SC_CEF_FLAGS" );
+            int cl_len = params->CommandLine.Length / sizeof(WCHAR), how = 0, o = -1;
+            int cap = cl_len + 160 + (extra ? (int)strlen( extra ) : 0);
+            WCHAR *nbuf = malloc( cap * sizeof(WCHAR) );   /* leaks once per launch, as above */
+
+            if (nbuf)
+                o = sc_browser_cmdline( params->CommandLine.Buffer, cl_len, !(jl && jl[0] == '0'), extra,
+                                        nbuf, cap, &how );
+            if (o >= 0)
+            {
+                char tail[136];
+                int tstart = o > 128 ? o - 128 : 0, ti;
+
+                params->CommandLine.Buffer = nbuf;
+                params->CommandLine.Length = o * sizeof(WCHAR);
+                params->CommandLine.MaximumLength = params->CommandLine.Length + sizeof(WCHAR);
+                dprintf( 2, "[sc-cef] SocialClubHelper.exe browser: %s; BackupRefPtr off (%s); V8 %s; %s; "
+                            "MADEIRA_SC_CEF_FLAGS %s\n",
+                         (how & SC_SINGLE_ADDED) ? "--single-process added" : "already --single-process",
+                         (how & SC_BRP_SPLICED) ? "spliced into its --disable-features list"
+                                                : "new --disable-features switch",
+                         (how & SC_JITLESS_ADDED) ? "--jitless (MADEIRA_JITLESS=0 turns it off)"
+                         : (how & SC_JITLESS_MERGED) ? "--jitless put first in MADEIRA_SC_CEF_FLAGS' --js-flags "
+                                                       "(Chromium keeps only the last one)"
+                         : (how & SC_OWN_JS_FLAGS) ? "flags left as the app set them"
+                                                   : "JIT (MADEIRA_JITLESS=0)",
+                         (how & SC_NOPROXY_ADDED) ? "--no-proxy-server added" : "its own proxy switch kept",
+                         (how & SC_EXTRA_ADDED) ? "appended" : "unset" );
+                for (ti = 0; ti + tstart < o && ti < 135; ti++)
+                {
+                    WCHAR c = nbuf[tstart + ti];
+                    tail[ti] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+                }
+                tail[ti] = 0;
+                dprintf( 2, "[sc-cef] cmdline-tail: ...%s\n", tail );
+            }
+            else
+            {
+                free( nbuf );
+                dprintf( 2, "[sc-cef] SocialClubHelper.exe browser: command line NOT rewritten "
+                            "(no memory) -- it runs multi-process\n" );
+            }
+        }
+    }
+
+    /* Madeira: the EA app's Chromium -- see ea_cef_kind. Nothing below is read unless env.MADEIRA_EA_CEF is 1. */
+    {
+        const char *ea = getenv( "MADEIRA_EA_CEF" );
+        int kind = (ea && ea[0] == '1' && !ea[1])
+                 ? ea_cef_kind( params->ImagePathName.Buffer, params->ImagePathName.Length / sizeof(WCHAR),
+                                params->CommandLine.Buffer, params->CommandLine.Length / sizeof(WCHAR) )
+                 : EA_NOT_CEF;
+        if (kind == EA_CHILD)
+        {
+            dprintf( 2, "[ea-cef] REFUSING a --type= child of the EA app's Chromium (%s): its browser runs "
+                        "--single-process, one CEF process is all the address space holds "
+                        "(env.MADEIRA_EA_CEF=0 allows it)\n", debugstr_us( &params->ImagePathName ) );
+            return STATUS_ACCESS_DENIED;
+        }
+        if (kind == EA_BROWSER)
+        {
+            const char *cmd = getenv( "MADEIRA_EA_CEF_CMDLINE" );
+            if (cmd && cmd[0] == '0' && !cmd[1])
+                dprintf( 2, "[ea-cef] EADesktop.exe browser: command line left as it is (env.MADEIRA_EA_CEF_CMDLINE=0)\n" );
+            else
+            {
+                const char *jl = getenv( "MADEIRA_JITLESS" );
+                const char *extra = getenv( "MADEIRA_EA_CEF_FLAGS" );
+                int cl_len = params->CommandLine.Length / sizeof(WCHAR), how = 0, o = -1;
+                int cap = cl_len + 160 + (extra ? (int)strlen( extra ) : 0);
+                WCHAR *nbuf = malloc( cap * sizeof(WCHAR) );   /* leaks once per launch, as above */
+
+                if (nbuf)
+                    o = sc_browser_cmdline( params->CommandLine.Buffer, cl_len, !(jl && jl[0] == '0'), extra,
+                                            nbuf, cap, &how );
+                if (o >= 0)
+                {
+                    char tail[136];
+                    int tstart = o > 128 ? o - 128 : 0, ti;
+
+                    params->CommandLine.Buffer = nbuf;
+                    params->CommandLine.Length = o * sizeof(WCHAR);
+                    params->CommandLine.MaximumLength = params->CommandLine.Length + sizeof(WCHAR);
+                    for (ti = 0; ti + tstart < o && ti < 135; ti++)
+                    {
+                        WCHAR c = nbuf[tstart + ti];
+                        tail[ti] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+                    }
+                    tail[ti] = 0;
+                    dprintf( 2, "[ea-cef] EADesktop.exe browser: %s; BackupRefPtr off (%s); V8 %s; %s; "
+                                "MADEIRA_EA_CEF_FLAGS %s\n",
+                             (how & SC_SINGLE_ADDED) ? "--single-process added" : "already --single-process",
+                             (how & SC_BRP_SPLICED) ? "spliced into its --disable-features list"
+                                                    : "new --disable-features switch",
+                             (how & SC_JITLESS_ADDED) ? "--jitless (MADEIRA_JITLESS=0 turns it off)"
+                             : (how & SC_JITLESS_MERGED) ? "--jitless put first in MADEIRA_EA_CEF_FLAGS' --js-flags "
+                                                           "(Chromium keeps only the last one)"
+                             : (how & SC_OWN_JS_FLAGS) ? "flags left as the app set them"
+                                                       : "JIT (MADEIRA_JITLESS=0)",
+                             (how & SC_NOPROXY_ADDED) ? "--no-proxy-server added" : "its own proxy switch kept",
+                             (how & SC_EXTRA_ADDED) ? "appended" : "unset" );
+                    dprintf( 2, "[ea-cef] cmdline-tail: ...%s\n", tail );
+                }
+                else
+                {
+                    free( nbuf );
+                    dprintf( 2, "[ea-cef] EADesktop.exe browser: command line NOT rewritten "
+                                "(no memory) -- it runs multi-process\n" );
+                }
+            }
+        }
+    }
+#endif
+
+#ifdef WINE_IOS
+    /* madeira-bcd: a child without the JIT pool's variables gets the app's (see
+     * ios_env_with); env.MADEIRA_JIT_ENV_INHERIT=0 leaves its environment alone. */
+    {
+        static const char *const jit_names[] = { "WINE_IOS_JIT_RX", "WINE_IOS_JIT_SIZE", "WINE_IOS_JIT_RW" };
+        const char *keep = getenv( "MADEIRA_JIT_ENV_INHERIT" );   /* 0: a child's environment stays as its creator built it */
+        unsigned int added = 0;
+        SIZE_T len = 0;
+        WCHAR *env = (keep && keep[0] == '0') ? NULL
+                   : ios_env_with( params->Environment, jit_names, 3, getenv, &len, &added );   /* leaks once per start, as above */
+
+        if (env)
+        {
+            static int jit_env_n;
+
+            params->Environment = env;
+            params->EnvironmentSize = len * sizeof(WCHAR);
+            if (jit_env_n++ < 16)
+                dprintf( 2, "[jit-env] %s starts without the JIT pool's variables (a service gets its "
+                            "environment from the registry): added%s%s%s so its emulator writes code "
+                            "through the RW alias (env.MADEIRA_JIT_ENV_INHERIT=0 leaves it)\n",
+                         debugstr_us( &params->ImagePathName ), (added & 1) ? " WINE_IOS_JIT_RX" : "",
+                         (added & 2) ? " WINE_IOS_JIT_SIZE" : "", (added & 4) ? " WINE_IOS_JIT_RW" : "" );
         }
     }
 #endif
@@ -1622,6 +2658,25 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         if (ios_is_arm64ec_cur() && pe_info.is_hybrid && machine == IMAGE_FILE_MACHINE_ARM64)
             machine = ios_cur_image_info()->Machine;
     }
+#ifdef WINE_IOS
+    /* an aarch64 program is refused in an ARM64EC session (see ec_native_child_refuse) */
+    {
+        const char *ec_conhost = getenv( "MADEIRA_EC_CONHOST" );
+        int conhost_on = ec_conhost && ec_conhost[0] == '1' &&
+                         ios_image_name_is( params->ImagePathName.Buffer,
+                                            params->ImagePathName.Length / sizeof(WCHAR), "conhost.exe" );
+
+        if (!conhost_on && ec_native_child_refuse( is_arm64ec(), getenv( "MADEIRA_EC_NATIVE_CHILD" ), machine ))
+        {
+            dprintf(2, "[proc-gate] ml2280 REFUSING spawn of %s (an aarch64 program in an ARM64EC session: "
+                    "the session's ntdll loads the emulator into it and its threads have no CPU area, so it "
+                    "would crash; start this game in the Wine desktop; env.MADEIRA_EC_NATIVE_CHILD=1 starts it)\n",
+                    debugstr_us( &params->ImagePathName ));
+            status = STATUS_ACCESS_DENIED;
+            goto done;
+        }
+    }
+#endif
 #ifdef WINE_IOS
     /* a 32-bit child is about to need a guest window (see ios_wow_session_arm) */
     if (machine == IMAGE_FILE_MACHINE_I386 && !(pe_info.image_flags & IMAGE_FLAGS_ComPlusNativeReady))
@@ -1741,6 +2796,46 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
 
     /* wait for the new process info to be ready */
 
+#ifdef WINE_IOS
+    {
+        /* All pseudo-processes share one address space. A child whose main image can
+         * only run at the fixed base this process holds waits for this process to exit
+         * (ios_exe_win_wait_for_handoff), so its start-up cannot complete while we
+         * block here. Return to the caller instead: the usual next step for such a
+         * program is to exit, which hands the base over. */
+        extern int ios_exe_win_handoff_waits_on( void *peb );
+        LARGE_INTEGER poll;
+        BOOL handed_off = FALSE;
+
+        poll.QuadPart = -50 * 10000;   /* 50 ms */
+        while (NtWaitForSingleObject( process_info, FALSE, &poll ) == STATUS_TIMEOUT)
+        {
+            if (ios_exe_win_handoff_waits_on( NtCurrentTeb()->Peb ))
+            {
+                handed_off = TRUE;
+                break;
+            }
+        }
+        if (handed_off)
+        {
+            dprintf( 2, "[exe-window] the new process is waiting for this process's fixed base; "
+                     "returning from process creation without waiting for its start-up\n" );
+            success = TRUE;
+            status = STATUS_SUCCESS;
+        }
+        else
+        {
+            SERVER_START_REQ( get_new_process_info )
+            {
+                req->info = wine_server_obj_handle( process_info );
+                wine_server_call( req );
+                success = reply->success;
+                status = reply->exit_code;
+            }
+            SERVER_END_REQ;
+        }
+    }
+#else
     NtWaitForSingleObject( process_info, FALSE, NULL );
     SERVER_START_REQ( get_new_process_info )
     {
@@ -1750,6 +2845,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         status = reply->exit_code;
     }
     SERVER_END_REQ;
+#endif
 
     if (!success)
     {
@@ -2306,8 +3402,466 @@ static void ios_unwind_dump( uint64_t rip, const uint64_t *gregs, const char *ta
     }
     dprintf( 2, "[unwind] %s ml661 end\n", tag );
 }
+
+/* madeira-bcd: Chromium's out-of-memory exit, seen from NtTerminateProcess.
+ * SocialClubHelper.exe raised 0xE0000008 after 24 minutes of GTA V Enhanced
+ * (log 2026-10-08 13:39:08, build 451, 14:01:51) and the game quit with it.
+ * RaiseException is dispatched in the PE ntdll and the unhandled-exception
+ * filter calls NtTerminateProcess, so the [chromium-oom] line in
+ * NtRaiseException never ran and the failed request's size was lost. The
+ * EXCEPTION_RECORD is still on the thread's stack, in RaiseException's frame:
+ * look for it in the top 256 KB (code 0xE0000008, EXCEPTION_NONCONTINUABLE, no
+ * nested record, 1-15 parameters) and print the parameters; PartitionAlloc
+ * passes the request's size and two page file figures. */
+static void ios_term_oom_record( TEB *teb )
+{
+    static uint64_t buf[8192];
+    static LONG lines;
+    uint64_t lo, hi, at;
+    int found = 0;
+
+    if (!teb || InterlockedIncrement( &lines ) > 8) return;
+    lo = (uint64_t)(ULONG_PTR)teb->Tib.StackLimit;
+    hi = (uint64_t)(ULONG_PTR)teb->Tib.StackBase;
+    if (!hi || hi <= lo) { dprintf( 2, "[chromium-oom] at exit: no stack bounds in the TEB\n" ); return; }
+    if (hi - lo > 0x40000) lo = hi - 0x40000;
+    lo &= ~(uint64_t)7;
+    for (at = lo; at < hi && !found; at += sizeof(buf) - 20 * 8)   /* chunks overlap by more than a record */
+    {
+        mach_vm_size_t got = 0;
+        uint64_t want = hi - at < sizeof(buf) ? hi - at : sizeof(buf);
+        size_t i, n;
+        if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)at, want,
+                                    (mach_vm_address_t)buf, &got ) != KERN_SUCCESS || got < 64)
+            continue;
+        n = (size_t)(got / 8);
+        for (i = 0; i + 4 < n; i++)
+        {
+            uint64_t np = buf[i + 3] & 0xffffffffULL, k;
+            if ((uint32_t)buf[i] != 0xE0000008u || !((buf[i] >> 32) & 1) || buf[i + 1] || !np || np > 15
+                || i + 4 + np > n)
+                continue;
+            dprintf( 2, "[chromium-oom] at exit: record at %#llx (thread stack [%#llx,%#llx)), raised at %#llx, "
+                        "%llu parameter(s): request %#llx bytes (%llu MB)",
+                     (unsigned long long)(at + i * 8), (unsigned long long)lo, (unsigned long long)hi,
+                     (unsigned long long)buf[i + 2], (unsigned long long)np,
+                     (unsigned long long)buf[i + 4], (unsigned long long)(buf[i + 4] >> 20) );
+            for (k = 1; k < np && k < 4; k++)
+                dprintf( 2, ", %llu MB", (unsigned long long)(buf[i + 4 + k] >> 20) );
+            dprintf( 2, "\n" );
+            found = 1;
+            break;
+        }
+    }
+    if (!found)
+        dprintf( 2, "[chromium-oom] at exit: no 0xE0000008 record in the top of the thread's stack [%#llx,%#llx)\n",
+                 (unsigned long long)lo, (unsigned long long)hi );
+}
 #endif /* WINE_IOS */
 
+
+#ifdef WINE_IOS
+/* Fatal x64 instructions can differ from the file after self-modification.
+ * Read only registered code, never dereference guest pointers or alter SEH. */
+static uint64_t ios_guest_instruction_read( const char *view, uint64_t address, size_t length,
+                                           unsigned char bytes[48] )
+{
+    uint64_t valid = 0;
+    char line[48 * 3 + 1];
+    size_t i;
+
+    if (!length || length > 48 || address > UINT64_MAX - length) return 0;
+    for (i = 0; i < length; i++)
+    {
+        mach_vm_size_t got = 0;
+        unsigned char byte = 0;
+        if (mach_vm_read_overwrite( mach_task_self(), address + i, 1,
+                                    (mach_vm_address_t)&byte, &got ) == KERN_SUCCESS && got == 1)
+        {
+            bytes[i] = byte;
+            valid |= (uint64_t)1 << i;
+            snprintf( line + i * 3, 4, "%02x ", byte );
+        }
+        else memcpy( line + i * 3, "?? ", 3 );
+    }
+    line[length * 3] = 0;
+    dprintf( 2, "[guest-insn] %s address=%#llx valid=%#llx bytes=%s\n", view,
+             (unsigned long long)address, (unsigned long long)valid, line );
+    return valid;
+}
+
+static void ios_guest_code_pair( const char *tag, uint64_t rip, void *owner )
+{
+    extern int ios_jit_guest_code_window( uint64_t, uint64_t *, uint64_t *, size_t * );
+    extern void *ios_jit_translate_addr_for_owner( void *, void * );
+    uint64_t image = 0, start = 0, copy, a, b, full;
+    size_t length = 0;
+    unsigned char pe[48] = {0}, pool[48] = {0};
+    char view[32];
+
+    if (!ios_jit_guest_code_window( rip, &image, &start, &length ) ||
+        !length || length > 48 || start > rip || rip - start >= length) return;
+    dprintf( 2, "[guest-path] %s rip=%#llx image=%#llx rva=%#llx window=%#llx length=%zu\n",
+             tag, (unsigned long long)rip, (unsigned long long)image,
+             (unsigned long long)(rip - image), (unsigned long long)start, length );
+    snprintf( view, sizeof(view), "%s-PE", tag );
+    a = ios_guest_instruction_read( view, start, length, pe );
+    copy = (uint64_t)(uintptr_t)ios_jit_translate_addr_for_owner( (void *)(uintptr_t)start, owner );
+    if (!copy || copy == start) return;
+    snprintf( view, sizeof(view), "%s-COPY", tag );
+    b = ios_guest_instruction_read( view, copy, length, pool );
+    full = ((uint64_t)1 << length) - 1;
+    dprintf( 2, "[guest-path] %s snapshot=%s\n", tag,
+             a != full || b != full ? "INCOMPLETE" : memcmp( pe, pool, length ) ? "DIFFER" : "MATCH" );
+}
+
+/* CALL-shape evidence only, not an unwind or proof that a stack word is live.
+ * Check the complete FF /2 encoding, including SIB/disp32; never read cb[8]. */
+static int ios_guest_call_decode( const unsigned char cb[8], unsigned *length, int32_t *relative )
+{
+    unsigned k;
+    if (cb[3] == 0xe8)
+    {
+        *length = 5;
+        memcpy( relative, cb + 4, 4 );
+        return 1;
+    }
+    for (k = 2; k <= 7; k++)
+    {
+        unsigned pos = 8 - k, modrm = cb[pos + 1], mod = modrm >> 6, rm = modrm & 7;
+        unsigned n = 2;
+        if (cb[pos] != 0xff || ((modrm >> 3) & 7) != 2) continue;
+        if (mod != 3)
+        {
+            if (rm == 4)
+            {
+                if (k < 3) continue;
+                n++;
+                if (!mod && (cb[pos + 2] & 7) == 5) n += 4;
+            }
+            else if (!mod && rm == 5) n += 4;
+            if (mod == 1) n++;
+            else if (mod == 2) n += 4;
+        }
+        if (n != k) continue;
+        *length = k;
+        *relative = 0;
+        return 2;
+    }
+    return 0;
+}
+
+static const char *ios_guest_return_kind( uint64_t v, unsigned *length, int32_t *relative )
+{
+    extern int ios_jit_guest_code_window( uint64_t, uint64_t *, uint64_t *, size_t * );
+    uint64_t image = 0, start = 0;
+    size_t size = 0;
+    unsigned char cb[8];
+    mach_vm_size_t got = 0;
+    int kind;
+
+    if (v < 8 || !ios_jit_guest_code_window( v - 1, &image, &start, &size ) ||
+        start > v - 8 || v - start > size) return "  ?";
+    if (mach_vm_read_overwrite( mach_task_self(), v - 8, sizeof(cb),
+                                (mach_vm_address_t)cb, &got ) != KERN_SUCCESS || got != sizeof(cb)) return "  ?";
+    kind = ios_guest_call_decode( cb, length, relative );
+    return kind == 1 ? "CALL" : kind == 2 ? "call*" : "  ?";
+}
+
+static void ios_guest_call_dump( uint64_t v, unsigned length, int32_t relative, int direct,
+                                 unsigned stack_offset, uint64_t fault_rip, void *owner )
+{
+    uint64_t target;
+    if (length < 2 || length > 7 || v < length) return;
+    dprintf( 2, "[guest-call] candidate sp+%03x ret=%#llx site=%#llx kind=%s length=%u\n",
+             stack_offset, (unsigned long long)v, (unsigned long long)(v - length),
+             direct ? "E8" : "FF/2", length );
+    ios_guest_code_pair( "call-site", v - length, owner );
+    if (!direct) return; /* no guessed register or memory operand */
+    if (relative >= 0)
+    {
+        if (v > UINT64_MAX - (uint32_t)relative) return;
+        target = v + (uint32_t)relative;
+    }
+    else
+    {
+        uint64_t delta = (uint64_t)-(int64_t)relative;
+        if (v < delta) return;
+        target = v - delta;
+    }
+    dprintf( 2, "[guest-call] direct-target=%#llx equals-fault=%u (candidate, not an unwind)\n",
+             (unsigned long long)target, target == fault_rip );
+    ios_guest_code_pair( "call-target", target, owner );
+}
+
+/* Cover a small source block without gaps between the entry/exit windows.
+ * Revalidate each chunk as registered x64 code; do not cross a data section.
+ * The bytes are current snapshots, not the decoder's original bytes. */
+static int ios_guest_block_code_dump( uint64_t rip, uint64_t size, void *owner )
+{
+    extern int ios_jit_guest_code_window( uint64_t, uint64_t *, uint64_t *, size_t * );
+    extern void *ios_jit_translate_addr_for_owner( void *, void * );
+    uint64_t image = 0, start = 0, expected_image, copy;
+    size_t window = 0, done = 0, limit = size < 256 ? size : 256;
+    unsigned char bytes[48];
+
+    if (!size || rip > UINT64_MAX - size ||
+        !ios_jit_guest_code_window( rip, &image, &start, &window ) ||
+        !window || window > sizeof(bytes) || start > rip || rip - start >= window) return 0;
+    expected_image = image;
+    dprintf( 2, "[guest-block-code] entry=%#llx guest-size=%llu selected=%zu cap=256 "
+             "(current bytes, not compile history)\n",
+             (unsigned long long)rip, (unsigned long long)size, limit );
+    while (done < limit)
+    {
+        uint64_t address = rip + done;
+        size_t chunk;
+        if (!ios_jit_guest_code_window( address, &image, &start, &window ) || image != expected_image ||
+            !window || window > sizeof(bytes) || start > address || address - start >= window)
+        {
+            dprintf( 2, "[guest-block-code] stopped at +%zu (outside registered x64 code)\n", done );
+            break;
+        }
+        chunk = window - (address - start);
+        if (chunk > limit - done) chunk = limit - done;
+        ios_guest_instruction_read( "block-code-PE", address, chunk, bytes );
+        copy = (uint64_t)(uintptr_t)ios_jit_translate_addr_for_owner( (void *)(uintptr_t)address, owner );
+        if (copy && copy != address) ios_guest_instruction_read( "block-code-COPY", copy, chunk, bytes );
+        done += chunk;
+    }
+    return 1;
+}
+
+/* The generated ARM64 body includes literal data. Read exact bounded rows,
+ * excluding the header, tail and RIP table. This does not execute the code. */
+static void ios_guest_jit_body_dump( uint64_t block, uint32_t tail_offset )
+{
+    uint32_t available, limit, done;
+    if (!block || (block & 3) || tail_offset < 4 || (tail_offset & 3) ||
+        tail_offset > (64u << 20) || block > UINT64_MAX - tail_offset) return;
+    available = tail_offset - 4;
+    limit = available < 8192 ? available : 8192;
+    dprintf( 2, "[guest-jit] block=%#llx begin=%#llx body-bytes=%u selected=%u cap=8192 "
+             "(generated ARM64 body, includes literals)\n",
+             (unsigned long long)block, (unsigned long long)(block + 4), available, limit );
+    for (done = 0; done < limit; )
+    {
+        uint32_t words[16], chunk = limit - done;
+        char line[16 * 9 + 1];
+        mach_vm_size_t got = 0;
+        unsigned i;
+        if (chunk > sizeof(words)) chunk = sizeof(words);
+        if (mach_vm_read_overwrite( mach_task_self(), block + 4 + done, chunk,
+                (mach_vm_address_t)words, &got ) != KERN_SUCCESS || got != chunk)
+        {
+            dprintf( 2, "[guest-jit] stopped at +%u (unreadable/short row)\n", done + 4 );
+            break;
+        }
+        for (i = 0; i < chunk / 4; i++) snprintf( line + i * 9, 10, "%08x ", words[i] );
+        line[chunk / 4 * 9] = 0;
+        dprintf( 2, "[guest-jit] address=%#llx words=%s\n",
+                 (unsigned long long)(block + 4 + done), line );
+        done += chunk;
+    }
+}
+
+/* Packed host-PC/guest-RIP deltas accompanying this generated block. The
+ * current guest bytes alone cannot identify its compiled instruction map. */
+static void ios_guest_jit_map_dump( uint64_t block, uint32_t tail_offset,
+                                    uint64_t total, uint32_t entries, uint32_t count )
+{
+    unsigned char bytes[48];
+    uint64_t address, available;
+    size_t done = 0, limit;
+    if (!block || !count || count > 65536 || total > (64u << 20) ||
+        total < tail_offset || entries < 40 || entries >= total - tail_offset ||
+        block > UINT64_MAX - total) return;
+    address = block + tail_offset + entries;
+    available = total - tail_offset - entries;
+    limit = available < 256 ? available : 256;
+    dprintf( 2, "[guest-jit-map] table=%#llx count=%u available=%llu selected=%zu cap=256 "
+             "(packed host-PC/guest-RIP deltas)\n",
+             (unsigned long long)address, count, (unsigned long long)available, limit );
+    while (done < limit)
+    {
+        size_t chunk = limit - done;
+        if (chunk > sizeof(bytes)) chunk = sizeof(bytes);
+        ios_guest_instruction_read( "block-rip-table", address + done, chunk, bytes );
+        done += chunk;
+    }
+}
+
+/* Read the pinned FEX JITCodeHeader/Tail layout through Mach, with no PE call.
+ * The guest bytes below are current snapshots, not saved compile-time bytes. */
+static void ios_guest_block_dump( uint64_t block, uint64_t fault_rip, void *owner, int source_body )
+{
+    uint32_t offset = 0;
+    struct { uint64_t size, rip, guest_size; uint32_t count, entries, spin;
+             uint8_t single, pad[3]; } tail;
+    mach_vm_size_t got = 0;
+    _Static_assert( sizeof(tail) == 40, "FEX JITCodeTail layout" );
+
+    if (!block || mach_vm_read_overwrite( mach_task_self(), block, sizeof(offset),
+            (mach_vm_address_t)&offset, &got ) != KERN_SUCCESS || got != sizeof(offset) ||
+        offset < 4 || offset > (64u << 20) || block > UINT64_MAX - offset - sizeof(tail))
+    {
+        dprintf( 2, "[guest-block] header unavailable/invalid block=%#llx\n", (unsigned long long)block );
+        return;
+    }
+    got = 0;
+    if (mach_vm_read_overwrite( mach_task_self(), block + offset, sizeof(tail),
+            (mach_vm_address_t)&tail, &got ) != KERN_SUCCESS || got != sizeof(tail) ||
+        tail.size < offset + sizeof(tail) || tail.size > (64u << 20) ||
+        !tail.guest_size || tail.guest_size > (64u << 20) || !tail.rip ||
+        tail.rip > UINT64_MAX - tail.guest_size || tail.count > 65536 || tail.single > 1)
+    {
+        dprintf( 2, "[guest-block] tail unavailable/invalid block=%#llx\n", (unsigned long long)block );
+        return;
+    }
+    dprintf( 2, "[guest-block] block=%#llx host-size=%llu guest-entry=%#llx guest-size=%llu "
+             "rip-entries=%u single=%u contains-fault=%u (current bytes, not compile history)\n",
+             (unsigned long long)block, (unsigned long long)tail.size,
+             (unsigned long long)tail.rip, (unsigned long long)tail.guest_size,
+             tail.count, tail.single, fault_rip >= tail.rip && fault_rip - tail.rip < tail.guest_size );
+    ios_guest_code_pair( "block-entry", tail.rip, owner );
+    if (source_body && fault_rip >= tail.rip && fault_rip - tail.rip < tail.guest_size &&
+        ios_guest_block_code_dump( tail.rip, tail.guest_size, owner ))
+    {
+        ios_guest_jit_body_dump( block, offset );
+        ios_guest_jit_map_dump( block, offset, tail.size, tail.entries, tail.count );
+    }
+}
+
+/* Only a recognized, last-executed JMP [RSP+disp8]. This reads the current
+ * operand after the fault; it is not a saved value from branch execution. */
+static void ios_guest_branch_operand_dump( uint64_t source, uint64_t target, const void *frame )
+{
+    extern int ios_jit_guest_code_window( uint64_t, uint64_t *, uint64_t *, size_t * );
+    uint64_t image = 0, start = 0, rsp = 0, address, value = 0;
+    uint64_t frame_address = (uint64_t)(uintptr_t)frame;
+    size_t length = 0;
+    unsigned char code[4];
+    mach_vm_size_t got = 0;
+    int displacement;
+
+    if (!ios_jit_guest_code_window( source, &image, &start, &length ) || source < start ||
+        source - start > length || length - (source - start) < sizeof(code) ||
+        mach_vm_read_overwrite( mach_task_self(), source, sizeof(code),
+            (mach_vm_address_t)code, &got ) != KERN_SUCCESS || got != sizeof(code) ||
+        code[0] != 0xff || code[1] != 0x64 || code[2] != 0x24) return;
+
+    /* CPUState.gregs[RSP] is the pinned architectural prefix, offset0x40.
+     * Read via Mach even if the history itself was readable. */
+    got = 0;
+    if (!frame_address || frame_address > UINT64_MAX - 0x40 - sizeof(rsp) ||
+        mach_vm_read_overwrite( mach_task_self(), frame_address + 0x40, sizeof(rsp),
+            (mach_vm_address_t)&rsp, &got ) != KERN_SUCCESS || got != sizeof(rsp) ||
+        rsp < 0x10000 || rsp >= UINT64_C(0x800000000000)) goto unavailable;
+    displacement = (int8_t)code[3];
+    if (displacement < 0)
+    {
+        if (rsp < (uint64_t)-displacement) goto unavailable;
+        address = rsp - (uint64_t)-displacement;
+    }
+    else
+    {
+        if (rsp > UINT64_MAX - (unsigned)displacement) goto unavailable;
+        address = rsp + (unsigned)displacement;
+    }
+    if (address < 0x10000 || address > UINT64_C(0x800000000000) - sizeof(value)) goto unavailable;
+    got = 0;
+    if (mach_vm_read_overwrite( mach_task_self(), address, sizeof(value),
+            (mach_vm_address_t)&value, &got ) != KERN_SUCCESS || got != sizeof(value)) goto unavailable;
+    dprintf( 2, "[guest-operand] source=%#llx current-rsp=%#llx disp=%d address=%#llx value=%#llx "
+             "target=%#llx matches-target=%u (current snapshot, not historical)\n",
+             (unsigned long long)source, (unsigned long long)rsp, displacement,
+             (unsigned long long)address, (unsigned long long)value, (unsigned long long)target, value == target );
+    return;
+unavailable:
+    dprintf( 2, "[guest-operand] recognized JMP [RSP+disp8], current operand unavailable\n" );
+}
+
+static void ios_guest_branch_history_dump( const void *frame, uint64_t fault_rip, void *owner )
+{
+    extern unsigned ios_fex_branch_history_offset( void );
+    struct { uint64_t magic, serial; struct { uint64_t source, target, block, hint; } edges[8]; } history;
+    uint64_t address = (uint64_t)(uintptr_t)frame;
+    unsigned offset = ios_fex_branch_history_offset(), i, count;
+    mach_vm_size_t got = 0;
+    static const char *const hints[4] = { "branch", "call", "return", "check-tf" };
+    _Static_assert( sizeof(history) == 272, "FEX branch history DATA v1" );
+
+    if (!offset || !address || address > UINT64_MAX - offset - sizeof(history) ||
+        mach_vm_read_overwrite( mach_task_self(), address + offset, sizeof(history),
+            (mach_vm_address_t)&history, &got ) != KERN_SUCCESS || got != sizeof(history) ||
+        history.magic != UINT64_C(0x314744454742444d))
+    {
+        dprintf( 2, "[guest-edge] history unavailable (DATA layout or frame read)\n" );
+        return;
+    }
+    count = history.serial < 8 ? (unsigned)history.serial : 8;
+    dprintf( 2, "[guest-edge] serial=%llu count=%u newest-first (executed FEX exits; source=last mapped opcode, current bytes)\n",
+             (unsigned long long)history.serial, count );
+    for (i = 0; i < count; i++)
+    {
+        unsigned slot = (unsigned)((history.serial - 1 - i) & 7);
+        if (history.edges[slot].hint > 3) break;
+        dprintf( 2, "[guest-edge] #%u source=%#llx target=%#llx block=%#llx kind=%s equals-fault=%u\n",
+                 i, (unsigned long long)history.edges[slot].source,
+                 (unsigned long long)history.edges[slot].target,
+                 (unsigned long long)history.edges[slot].block, hints[history.edges[slot].hint],
+                 history.edges[slot].target == fault_rip );
+        ios_guest_code_pair( "branch-source", history.edges[slot].source, owner );
+        if (!i && !history.edges[slot].hint && history.edges[slot].target == fault_rip)
+        {
+            ios_guest_branch_operand_dump( history.edges[slot].source, history.edges[slot].target, frame );
+            ios_guest_block_dump( history.edges[slot].block, history.edges[slot].source, owner, 1 );
+        }
+    }
+}
+
+static int ios_dump_guest_instruction( HANDLE handle, LONG exit_code, uint64_t rip, void *owner )
+{
+    extern int ios_jit_guest_code_window( uint64_t, uint64_t *, uint64_t *, size_t * );
+    extern void *ios_jit_translate_addr_for_owner( void *, void * );
+    static unsigned reports;
+    uint64_t image = 0, start = 0, copy, pe_valid, copy_valid, complete;
+    unsigned char pe_bytes[48] = {0}, copy_bytes[48] = {0};
+    size_t length = 0;
+    unsigned report;
+
+    if ((handle && handle != NtCurrentProcess()) ||
+        (exit_code != (LONG)STATUS_PRIVILEGED_INSTRUCTION &&
+         exit_code != (LONG)STATUS_ILLEGAL_INSTRUCTION)) return 0;
+    report = __atomic_fetch_add( &reports, 1, __ATOMIC_RELAXED );
+    if (report >= 16) return 0;
+    if (!ios_jit_guest_code_window( rip, &image, &start, &length ) ||
+        !length || length > 48 || start > rip || rip - start >= length)
+    {
+        dprintf( 2, "[guest-insn] #%u code=%08x rip=%#llx: no registered x64 text window\n",
+                 report + 1, (unsigned)exit_code, (unsigned long long)rip );
+        return 0;
+    }
+    dprintf( 2, "[guest-insn] #%u code=%08x rip=%#llx image=%#llx rva=%#llx "
+             "window=%#llx length=%zu opcode-offset=%llu owner=%p\n", report + 1,
+             (unsigned)exit_code, (unsigned long long)rip, (unsigned long long)image,
+             (unsigned long long)(rip - image), (unsigned long long)start, length,
+             (unsigned long long)(rip - start), owner );
+    pe_valid = ios_guest_instruction_read( "PE", start, length, pe_bytes );
+    copy = (uint64_t)(uintptr_t)ios_jit_translate_addr_for_owner( (void *)(uintptr_t)start, owner );
+    if (!copy || copy == start)
+    {
+        dprintf( 2, "[guest-insn] COPY: no separate mapping\n" );
+        return 1;
+    }
+    copy_valid = ios_guest_instruction_read( "COPY", copy, length, copy_bytes );
+    complete = ((uint64_t)1 << length) - 1;
+    dprintf( 2, "[guest-insn] PE/COPY snapshot=%s\n",
+             pe_valid != complete || copy_valid != complete ? "INCOMPLETE" :
+             memcmp( pe_bytes, copy_bytes, length ) ? "DIFFER" : "MATCH" );
+    return 1;
+}
+#endif
 
 /******************************************************************************
  *              NtTerminateProcess  (NTDLL.@)
@@ -2318,6 +3872,8 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
     BOOL self;
 
 #ifdef WINE_IOS
+    if ((unsigned int)exit_code == 0xE0000008u && handle == NtCurrentProcess())
+        ios_term_oom_record( NtCurrentTeb() );
     {
         static int term_log_count = 0;
         /* iOS-Madeira [term-stack] (task#29): also fire on ANY nonzero exit_code
@@ -2354,10 +3910,25 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
                     uint64_t sbase = (uint64_t)cpuarea->EmulatorStackBase;
                     uint64_t slimit = (uint64_t)cpuarea->EmulatorStackLimit;
                     uint64_t rsp = 0;
+                    unsigned callsites = 0;
+                    int guest_diag;
                     int gi, hits = 0;
                     dprintf(2, "[term-stack] rip=%llx stack=[%llx..%llx]\n",
                             (unsigned long long)rip, (unsigned long long)slimit,
                             (unsigned long long)sbase);
+                    guest_diag = ios_dump_guest_instruction( handle, exit_code, rip, cur_teb->Peb );
+                    if (guest_diag)
+                    {
+                        extern int ios_jit_guest_code_window( uint64_t, uint64_t *, uint64_t *, size_t * );
+                        uint64_t image = 0, start = 0, fault_image = 0, fault_start = 0;
+                        size_t length = 0, fault_length = 0;
+                        /* Show earlier bytes only inside the same registered image. */
+                        if (rip >= 32 && ios_jit_guest_code_window( rip, &fault_image, &fault_start, &fault_length ) &&
+                            ios_jit_guest_code_window( rip - 32, &image, &start, &length ) && image == fault_image)
+                            ios_guest_code_pair( "before-rip", rip - 32, cur_teb->Peb );
+                        ios_guest_block_dump( fx[0], rip, cur_teb->Peb, 0 );
+                        ios_guest_branch_history_dump( fex_state, rip, cur_teb->Peb );
+                    }
                     dprintf(2, "[term-stack] g0-7: %llx %llx %llx %llx %llx %llx %llx %llx\n",
                             gregs[0], gregs[1], gregs[2], gregs[3],
                             gregs[4], gregs[5], gregs[6], gregs[7]);
@@ -2419,24 +3990,14 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
                                  * still owed — but it turns address soup into a chain worth
                                  * reading. Unvalidated entries are still shown, marked, so a
                                  * missed CALL form cannot hide the real caller. */
-                                const char *kind = "  ?";
+                                unsigned call_length = 0;
+                                int32_t call_relative = 0;
+                                const char *kind = ios_guest_return_kind( v, &call_length, &call_relative );
+                                if (guest_diag && kind[0] != ' ' && callsites < 8)
                                 {
-                                    unsigned char cb[8];
-                                    mach_vm_size_t cg = 0;
-                                    if (v >= 8 &&
-                                        mach_vm_read_overwrite( mach_task_self(),
-                                            (mach_vm_address_t)(v - 8), sizeof(cb),
-                                            (mach_vm_address_t)cb, &cg ) == KERN_SUCCESS && cg == 8)
-                                    {
-                                        if (cb[3] == 0xE8) kind = "CALL";          /* v-5 */
-                                        else {
-                                            int k;
-                                            for (k = 1; k <= 6; k++) {
-                                                unsigned char op = cb[8 - k], modrm = cb[8 - k + 1];
-                                                if (op == 0xFF && ((modrm >> 3) & 7) == 2) { kind = "call*"; break; }
-                                            }
-                                        }
-                                    }
+                                    callsites++;
+                                    ios_guest_call_dump( v, call_length, call_relative, kind[0] == 'C',
+                                                         wi * 8, rip, cur_teb->Peb );
                                 }
                                 if (kind[0] == ' ' && hits >= 8) continue;   /* keep the log honest but bounded */
                                 /* name via export directory of the map view */
@@ -2982,7 +4543,31 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
         len = sizeof(ULONG_PTR);
         if (size != len) return STATUS_INFO_LENGTH_MISMATCH;
         if (handle == GetCurrentProcess())
-            *(ULONG_PTR *)info = is_old_wow64() ? (ULONG_PTR)peb : (ULONG_PTR)wow_peb;
+        {
+            /* Madeira wow64-peb-self: wow_peb is a session global that init_peb()
+             * sets for a 32-bit child and loader_ios.c temporarily clears while a
+             * 64-bit child runs unix_init_startup_info().  A 32-bit thread querying
+             * ProcessWow64Information during that window read NULL and faulted in
+             * wow64.dll at [0+0x480], while a 64-bit process querying itself after
+             * any 32-bit child had booted read the child's wow_peb.  Derive this
+             * process's PEB32 from its own PEB and guest window
+             * ((char *)cur_peb + page_size), matching init_peb().
+             * env.MADEIRA_WOW64_PEB_SELF=0 answers the session global as before. */
+            static int self_off = -1;
+            if (self_off < 0)
+            {
+                const char *e = getenv( "MADEIRA_WOW64_PEB_SELF" );
+                self_off = (e && e[0] == '0' && !e[1]) ? 1 : 0;
+            }
+            if (self_off)
+                *(ULONG_PTR *)info = is_old_wow64() ? (ULONG_PTR)peb : (ULONG_PTR)wow_peb;
+            else
+            {
+                PEB *cur_peb = NtCurrentTeb() ? NtCurrentTeb()->Peb : peb;
+                *(ULONG_PTR *)info = is_old_wow64() ? (ULONG_PTR)cur_peb
+                    : (ios_wow_base_for_peb( cur_peb ) ? (ULONG_PTR)((char *)cur_peb + page_size) : 0);
+            }
+        }
         else
         {
             ULONG_PTR val = 0;
@@ -3059,7 +4644,11 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
                              MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION |
                              MEM_EXECUTE_OPTION_PERMANENT;
         else
-            *(ULONG *)info = execute_flags;
+        {
+            /* ml1354: a 32-bit pseudo-process's own flags (virtual_ios.c ios_dep_per_process) */
+            extern ULONG ios_wow_exec_flags_current( ULONG fallback );
+            *(ULONG *)info = ios_wow_exec_flags_current( execute_flags );
+        }
         break;
 
     case ProcessPriorityClass:
@@ -3345,9 +4934,16 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
 
     case ProcessExecuteFlags:
         if ((is_win64 && !is_wow64()) || size != sizeof(ULONG)) return STATUS_INVALID_PARAMETER;
-        if (execute_flags & MEM_EXECUTE_OPTION_PERMANENT) return STATUS_ACCESS_DENIED;
-        else
         {
+            /* ml1354: DEP is per process. The flags were one session-wide value, so a
+             * 32-bit browser making DEP permanent for itself also locked every later
+             * 32-bit process out of turning it off. */
+            extern ULONG ios_wow_exec_flags_current( ULONG fallback );
+            if (ios_wow_exec_flags_current( execute_flags ) & MEM_EXECUTE_OPTION_PERMANENT)
+                return STATUS_ACCESS_DENIED;
+        }
+        {
+            extern int ios_wow_exec_flags_store_current( ULONG flags );
             BOOL enable;
             switch (*(ULONG *)info & (MEM_EXECUTE_OPTION_ENABLE|MEM_EXECUTE_OPTION_DISABLE))
             {
@@ -3360,7 +4956,8 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
             default:
                 return STATUS_INVALID_PARAMETER;
             }
-            execute_flags = *(ULONG *)info;
+            /* the session-wide value stays for processes without a guest window */
+            if (!ios_wow_exec_flags_store_current( *(ULONG *)info )) execute_flags = *(ULONG *)info;
             virtual_set_force_exec( enable );
         }
         break;
@@ -3594,3 +5191,5 @@ NTSTATUS WINAPI NtDebugContinue( HANDLE handle, CLIENT_ID *client, NTSTATUS stat
     SERVER_END_REQ;
     return ret;
 }
+
+

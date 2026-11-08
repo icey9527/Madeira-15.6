@@ -6,9 +6,14 @@ library and downloads use, `docs/STEAM_LIBRARY.md`), which is closed
 while a game session holds the account: saves sync before and after a
 session, and during one only on the game menu's upload button.
 
-It is on by default. **Settings › Steam Cloud saves** turns it off, which
-keeps `env.MADEIRA_STEAM_CLOUD = 0` in `madeira.cfg`; turning it back on
-syncs the installed games at once.
+It is on by default. The **Steam Cloud saves** switch in **Settings › Steam**
+turns it off, which keeps `env.MADEIRA_STEAM_CLOUD = 0` in `madeira.cfg`.
+Off, Madeira checks, downloads and uploads nothing: Play never waits or
+asks, the game page's Steam Cloud section and the game menu's upload button
+are hidden, a running transfer stops between files, and saves stay as they
+are on the device and in the cloud. The log says `[steam-cloud] off (setting)`
+once per app run. Turning it back on drops what earlier checks found and
+syncs the installed games at once against the record of the last sync.
 `env.MADEIRA_STEAM_CLOUD_AUTO = 0` keeps the comparison and the game page
 but copies nothing in either direction unless the user asks there.
 
@@ -59,8 +64,16 @@ file is written whole.
 2. Maps each cloud path to a file of Madeira Dock's Wine prefix, through
    the `%Root%` placeholder of the path and the app's `ufs` product info:
    `GameInstall` is the game's folder, `WinAppDataLocalLow` and its
-   siblings are under the Windows user folder (the one Wine names after
-   `$USER`), and a path with no placeholder is under Steam's
+   siblings are under the Windows user folder: the profile the prefix's
+   registry names (ProfileList's `ProfileImagePath`, where Wine points
+   `%USERPROFILE%` and so the games; the template's is `C:\users\mythic`,
+   not the unix user `mobile`), else the one named after `$USER`. At start
+   Madeira makes that profile the unix user's (`ProfileUnification`): the
+   registry's profile paths are rewritten to `C:\users\mobile` and the
+   template profile's files are copied there, because a game Valve's client
+   starts in a Madeira Dock session gets its environment from the account
+   name and writes under `mobile` regardless. A path
+   with no placeholder is under Steam's
    `userdata/<account>/<app>/remote`. Names are matched without regard to
    case. A path that would leave its folder is refused.
 3. Compares SHA-1 and size, and also lists files matching the app's save
@@ -80,6 +93,24 @@ file is written whole.
      too, never uploaded over the cloud's copy unasked;
    - synced before and now missing in the cloud (deleted elsewhere): left
      alone, not sent back.
+
+## Valve's client's file list
+
+Files a game writes through the Steam Cloud API live in Steam's
+`userdata/<account>/<app>/remote`, and Valve's client in a Madeira Dock
+session shows the game only those its `remotecache.vdf` lists. That client
+never downloads for the game (Madeira starts the game itself, so the launch
+sync does not run), and with no list it answers that there are no saves:
+Slay the Spire 2 then started a new profile over the progress Madeira had
+downloaded, and that new profile was uploaded as a change made on the device.
+So after every comparison, while no session runs, Madeira rewrites the list
+from the device: a file identical to the cloud's is listed as synced at the
+cloud's change number, one that differs or that only the device has keeps the
+client's entry (or gets the one the client gives a file the game wrote), and
+one that only the cloud has is left out. Log: `[steam-cloud] app=<id>
+remotecache synced=<n> device-only=<n> dropped=<n>`.
+`env.MADEIRA_STEAM_CLOUD_REMOTECACHE = 0` leaves the list as the client wrote
+it, as before; the log says `[steam-cloud] remotecache off` once per app run.
 
 ## Safety
 
@@ -105,3 +136,13 @@ file is written whole.
   uploaded.
 - Encrypted cloud files are not supported.
 - Log tag `[steam-cloud]`: App IDs, counts and results; no file names or paths.
+
+Profile migration copies files before it changes registry paths. The old profile stays as a recovery copy. A copy or backup failure stops the migration. The sync record is cleared before copying, so a changed save needs a new comparison.
+
+### Unreadable local saves
+
+A local save whose checksum cannot be read completely is not evidence of a
+local change. Read errors discard the partial SHA-1, and an existing cloud/local
+pair with no local checksum waits for a choice instead of being automatically
+uploaded or downloaded. A local-only file without a checksum is not uploaded.
+An empty, readable file still has its valid SHA-1 and follows normal sync rules.
