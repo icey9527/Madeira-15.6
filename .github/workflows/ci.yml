@@ -622,7 +622,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: app/Madeira/i386-windows
-          key: wine-i386-v2-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-${{ hashFiles('build/wine-i386/build.sh', 'tools/ci/verify-wow64.py') }}
+          key: wine-i386-v2-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ steps.dxmtsha.outputs.sha }}-${{ hashFiles('build/wine-i386/build.sh') }}
 
       - name: Restore incremental 32-bit build
         id: wow64-build-cache
@@ -632,7 +632,7 @@ jobs:
           path: |
             wine/build-i386
             dxmt/build-pe-i386
-          key: wine-i386-build-v3-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ hashFiles('build/wine-i386/build.sh', 'tools/ci/verify-wow64.py') }}
+          key: wine-i386-build-v3-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-${{ hashFiles('build/wine-i386/build.sh') }}
           restore-keys: wine-i386-build-v3-${{ runner.arch }}-${{ steps.deps.outputs.xcode }}-${{ steps.native.outputs.wine-sha }}-
 
       - name: Build 32-bit Windows runtime (Wine i386 + DXMT i386)
@@ -878,6 +878,30 @@ jobs:
           prerelease: ${{ steps.channel.outputs.prerelease }}
           draft: false
           files: ipa/${{ steps.channel.outputs.file }}
+
+      # 每轮打印一次缓存命中情况：构建变慢时先看这一段，能立刻分清
+      # 「代码真的变了」还是「缓存键写太粗，无故重编」。
+      - name: Cache report（本轮缓存命中情况）
+        if: always() && !cancelled()
+        run: |
+          echo "== 缓存命中（true 表示复用，空表示本次重建）=="
+          echo "toolchains      ${{ steps.toolchains-cache.outputs.cache-hit }}"
+          echo "fex-source      ${{ steps.fex-source-cache.outputs.cache-hit }}"
+          echo "mingw           ${{ steps.mingw-cache.outputs.cache-hit }}"
+          echo "brew            ${{ steps.brew-cache.outputs.cache-hit }}"
+          echo "fex-build       ${{ steps.fex-build-cache.outputs.cache-hit }}"
+          echo "fex-wow64       ${{ steps.fex-wow64-cache.outputs.cache-hit }}"
+          echo "fex-arm64ec     ${{ steps.fex-arm64ec-cache.outputs.cache-hit }}"
+          echo "wine            ${{ steps.wine-cache.outputs.cache-hit }}"
+          echo "wine-pe-ntdll   ${{ steps.wine-pe-ntdll-cache.outputs.cache-hit }}"
+          echo "wow64-loader    ${{ steps.wow64-loader-cache.outputs.cache-hit }}"
+          echo "pairing         ${{ steps.pairing-cache.outputs.cache-hit }}"
+          echo "llvm            ${{ steps.llvm-cache.outputs.cache-hit }}"
+          echo "dxmt            ${{ steps.dxmt-cache.outputs.cache-hit }}"
+          echo "wow64-32bit     ${{ steps.wow64-cache.outputs.cache-hit }}"
+          echo "wow64-build     ${{ steps.wow64-build-cache.outputs.cache-hit }}"
+          echo "app             ${{ steps.app-cache.outputs.cache-hit }}"
+          echo "dxmt-pe         ${{ steps.dxmt-pe-cache.outputs.cache-hit }}"
 
       - name: Collect native compiler diagnostics
         if: always()

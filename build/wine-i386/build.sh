@@ -209,10 +209,17 @@ EOF
     echo "== installed DXMT i386 d3d11/dxgi/d3d10core/winemetal and d3d9 (shim + emulated) =="
     # Every module that carries a command library must be an iOS one; a macOS
     # container is what makes 32-bit d3d11 games abort with MTLLibraryError 1.
+    # A module with no command library at all is fine (dxgi/d3d10core/winemetal
+    # ship none), so only the "still not an iOS one" verdict fails the build.
     for f in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll d3d9-emulated.dll; do
         [ -f "$DEST/$f" ] || continue
-        grep -q 'MTLB' "$DEST/$f" 2>/dev/null || continue
-        python3 "$R/build/dxmt-pe/verify-metallib.py" "$DEST/$f"
+        out="$(python3 "$R/build/dxmt-pe/verify-metallib.py" "$DEST/$f" 2>&1)" || {
+            case "$out" in
+                *"no embedded metallib found"*) ;;   # this module carries none
+                *) echo "$out" >&2; exit 1 ;;
+            esac
+        }
+        printf '%s\n' "$out"
     done
 fi
 
