@@ -1020,8 +1020,11 @@ static bool query_bc_support(void) {
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
     if (dev) {
       snprintf(dev_class, sizeof(dev_class), "%s", object_getClassName(dev));   /* ml1249: MTLDebugDevice = validation on */
-      if ([dev respondsToSelector:@selector(supportsBCTextureCompression)])
-        supported = [dev supportsBCTextureCompression];
+      /* Same availability gate as _MTLDevice_supportsBCTextureCompression: on
+       * iPadOS 15.6 an M-series GPU answers YES, but Metal refuses the format. */
+      if (@available(iOS 16.4, macOS 11.0, *))
+        if ([dev respondsToSelector:@selector(supportsBCTextureCompression)])
+          supported = [dev supportsBCTextureCompression];
       if ([dev respondsToSelector:@selector(supports32BitFloatFiltering)])
         float32_filter = [dev supports32BitFloatFiltering] ? 1 : 0;
       [dev release];
@@ -3526,7 +3529,18 @@ _MTLDevice_supportsBCTextureCompression(void *obj) {
     params->ret = (wmtr_call(RM_OP_SUPPORTS_BC, &a, sizeof a, &r, sizeof r, 0) == RM_OK) ? r.value : 0;
     return STATUS_SUCCESS;
   }
-  params->ret = [(id<MTLDevice>)params->handle supportsBCTextureCompression];
+  /* iOS-Madeira ml2026-11-08: the property's own availability is iOS 16.4, and
+   * BELOW it the driver does not implement BC even though an M-series GPU
+   * answers YES. Half-Life (hl1mp_win64, 64-bit d3d9) on iPadOS 15.6 asked for
+   * a BC3 texture and got:
+   *     MTLDebugValidateMTLPixelFormat:1433: failed assertion
+   *     `pixelFormat (134) is not a valid MTLPixelFormat.'
+   * which raises 0x80000101 and ends the process. Gate on the same version the
+   * API appeared in, so 16.4+ still takes the fast path. */
+  if (@available(iOS 16.4, macOS 11.0, *))
+    params->ret = [(id<MTLDevice>)params->handle supportsBCTextureCompression];
+  else
+    params->ret = 0;
   return STATUS_SUCCESS;
 }
 
