@@ -18,6 +18,12 @@ def orchestration(source):
 
 
 fingerprint = hashlib.sha256(orchestration(script).encode('utf-8'))
+# The wine submodule is pinned, but stage_native applies this patch on top of it
+# (the 32-bit OpenGL thunks need ios_wow_host_ptr). A patched source that is not
+# in the key restores wine's cached libraries and silently skips the patch --
+# exactly what happened once (issue #58). Hash the patch itself.
+patch = root / 'patches/wine-opengl-winios.patch'
+fingerprint.update(patch.read_bytes() if patch.exists() else b'no-wine-patch')
 directories = [f'build/{name}' for name in ('ntdll-unix', 'wineserver', 'win32u-unix', 'madsync', 'hidpad', 'crypto-unix', 'gnutls-ios', 'freetype-ios')]
 tracked = subprocess.check_output(['git', '-C', str(root), 'ls-files', '--stage', '-z', '--', *directories]).split(b'\0')
 for entry in sorted(entry for entry in tracked if entry):
