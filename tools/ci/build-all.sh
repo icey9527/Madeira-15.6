@@ -1017,6 +1017,10 @@ stage_app() {
       grep -B1 -A4 "Undefined symbol" "$LOGDIR/xcodebuild.log" | head -24 || true
       exit 0
     fi
+    # The tail can be a wall of Swift module lists; print the actual diagnostics
+    # first so the log says why the build failed.
+    echo "======== xcodebuild 失败：错误行 ========"
+    grep -nE '(^|[[:space:]])(fatal )?error:|^Command .* failed|error: ' "$LOGDIR/xcodebuild.log" | head -40 || true
     echo "======== xcodebuild 失败，末 100 行 ========"
     tail -n 100 "$LOGDIR/xcodebuild.log"
     exit 1
