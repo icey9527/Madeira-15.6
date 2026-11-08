@@ -138,10 +138,15 @@ jobs:
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=stable" >> "$GITHUB_OUTPUT"
+            # 正式版按版本号发：每个 MARKETING_VERSION 一个独立 release
+            # （v0.1.3、v0.2.0…），旧的版本不会被覆盖，用户也能回退。
+            # 版本号取自 project.pbxproj，跟上游保持一致。
+            version="$(sed -n 's/.*MARKETING_VERSION = \([0-9.]*\);.*/\1/p' app/Madeira.xcodeproj/project.pbxproj | head -1)"
+            [ -n "$version" ] || { echo "::error::MARKETING_VERSION not found in project.pbxproj"; exit 1; }
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "title=Madeira iOS 15.6 移植 正式版" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-stable.ipa" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira iOS 15.6 移植 v$version" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-v$version.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
           fi
