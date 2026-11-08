@@ -45,6 +45,21 @@ LOG="$B/madeira-i386-build.log"
 # The workflow exports IPHONEOS_DEPLOYMENT_TARGET/SDKROOT for the iOS half.
 # This configure/build is a macOS-host build and must not inherit them, or
 # configure picks up the iOS SDK and the i386 modules fail to link.
+#
+# The Metal shader standard still has to be named explicitly for the DXMT
+# modules below: without it they embed Apple's macOS command library
+# (`platform=0x8001 OS=0x81`) and every 32-bit d3d11 game dies at start-up with
+#     Failed to create internal command library: Code=1
+#     "This library format is not supported on this platform"
+# (Terraria, device log 2026-11-08 14:12.) iOS 15's level is Metal 2.4.
+IOS_MIN="${IPHONEOS_DEPLOYMENT_TARGET:-15.6}"; IOS_MIN="${IOS_MIN%%.*}"
+case "$IOS_MIN" in
+    1[0-5]) IOS_METAL_STD_DEFAULT="ios-metal2.4" ;;
+    16)     IOS_METAL_STD_DEFAULT="metal3.0" ;;
+    *)      IOS_METAL_STD_DEFAULT="metal3.1" ;;
+esac
+IOS_METAL_STD="${DXMT_METAL_STD:-$IOS_METAL_STD_DEFAULT}"
+IOS_METAL_TARGET="${DXMT_METAL_TARGET:-air64-apple-ios$IOS_MIN}"
 unset IPHONEOS_DEPLOYMENT_TARGET
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
 MAC_TARGET="$(uname -m)-apple-macos$(sw_vers -productVersion)"
@@ -175,7 +190,9 @@ EOF
     if [ ! -f build-pe-i386/build.ninja ]; then
         SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
         meson setup --cross-file "$X" --native-file build-osx.txt --buildtype release \
-            -Dwine_build_path="$B" -Dwine_builtin_dll=true build-pe-i386
+            -Dwine_build_path="$B" -Dwine_builtin_dll=true \
+            -Dmetal_std="$IOS_METAL_STD" -Dmetal_sdk=iphoneos -Dmetal_target="$IOS_METAL_TARGET" \
+            build-pe-i386
     fi
     SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" meson compile -C build-pe-i386
     for m in d3d11/d3d11.dll dxgi/dxgi.dll d3d10/d3d10core.dll winemetal/winemetal.dll; do
@@ -187,6 +204,13 @@ EOF
     "$STRIP" -o "$DEST/d3d9shim.dll" build-pe-i386/src/d3d9shim/d3d9shim.dll
     "$STRIP" -o "$DEST/d3d9-emulated.dll" build-pe-i386/src/d3d9/d3d9.dll
     echo "== installed DXMT i386 d3d11/dxgi/d3d10core/winemetal and d3d9 (shim + emulated) =="
+    # Every module that carries a command library must be an iOS one; a macOS
+    # container is what makes 32-bit d3d11 games abort with MTLLibraryError 1.
+    for f in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll d3d9-emulated.dll; do
+        [ -f "$DEST/$f" ] || continue
+        grep -q 'MTLB' "$DEST/$f" 2>/dev/null || continue
+        python3 "$R/build/dxmt-pe/verify-metallib.py" "$DEST/$f"
+    done
 fi
 
 # ----------------------------------------------------------- import closure
