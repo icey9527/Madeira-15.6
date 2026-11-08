@@ -79,12 +79,25 @@ if [ ! -f "$B/build.ninja" ]; then
             --buildtype release -Dwine_build_path="$W" \
             -Dmetal_std="$METAL_STD" -Dmetal_sdk=iphoneos -Dmetal_target="$METAL_TARGET")
 fi
-env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
-    ninja -C "$B" src/d3d11/d3d11.dll
+# BOTH front ends carry an embedded command library, so both have to be built
+# with the iOS target. Only d3d11.dll used to be: arm64ec-windows/d3d9.dll was
+# whatever the vendored farm shipped, and that one is Apple's macOS build --
+# `platform=0x8001 OS=0x81`. A 64-bit d3d9 game (Half-Life's hl1mp_win64.exe)
+# then dies at start-up with
+#     Failed to create internal command library: Code=1
+#     "This library format is not supported on this platform"
+# because iOS 15.6's Metal refuses a macOS container. 32-bit d3d9 was never
+# affected: it goes through the i386 shim into the unix library, whose shaders
+# come from this same iOS-targeted build.
+for dll in d3d11 d3d9; do
+    env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
+        ninja -C "$B" "src/$dll/$dll.dll"
 
-echo "d3d11.dll: committed $(wc -c < "$OUT") bytes, freshly built $(wc -c < "$B/src/d3d11/d3d11.dll") bytes"
-"$TC/arm64ec-w64-mingw32-strip" --strip-debug -o "$OUT.tmp" "$B/src/d3d11/d3d11.dll"
-mv "$OUT.tmp" "$OUT"
-echo "d3d11.dll: shipped $(wc -c < "$OUT") bytes (-std=$METAL_STD --target=$METAL_TARGET)"
+    dst="$R/app/Madeira/arm64ec-windows/$dll.dll"
+    echo "$dll.dll: committed $(wc -c < "$dst") bytes, freshly built $(wc -c < "$B/src/$dll/$dll.dll") bytes"
+    "$TC/arm64ec-w64-mingw32-strip" --strip-debug -o "$dst.tmp" "$B/src/$dll/$dll.dll"
+    mv "$dst.tmp" "$dst"
+    echo "$dll.dll: shipped $(wc -c < "$dst") bytes (-std=$METAL_STD --target=$METAL_TARGET)"
 
-python3 "$R/build/dxmt-pe/verify-metallib.py" "$OUT"
+    python3 "$R/build/dxmt-pe/verify-metallib.py" "$dst"
+done
