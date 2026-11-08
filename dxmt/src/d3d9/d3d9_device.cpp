@@ -599,9 +599,18 @@ MTLD3D9Device::MTLD3D9Device(
     setupFpu();
   // MADEIRA: one query, once. See bcTexturesSupported() in the header for why
   // the answer never reaches the D3D-visible side of the frontend.
-  m_bcSupported = m_metalDevice.supportsBCTextureCompression();
-  if (!m_bcSupported)
-    Logger::info("d3d9: adapter has no BC texture support; DXTn/3Dc uploads are decoded on the CPU");
+  //
+  // ml2026-11-08: the property is NOT trustworthy on iPadOS. AGXG13G reports
+  // supportsBCTextureCompression = YES, yet Metal refuses the format when the
+  // texture is created:
+  //     MTLDebugValidateMTLPixelFormat:1433: failed assertion
+  //     `pixelFormat (134) is not a valid MTLPixelFormat.'
+  // (134 = BC3.) The raise becomes 0x80000101 and the game exits -- Half-Life
+  // hl1mp_win64, iPadOS 15.6, device log 2026-11-08 16:39. BC is macOS-only on
+  // Apple GPUs, so always take the CPU-decode path here.
+  m_bcSupported = false;
+  Logger::info("d3d9: BC textures are decoded on the CPU (iPadOS reports BC "
+               "support that Metal then refuses)");
   m_completionEvent = m_metalDevice.newSharedEvent();
   // Pre-allocate 2 blocks per ring: first-touch of a fresh
   // Metal-registered block page-faults expensively under Rosetta
