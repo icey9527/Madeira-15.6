@@ -1351,6 +1351,36 @@ UINT winios_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs,
 {
     const char *backend = getenv( "MADEIRA_GL_BACKEND" );
 
+    /* A d3d9 game loads opengl32.dll while it starts up, and if this driver
+     * takes that call the DXMT d3d9 shim never attaches afterwards: device log
+     * 2026-11-07 21:59 (Baldr Sky) has no "[unixlib] d3d9shim" line and zero
+     * d3d9 device calls, and the game quits after its first frame. With
+     * MADEIRA_NO_GL=1 the shim attaches and the game plays. So the driver
+     * answers "not implemented" -- exactly what the null driver answers --
+     * unless the session really has a desktop GL backend: gl-backend = zink
+     * (Mesa OSMesa + MoltenVK in the bundle's gl/ folder), or
+     * MADEIRA_GL_DRIVER=1 to force the GLES one. A build with no gl/ dylibs
+     * therefore behaves like 0.1.3: every context creation fails, and d3d9
+     * games keep d3d9.
+     *
+     * The decision is made here rather than where pOpenGLInit is installed
+     * because the install runs before the session's env exists. */
+    if (getenv( "MADEIRA_NO_GL" ))
+    {
+        ERR( "[winios-gl] driver declined: MADEIRA_NO_GL is set\n" );
+        return STATUS_NOT_IMPLEMENTED;
+    }
+    {
+        const char *force = getenv( "MADEIRA_GL_DRIVER" );   /* 1: allow the GLES driver without zink */
+        int allowed = (force && force[0] == '1' && !force[1]) || (backend && !strcmp( backend, "zink" ));
+        if (!allowed)
+        {
+            ERR( "[winios-gl] driver declined: backend=%s, MADEIRA_GL_DRIVER=%s -- d3d9 games keep d3d9\n",
+                 backend ? backend : "(unset)", force ? force : "(unset)" );
+            return STATUS_NOT_IMPLEMENTED;
+        }
+    }
+
     if (version != WINE_OPENGL_DRIVER_VERSION)
     {
         ERR( "[winios-gl] version mismatch, win32u wants %u but driver has %u\n", version, WINE_OPENGL_DRIVER_VERSION );

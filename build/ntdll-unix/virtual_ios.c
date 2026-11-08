@@ -13007,21 +13007,41 @@ static NTSTATUS load_builtin_unixlib( void *module, BOOL wow, const void **funcs
             funcs64 = (const void *)winevulkan_unix_call_funcs;
             funcs_wow64 = NULL;
         } else if (match && strstr(match, "opengl32")) {
-            /* Real opengl32 unix side (OpenGL ES / desktop GL through the winios
-             * WGL driver). MADEIRA_NO_GL=1 keeps the old GL-absent stub table.
-             * The wow64 table's thunks convert every embedded guest pointer with
-             * ios_wow_host_ptr() (patches/wine-opengl-winios.patch: make_opengl),
-             * so 32-bit GL games (Quake 3 engine, GLQuake) reach the driver. */
+            /* Which opengl32 unix table a module is handed: the GL-absent stub,
+             * or the real one behind the winios WGL driver (OpenGL ES / desktop
+             * GL). The wow64 table's thunks convert every embedded guest pointer
+             * with ios_wow_host_ptr() (patches/wine-opengl-winios.patch:
+             * make_opengl), so 32-bit GL games (Quake 3 engine, GLQuake) reach
+             * the driver.
+             *
+             * The real table binds only when a backend can serve it: zink
+             * (Mesa OSMesa + MoltenVK in the bundle) or MADEIRA_GL_DRIVER=1.
+             * Otherwise the stub, which is what 0.1.3 shipped. This is the same
+             * rule driver_ios.c applies to pOpenGLInit, and it has to be the
+             * same rule: on this device the real table's init fails
+             * ("opengl32.dll failed to initialize, aborting", STATUS_DLL_INIT_FAILED
+             * 0xc0000142) and takes the whole game process with it -- Baldr Sky,
+             * device logs 2026-11-07 21:59 / 22:11 / 2026-11-08 01:35, while
+             * 22:17 with MADEIRA_NO_GL=1 bound the stub and the process lived.
+             * MADEIRA_NO_GL=1 still forces the stub. */
             pthread_once( &ios_stub_tables_once, ios_init_stub_tables );
-            if (getenv("MADEIRA_NO_GL")) {
-                WARN_(module)("iOS: module %p (%s) -> GL-absent stub table (MADEIRA_NO_GL)\n",
-                              module, match);
-                libname = "opengl32 (GL-absent stub table, MADEIRA_NO_GL)";
-                funcs64 = funcs_wow64 = (const void *)ios_gl_stub_unix_call_table;
-            } else {
-                libname = "opengl32 (winios WGL)";
-                funcs64 = (const void *)opengl32_unix_call_funcs;
-                funcs_wow64 = (const void *)opengl32_unix_call_wow64_funcs;
+            {
+                const char *gl_off = getenv("MADEIRA_NO_GL");
+                const char *gl_drv = getenv("MADEIRA_GL_DRIVER");   /* 1: allow the GLES driver without zink */
+                const char *gl_be = getenv("MADEIRA_GL_BACKEND");
+                int real = !gl_off &&
+                           ((gl_drv && gl_drv[0] == '1' && !gl_drv[1]) ||
+                            (gl_be && !strcmp( gl_be, "zink" )));
+                if (!real) {
+                    WARN_(module)("iOS: module %p (%s) -> GL-absent stub table (backend=%s, MADEIRA_GL_DRIVER=%s)\n",
+                                  module, match, gl_be ? gl_be : "(unset)", gl_drv ? gl_drv : "(unset)");
+                    libname = "opengl32 (GL-absent stub table)";
+                    funcs64 = funcs_wow64 = (const void *)ios_gl_stub_unix_call_table;
+                } else {
+                    libname = "opengl32 (winios WGL)";
+                    funcs64 = (const void *)opengl32_unix_call_funcs;
+                    funcs_wow64 = (const void *)opengl32_unix_call_wow64_funcs;
+                }
             }
         } else {
             pthread_once( &ios_stub_tables_once, ios_init_stub_tables );
