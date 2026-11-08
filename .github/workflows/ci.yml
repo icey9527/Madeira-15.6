@@ -125,15 +125,16 @@ jobs:
             echo "configuration=Debug" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=YES" >> "$GITHUB_OUTPUT"
           elif [ "${GITHUB_REF#refs/heads/}" != "${GITHUB_REF}" ] && [[ "${GITHUB_REF#refs/heads/}" == S* ]]; then
-            # A staged re-add branch: artifact only, never a release. It must not
-            # be able to move the stable channel's tag or asset.
-            echo 'tag=' >> "$GITHUB_OUTPUT"
+            # A staged re-add branch publishes its own pre-release under a
+            # staging-<branch> tag, so the package is installable for a device
+            # test. Its tag is its own: it can never move "stable" or "nightly".
+            branch="${GITHUB_REF#refs/heads/}"
+            echo "tag=staging-$branch" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=Madeira 分层验证 ${GITHUB_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
-            echo "file=Madeira-15.6-${GITHUB_REF#refs/heads/}.ipa" >> "$GITHUB_OUTPUT"
+            echo "title=Madeira 分层验证 $branch" >> "$GITHUB_OUTPUT"
+            echo "file=Madeira-15.6-$branch.ipa" >> "$GITHUB_OUTPUT"
             echo "configuration=Release" >> "$GITHUB_OUTPUT"
             echo "debug_dylib=NO" >> "$GITHUB_OUTPUT"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
           else
             echo "tag=stable" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
