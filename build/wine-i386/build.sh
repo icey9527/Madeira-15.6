@@ -21,10 +21,13 @@
 # missing.
 #
 # DXMT owns d3d11/dxgi/d3d10core/winemetal on i386 as on 64-bit: Wine's own
-# d3d11/dxgi/d3d10core are wined3d frontends and wined3d has no backend in this
-# port (no OpenGL, --without-vulkan), so those are never installed from Wine.
-# d3d9 is DXMT's too: its thin shim ships as d3d9.dll and forwards to the
+# d3d11/dxgi/d3d10core are wined3d frontends, so those are never installed from
+# Wine. d3d9 is DXMT's too: its thin shim ships as d3d9.dll and forwards to the
 # emulated frontend (d3d9-emulated.dll) unless madeira.cfg says d3d9 = native.
+# Wine's own d3d9 ships beside it as d3d9-wined3d.dll (wined3d's OpenGL
+# renderer on the patched opengl32, docs/BUILDING.md step 6); madeira.cfg
+# d3d9 = wined3d links it in for a session (WineProcessBridge.m).
+#   build/wine-i386/build.sh d3d9-wined3d    only that one
 set -euo pipefail
 
 R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -42,6 +45,21 @@ LOG="$B/madeira-i386-build.log"
 # The workflow exports IPHONEOS_DEPLOYMENT_TARGET/SDKROOT for the iOS half.
 # This configure/build is a macOS-host build and must not inherit them, or
 # configure picks up the iOS SDK and the i386 modules fail to link.
+#
+# The Metal shader standard still has to be named explicitly for the DXMT
+# modules below: without it they embed Apple's macOS command library
+# (`platform=0x8001 OS=0x81`) and every 32-bit d3d11 game dies at start-up with
+#     Failed to create internal command library: Code=1
+#     "This library format is not supported on this platform"
+# (Terraria, device log 2026-11-08 14:12.) iOS 15's level is Metal 2.4.
+IOS_MIN="${IPHONEOS_DEPLOYMENT_TARGET:-15.6}"; IOS_MIN="${IOS_MIN%%.*}"
+case "$IOS_MIN" in
+    1[0-5]) IOS_METAL_STD_DEFAULT="ios-metal2.4" ;;
+    16)     IOS_METAL_STD_DEFAULT="metal3.0" ;;
+    *)      IOS_METAL_STD_DEFAULT="metal3.1" ;;
+esac
+IOS_METAL_STD="${DXMT_METAL_STD:-$IOS_METAL_STD_DEFAULT}"
+IOS_METAL_TARGET="${DXMT_METAL_TARGET:-air64-apple-ios$IOS_MIN}"
 unset IPHONEOS_DEPLOYMENT_TARGET
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
 MAC_TARGET="$(uname -m)-apple-macos$(sw_vers -productVersion)"
@@ -86,7 +104,7 @@ SKIP_REASON=(
   "aero.msstyles=7.4 MiB of theme data nothing in the prefix selects"
   "winedbg.exe=4.5 MiB debugger only the (unshown) crash dialog spawns; dbghelp.dll ships"
   "d3d11.dll|dxgi.dll|d3d10core.dll|winemetal.dll=DXMT-owned (installed below); Wine's are wined3d frontends with no backend here"
-  "d3d9.dll=DXMT-owned: the shim and the emulated frontend are installed below"
+  "d3d9.dll=DXMT-owned: the shim and the emulated frontend are installed below; Wine's goes in as d3d9-wined3d.dll"
 )
 SKIP=()
 for e in "${SKIP_REASON[@]}"; do IFS='|' read -r -a n <<< "${e%%=*}"; SKIP+=("${n[@]}"); done
@@ -103,6 +121,9 @@ while IFS= read -r t; do
     fi
     TARGETS+=("$t")
 done < <(grep -oE '^(dlls|programs)/[^/]+/i386-windows/[^/ :]+' "$B/Makefile" | grep -E "$EXT_RE" | sort -u)
+# Wine's d3d9, installed as d3d9-wined3d.dll below (d3d9.dll is the DXMT shim).
+D3D9_WINED3D=dlls/d3d9/i386-windows/d3d9.dll
+if [ $# -eq 0 ] || is_in d3d9-wined3d "$@"; then TARGETS+=("$D3D9_WINED3D"); fi
 [ ${#TARGETS[@]} -gt 0 ] || { echo "no i386 targets matched" >&2; exit 2; }
 echo "== ${#TARGETS[@]} i386 modules (skipped by policy: ${#SKIP[@]} names) =="
 
@@ -129,6 +150,7 @@ fi
 mkdir -p "$DEST"
 for t in "${TARGETS[@]}"; do
     b="$(basename "$t")"
+    [ "$t" = "$D3D9_WINED3D" ] && b=d3d9-wined3d.dll
     cp -f "$t" "$DEST/$b.tmp"
     case "$b" in *.tlb) ;; *) "$STRIP" --strip-debug "$DEST/$b.tmp" ;; esac
     mv -f "$DEST/$b.tmp" "$DEST/$b"
@@ -143,6 +165,8 @@ echo "== installed ${#TARGETS[@]} Wine modules into app/Madeira/i386-windows =="
 # through its own table (virtual_ios.c, the d3d9shim branch).
 if [ -z "${SKIP_DXMT:-}" ] && [ $# -eq 0 ]; then
     D="$R/dxmt"
+    # This repository's DXMT changes (build/dxmt-patches/README.md) go in first.
+    bash "$R/build/dxmt-patches/apply.sh"
     X="$B/dxmt-cross-i386.txt"
     cat > "$X" <<EOF
 [binaries]
@@ -166,7 +190,9 @@ EOF
     if [ ! -f build-pe-i386/build.ninja ]; then
         SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
         meson setup --cross-file "$X" --native-file build-osx.txt --buildtype release \
-            -Dwine_build_path="$B" -Dwine_builtin_dll=true build-pe-i386
+            -Dwine_build_path="$B" -Dwine_builtin_dll=true \
+            -Dmetal_std="$IOS_METAL_STD" -Dmetal_sdk=iphoneos -Dmetal_target="$IOS_METAL_TARGET" \
+            build-pe-i386
     fi
     SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" meson compile -C build-pe-i386
     for m in d3d11/d3d11.dll dxgi/dxgi.dll d3d10/d3d10core.dll winemetal/winemetal.dll; do
@@ -178,6 +204,13 @@ EOF
     "$STRIP" -o "$DEST/d3d9shim.dll" build-pe-i386/src/d3d9shim/d3d9shim.dll
     "$STRIP" -o "$DEST/d3d9-emulated.dll" build-pe-i386/src/d3d9/d3d9.dll
     echo "== installed DXMT i386 d3d11/dxgi/d3d10core/winemetal and d3d9 (shim + emulated) =="
+    # Every module that carries a command library must be an iOS one; a macOS
+    # container is what makes 32-bit d3d11 games abort with MTLLibraryError 1.
+    for f in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll d3d9-emulated.dll; do
+        [ -f "$DEST/$f" ] || continue
+        grep -q 'MTLB' "$DEST/$f" 2>/dev/null || continue
+        python3 "$R/build/dxmt-pe/verify-metallib.py" "$DEST/$f"
+    done
 fi
 
 # ----------------------------------------------------------- import closure
@@ -190,12 +223,14 @@ for f in "$DEST"/*; do
     while IFS= read -r imp; do
         l="$(echo "$imp" | tr '[:upper:]' '[:lower:]')"
         case "$l" in api-ms-win-*|ext-ms-win-*) continue ;; esac
-        # here-string, not `echo | grep -q`: grep -q exits on the first match,
-        # the echo then dies of SIGPIPE, and `set -o pipefail` turns that into a
-        # false "missing import" for every DLL that IS present.
-        grep -qx "$l" <<< "$present" && continue
+        # Use a here-string: echo | grep -q can trigger SIGPIPE under pipefail
+        # when an early line matches, falsely reporting a present import missing.
+        grep -Fx -- "$l" <<< "$present" >/dev/null && continue
         echo "missing import: $(basename "$f") -> $imp"; missing=$((missing + 1))
     done < <("$OBJDUMP" -p "$f" 2>/dev/null | sed -n 's/^ *DLL Name: //p')
 done
 echo "== $(ls "$DEST" | wc -l | tr -d ' ') files in app/Madeira/i386-windows, $missing missing imports =="
-[ "$missing" -eq 0 ] || { echo "i386 import closure incomplete" >&2; exit 1; }
+if [ $# -eq 0 ] && [ -z "${SKIP_DXMT:-}" ]; then
+    # stdout: the CI check for this block requires an empty stderr here.
+    [ "$missing" -eq 0 ] || { echo "i386 import closure incomplete"; exit 1; }
+fi

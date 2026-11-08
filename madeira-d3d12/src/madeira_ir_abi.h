@@ -1,3 +1,5 @@
+/* Portions copyright 2026 thebcd69 (BCD): code taken from https://github.com/thebcd69/bcd-games
+ * under GPL-3.0-or-later and modified for Madeira in October and November 2026. See THIRD-PARTY-NOTICES.md. */
 /* Shared ABI between the ARM64EC D3D12 runtime and the native shader-converter
  * service, crossed exactly once per pipeline creation via winemetal's unix call.
  *
@@ -203,7 +205,8 @@ struct madeira_ir_convert_args {
      * application's input layout (a second metallib), and reflection reports
      * the numbers the pipeline and the draws need. */
     uint32_t gs_emulation;      /* in: 1 = this stage belongs to a pipeline with a geometry shader */
-    uint32_t input_topology;    /* in: D3D12_PRIMITIVE_TOPOLOGY_TYPE (1 point, 2 line, 3 triangle) */
+    uint32_t input_topology;    /* in: D3D12_PRIMITIVE_TOPOLOGY_TYPE (1 point, 2 line, 3 triangle);
+                                 * MADEIRA_IR_TOPOLOGY_PATCH_STRICT asks for IRInputTopologyPatch */
     uint64_t layout;            /* in: const struct madeira_ir_input_layout *, vertex stage only */
     uint64_t out_buf2;          /* in: where the stage-in metallib goes, may be 0 */
     uint64_t out_cap2;          /* in */
@@ -330,6 +333,13 @@ struct madeira_ir_loc {
     uint32_t offset;            /* byte offset in the top-level argument buffer */
     uint64_t size;              /* entry size in bytes */
 };
+/* A DXIL tessellation pipeline's stages are normally converted with
+ * IRInputTopologyTriangle (every topology that is not point or line). With
+ * madeira.cfg dxil-tess-patch-topology = 1 (an experiment, off by default) the
+ * runtime passes this value instead and the service asks the converter for
+ * IRInputTopologyPatch. A distinct value, so both shader caches key on it. */
+#define MADEIRA_IR_TOPOLOGY_PATCH_STRICT 0x104u
+
 /* ml861: a static sampler, field for field the D3D12 description. The
  * converter's enums carry the D3D12 numbering, so every value passes through
  * unchanged and is baked into the shader as a constant sampler. */
