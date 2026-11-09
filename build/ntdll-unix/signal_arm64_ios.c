@@ -1848,6 +1848,75 @@ static void ios_srw_hang_census( int count )
     }
 }
 
+/* ml2251 (2026-11-09): every parked thread, in BOTH address spaces.
+ *
+ * ios_alert_waiter_dump() reports a count plus the write-once dump of a hot
+ * address, and [srw-hang] walks 32-bit threads only.  A 64-bit game wedged on
+ * a Wine SRW therefore leaves no record of what the OTHER threads were waiting
+ * on: 雨霏霏 (amehazu.exe, 64-bit) sat with the lock word 0x0d -> 0x11 (held
+ * bit set, 6 -> 8 queued exclusive waiters, owners 0) and 22 threads parked,
+ * none of them named.  That is the one fact needed to tell a live deadlock
+ * (a holder that is itself parked on lock 2 = A/B cycle) from a lost wake
+ * (nobody holds anything, waiters were never woken).
+ *
+ * Sweep the registry each census pass: any thread registered in
+ * RtlWaitOnAddress for MADEIRA_PARK_DIAG_S seconds (default 20, 0 disables)
+ * is printed once — tid, TEB, wait address, the word there, pc/lr and the
+ * Mach run state.  Read the addresses as a set: two entries whose wait
+ * address is the other one's held lock name the cycle outright. */
+static void ios_park_census( int count )
+{
+    static int diag_s = -2;
+    static uint32_t seen[128];
+    static int nseen;
+    extern int ios_alert_waiter_lookup( unsigned int tid, const void **addr, int *age_s, int *inf );
+    int i, j;
+
+    if (diag_s == -2)
+    {
+        const char *e = getenv( "MADEIRA_PARK_DIAG_S" );
+        diag_s = e && *e ? atoi( e ) : 20;
+    }
+    if (diag_s <= 0 || nseen >= 128) return;
+
+    for (i = count - 1; i >= 0 && nseen < 128; i--)
+    {
+        thread_t cand = ios_thread_registry[i].mach_thread;
+        uintptr_t cteb = (uintptr_t)ios_thread_registry[i].teb;
+        unsigned int ttid = 0;
+        const void *waddr = NULL;
+        int wage = 0, winf = 0, dup = 0;
+        uint32_t w = 0;
+        mach_vm_size_t mgot = 0;
+        arm_thread_state64_t st;
+        mach_msg_type_number_t cnt = ARM_THREAD_STATE64_COUNT;
+        struct thread_basic_info bi;
+        mach_msg_type_number_t bcnt = THREAD_BASIC_INFO_COUNT;
+
+        if (!cand || !cteb) continue;
+        if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(cteb + 0x48), 4,
+                                    (mach_vm_address_t)&ttid, &mgot ) != KERN_SUCCESS
+            || mgot != 4 || !ttid)
+            continue;
+        for (j = 0; j < nseen; j++) if (seen[j] == ttid) dup = 1;
+        if (dup) continue;
+        if (!ios_alert_waiter_lookup( ttid, &waddr, &wage, &winf ) || !waddr) continue;
+        if (wage < diag_s) continue;
+        /* A cookie is not necessarily 4-aligned: a wine srw_lock waiter sleeps
+         * at lock+2, so mask the low bits before reading the word. */
+        mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)((uintptr_t)waddr & ~3ull), 4,
+                                (mach_vm_address_t)&w, &mgot );
+        if (thread_get_state( cand, ARM_THREAD_STATE64, (thread_state_t)&st, &cnt ) != KERN_SUCCESS)
+            memset( &st, 0, sizeof(st) );
+        memset( &bi, 0, sizeof(bi) );
+        thread_info( cand, THREAD_BASIC_INFO, (thread_info_t)&bi, &bcnt );
+        seen[nseen++] = ttid;
+        dprintf( 2, "[park-census] tid=%04x teb=0x%llx age=%ds %s wait=%p w=%08x pc=0x%llx lr=0x%llx run=%d\n",
+                 ttid, (unsigned long long)cteb, wage, winf ? "INF" : "TMO", waddr, w,
+                 (unsigned long long)st.__pc, (unsigned long long)st.__lr, (int)bi.run_state );
+    }
+}
+
 #define IOS_PUMP_MAX 4
 extern void ios_alert_ring_dump(void);   /* ml439 (#74): unix/sync.c alert-flow probe */
 extern void ios_alert_waiter_dump(void); /* ml440 (#74): >60s parkers + their lock words */
@@ -1864,6 +1933,7 @@ void ios_pump_sample(void)
     ios_alert_ring_dump();   /* ml439: static ring during a parked-stall = wakes dying PE-side */
     ios_alert_waiter_dump(); /* ml440: name the lock the parked crowd is starving on */
     ios_srw_hang_census( count );   /* ml2250: who holds a 32-bit SRW lock a thread starves on */
+    ios_park_census( count );       /* ml2251: name every long parker, 32- and 64-bit */
     /* ml447: orphan-lock detector — collect live threads' TEB Instr[6]
      * CodeBufferWriteMutex stamps; a held-exclusive SRW with >=3 waiters that
      * NO live thread stamps (3 cycles running) has a vanished dead owner. */
